@@ -1,61 +1,37 @@
-import { sites } from '@openai/sites-vite-plugin';
-import tailwindcss from '@tailwindcss/postcss';
-import vinext from 'vinext';
-import { defineConfig } from 'vite';
-import hostingConfig from './.openai/hosting.json';
+import { fileURLToPath, URL } from "node:url";
+import { defineConfig } from "vite";
+import vue from "@vitejs/plugin-vue";
+import { localConnectorsDevPlugin } from "./vite-local-connectors";
 
-const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
-  '00000000-0000-4000-8000-000000000000';
-
-const { d1, r2 } = hostingConfig;
-
-// macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
-const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === 'seatbelt';
-
-const localBindingConfig = {
-  main: 'vinext/server/app-router-entry',
-  compatibility_flags: ['nodejs_compat'],
-  d1_databases: d1
-    ? [
-        {
-          binding: d1,
-          database_name: 'site-creator-d1',
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+// 在 dev 模式下，浏览器无法直接调用火山方舟控制面 usage API（需 Volc AK/SK 签名，
+// 且 ark- 开头的 Bearer Key 只能用于数据面推理，无 usage 端点）。
+// 故通过 Vite 中间件 spawn 本机 arkcli 复用其 SSO->签名调用链。
+// OpenAI Usage API 支持 Bearer + Vite 代理即可。
+export default defineConfig({
+  plugins: [vue(), localConnectorsDevPlugin()],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
+  server: {
+    port: 1420,
+    proxy: {
+      "/proxy-openai": {
+        target: "https://api.openai.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/proxy-openai/, ""),
+      },
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ["echarts", "vue-echarts"],
+          vue: ["vue"],
         },
-      ]
-    : [],
-  r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-          bucket_name: 'site-creator-r2',
-        },
-      ]
-    : [],
-};
-
-export default defineConfig(async () => {
-  // Keep Wrangler and Miniflare state project-local. These are non-secret tool
-  // settings; application environment belongs in ignored `.env*` files.
-  process.env.WRANGLER_WRITE_LOGS ??= 'false';
-  process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs';
-  process.env.MINIFLARE_REGISTRY_PATH ??= '.wrangler/registry';
-
-  // Wrangler snapshots its log path while the Cloudflare plugin is imported.
-  const { cloudflare } = await import('@cloudflare/vite-plugin');
-
-  return {
-    css: { postcss: { plugins: [tailwindcss()] } },
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
-    plugins: [
-      vinext(),
-      sites(),
-      cloudflare({
-        viteEnvironment: { name: 'rsc', childEnvironments: ['ssr'] },
-        config: localBindingConfig,
-      }),
-    ],
-  };
+      },
+    },
+  },
 });

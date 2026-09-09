@@ -4,6 +4,7 @@ import { httpGet } from "@/connectors/types";
 import { useUsageDashboard } from "@/composables/useUsageDashboard";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import ToolLogo from "@/components/ToolLogo.vue";
 
 type ArkStatusPayload = {
   logged_in?: boolean;
@@ -33,19 +34,12 @@ const saved = ref(false);
 
 /** 除火山方舟外的本机 CLI 连接器：登录态由各自 CLI 维护，同步时自动汇总。 */
 const CONNECTORS = [
-  { key: "codex", name: "Codex", brand: "--brand-codex", desc: "读取 ~/.codex/sessions 的逐请求 Token", badge: "自动采集", tone: "ok" },
-  { key: "claude", name: "Claude Code", brand: "--brand-claude", desc: "读取 ~/.claude/projects 的逐请求 Token", badge: "自动采集", tone: "ok" },
-  { key: "opencode", name: "OpenCode", brand: "--brand-open", desc: "读取本机 OpenCode 数据库的逐请求 Token", badge: "自动采集", tone: "ok" },
-  { key: "kiro", name: "Kiro CLI", brand: "--brand-kiro", desc: "官方 Credits + 本地会话 Token（estimateTokens 估算）", badge: "额度+估算", tone: "ok" },
-  { key: "qoder", name: "Qoder", brand: "--brand-qoder", desc: "套餐 Credits + 本地 SQLite 会话 Token（真实计数）", badge: "额度+Token", tone: "ok" },
+  { key: "codex", name: "Codex", desc: "读取 ~/.codex/sessions 的逐请求 Token", badge: "自动采集", tone: "ok" },
+  { key: "claude", name: "Claude Code", desc: "读取 ~/.claude/projects 的逐请求 Token", badge: "自动采集", tone: "ok" },
+  { key: "opencode", name: "OpenCode", desc: "读取本机 OpenCode 数据库的逐请求 Token", badge: "自动采集", tone: "ok" },
+  { key: "kiro", name: "Kiro CLI", desc: "官方 Credits + 本地会话 Token（estimateTokens 估算）", badge: "额度+估算", tone: "ok" },
+  { key: "qoder", name: "Qoder", desc: "套餐 Credits + 本地 SQLite 会话 Token（真实计数）", badge: "额度+Token", tone: "ok" },
 ] as const;
-
-function markStyle(brand: string) {
-  return {
-    background: `color-mix(in srgb, var(${brand}) 16%, transparent)`,
-    color: `var(${brand})`,
-  };
-}
 
 function fillForm() {
   const cfg = loadSettings();
@@ -125,7 +119,11 @@ function persist(andSync: boolean) {
     <div v-if="embedded || open" :class="{ 'embedded-root': embedded }">
       <div class="panel" :class="{ embedded }">
         <header class="panel-head">
-          <div>
+          <div v-if="embedded">
+            <h2>数据源</h2>
+            <p>均为本机 CLI，登录态只保存在本机；点击同步统一汇总</p>
+          </div>
+          <div v-else>
             <span class="eyebrow">CONNECTORS</span>
             <h2>连接与设置</h2>
             <p>数据源均为本机 CLI，登录态只保存在本机；点击同步统一汇总。</p>
@@ -136,7 +134,7 @@ function persist(andSync: boolean) {
         <div class="connector-list">
           <!-- 火山方舟：需登录，展示动态状态 -->
           <div class="connector-row">
-            <span class="conn-mark" :style="markStyle('--brand-ark')">V</span>
+            <span class="conn-mark"><ToolLogo platform="ark" :size="22" /></span>
             <div class="conn-info">
               <strong>火山方舟</strong>
               <small>套餐额度 + Token 用量 · 需 Volc SSO 登录</small>
@@ -159,7 +157,7 @@ function persist(andSync: boolean) {
 
           <!-- 其他本机 CLI：自动采集，无需登录配置 -->
           <div v-for="c in CONNECTORS" :key="c.key" class="connector-row">
-            <span class="conn-mark" :style="markStyle(c.brand)">{{ c.name.slice(0, 1) }}</span>
+            <span class="conn-mark"><ToolLogo :platform="c.key" :size="22" /></span>
             <div class="conn-info">
               <strong>{{ c.name }}</strong>
               <small>{{ c.desc }}</small>
@@ -256,9 +254,7 @@ function persist(andSync: boolean) {
   flex: 0 0 34px;
   place-items: center;
   border-radius: var(--r-sm);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
+  background: var(--surface-2);
 }
 .conn-info {
   min-width: 0;
@@ -364,4 +360,36 @@ function persist(andSync: boolean) {
     padding-left: 46px;
   }
 }
+
+/* Glass prototype */
+.panel.embedded {
+  width: 100%;
+  max-width: none;
+  padding: 0 0 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+.panel.embedded .panel-head { align-items: baseline; margin: 0; padding: 21px 26px 16px; border: 0; }
+.panel.embedded .panel-head h2 { margin: 0 0 3px; font-size: 16.5px; font-weight: 700; }
+.panel.embedded .panel-head p { margin: 0; color: var(--text-subtle); font-size: 12.5px; }
+.panel.embedded .connector-list { display: block; }
+.panel.embedded .connector-row { gap: 14px; padding: 16px 26px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+.panel.embedded .connector-row:first-child { border-top: 0; }
+.panel.embedded .conn-mark { width: 37px; height: 37px; flex-basis: 37px; border-radius: 12px; font-family: "Manrope", sans-serif; }
+.panel.embedded .conn-info strong { margin-bottom: 2px; font-size: 14px; font-weight: 700; }
+.panel.embedded .conn-info small { margin: 0; color: var(--text-subtle); font-size: 12px; }
+.panel.embedded .conn-badge { padding: 5px 11px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.panel.embedded .conn-badge.ok { background: rgba(47, 190, 143, 0.15); color: #1e9a76; }
+.panel.embedded .conn-badge.off { background: rgba(242, 146, 74, 0.15); color: #c46a1f; }
+.panel.embedded .connector-note { margin: 0 26px 18px; padding: 14px 17px; border: 1px solid rgba(242, 146, 74, 0.24); border-radius: 15px; background: rgba(242, 146, 74, 0.08); }
+.panel.embedded .connector-note p { color: #8a5623; }
+.panel.embedded .connector-note code { background: var(--surface-3); }
+.panel.embedded .cmd { margin: 10px 0 0; padding: 10px 15px; border: 0; border-radius: 10px; background: rgba(27, 32, 54, 0.9); color: #eaf0ff; font-size: 12.5px; }
+.panel.embedded .panel-foot { margin: 0; padding: 14px 26px 13px; border: 0; }
+.panel.embedded .foot-hint { color: var(--text-subtle); font-size: 11.5px; }
+.panel.embedded .actions { display: none; }
 </style>

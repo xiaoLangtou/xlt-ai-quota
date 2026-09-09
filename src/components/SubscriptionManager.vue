@@ -10,6 +10,7 @@ import { MonthPicker } from "@/components/ui/month-picker";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Menu } from "@/components/ui/menu";
+import ToolLogo from "@/components/ToolLogo.vue";
 import {
   BILL_CATEGORY_LABEL,
   BILL_CATEGORY_OPTIONS,
@@ -24,7 +25,7 @@ import {
   type SubscriptionBillingCycle,
 } from "@/types/usage";
 
-const props = defineProps<{ open?: boolean; embedded?: boolean }>();
+const props = defineProps<{ open?: boolean; embedded?: boolean; createSignal?: number }>();
 const emit = defineEmits<{ (e: "update:open", value: boolean): void }>();
 
 const COMMON_PROVIDERS = [
@@ -39,6 +40,10 @@ const COMMON_PROVIDERS = [
   "Qoder",
 ] as const;
 const CUSTOM_PROVIDER = "__custom__";
+const PROVIDER_OPTIONS = [
+  ...COMMON_PROVIDERS.map((provider) => ({ value: provider, label: provider, logo: provider })),
+  { value: CUSTOM_PROVIDER, label: "自定义服务商" },
+];
 // reka-ui 的 SelectItem 不允许空字符串值，用哨兵值表示「不关联订阅」。
 const NO_SUBSCRIPTION = "__none__";
 
@@ -144,6 +149,14 @@ function openCreate(): void {
   resetForm();
   showForm.value = true;
 }
+
+watch(
+  () => props.createSignal,
+  (value, previous) => {
+    if (value !== previous) openCreate();
+  },
+);
+
 
 function openEdit(item: AiSubscription): void {
   Object.assign(form, {
@@ -400,16 +413,16 @@ watch(usdToCnyRate, (value) => {
                     <label class="toolbar-rate"><span>USD 汇率</span><b>1 USD = ¥</b><Input v-model="exchangeRate" type="number" min="0.01" step="0.01" @change="saveExchangeRate" /></label>
                     <Button @click="openCreate">新增订阅</Button>
                   </template>
-                  <template v-else>
-                    <MonthPicker v-model="selectedMonth" aria-label="选择账单月份" />
-                    <Select v-model="selectedCategory" :options="categoryFilterOptions" aria-label="按分类筛选" />
-                    <Button variant="outline" @click="openBillCreate">＋ 手动记账</Button>
-                  </template>
                 </div>
+              </div>
+              <div v-if="activeView === 'bills'" class="bill-toolbar">
+                <MonthPicker v-model="selectedMonth" aria-label="选择账单月份" />
+                <Select v-model="selectedCategory" :options="categoryFilterOptions" aria-label="按分类筛选" />
+                <Button variant="outline" @click="openBillCreate">＋ 手动记账</Button>
               </div>
 
               <TabsContent value="subscriptions" class="directory" aria-label="我的订阅">
-              <div v-if="subscriptions.length" class="table-wrap"><Table class="workspace-table"><colgroup><col class="col-service"><col class="col-account"><col class="col-amount"><col class="col-cycle"><col class="col-renewal"><col class="col-status"><col class="col-actions"></colgroup><TableHeader><TableRow><TableHead>服务</TableHead><TableHead>账号</TableHead><TableHead class="num">金额</TableHead><TableHead>周期</TableHead><TableHead>下次续费</TableHead><TableHead>状态</TableHead><TableHead class="action-head">操作</TableHead></TableRow></TableHeader><TableBody><TableRow v-for="item in subscriptions" :key="item.id"><TableCell><div class="service-cell"><div class="provider-mark">{{ item.provider.slice(0, 1).toUpperCase() }}</div><div><strong>{{ item.provider }}</strong><small>{{ item.planName }}</small></div></div></TableCell><TableCell class="muted-cell" :title="item.account">{{ item.account }}</TableCell><TableCell class="num money-cell">{{ formatMoney(item.price, item.currency) }}</TableCell><TableCell>{{ billingLabel(item) }}</TableCell><TableCell><span>{{ item.nextBillingDate }}</span><small class="due-copy">{{ dueLabel(item.nextBillingDate) }}</small></TableCell><TableCell><span class="status-pill" :class="subscriptionStatus(item)">{{ subscriptionStatusLabel(item) }}</span></TableCell><TableCell><div class="row-actions"><Button variant="ghost" size="sm" @click="openEdit(item)">编辑</Button><Menu :items="[{ label: item.status === 'active' ? '暂停订阅' : '恢复订阅', value: 'toggle' }, { label: '删除订阅', value: 'remove', danger: true }]" aria-label="更多订阅操作" @select="(v) => onSubAction(item, v)" /></div></TableCell></TableRow></TableBody></Table></div>
+              <div v-if="subscriptions.length" class="table-wrap"><Table class="workspace-table"><colgroup><col class="col-service"><col class="col-account"><col class="col-amount"><col class="col-cycle"><col class="col-renewal"><col class="col-status"><col class="col-actions"></colgroup><TableHeader><TableRow><TableHead>服务</TableHead><TableHead>账号</TableHead><TableHead class="num">金额</TableHead><TableHead>周期</TableHead><TableHead>下次续费</TableHead><TableHead>状态</TableHead><TableHead class="action-head">操作</TableHead></TableRow></TableHeader><TableBody><TableRow v-for="item in subscriptions" :key="item.id"><TableCell><div class="service-cell"><span class="provider-mark"><ToolLogo :platform="item.provider" :size="21" /></span><div><strong>{{ item.provider }}</strong><small>{{ item.planName }}</small></div></div></TableCell><TableCell class="muted-cell" :title="item.account">{{ item.account }}</TableCell><TableCell class="num money-cell">{{ formatMoney(item.price, item.currency) }}</TableCell><TableCell>{{ billingLabel(item) }}</TableCell><TableCell><span>{{ item.nextBillingDate }}</span><small class="due-copy">{{ dueLabel(item.nextBillingDate) }}</small></TableCell><TableCell><span class="status-pill" :class="subscriptionStatus(item)">{{ subscriptionStatusLabel(item) }}</span></TableCell><TableCell><div class="row-actions"><Button variant="ghost" size="sm" @click="openEdit(item)">编辑</Button><Menu :items="[{ label: item.status === 'active' ? '暂停订阅' : '恢复订阅', value: 'toggle' }, { label: '删除订阅', value: 'remove', danger: true }]" aria-label="更多订阅操作" @select="(v) => onSubAction(item, v)" /></div></TableCell></TableRow></TableBody></Table></div>
               <div v-else class="empty-state"><div>＋</div><strong>还没有订阅记录</strong><p>从常用服务商开始，记录你的套餐和续费日期。</p><Button @click="openCreate">新增第一条订阅</Button></div>
               </TabsContent>
 
@@ -421,7 +434,7 @@ watch(usdToCnyRate, (value) => {
                     <TableBody>
                       <TableRow v-for="bill in monthBills" :key="bill.id">
                         <TableCell class="date-cell">{{ bill.date.slice(5) }}</TableCell>
-                        <TableCell><div class="service-cell"><div class="provider-mark">{{ bill.service.slice(0, 1).toUpperCase() }}</div><div><strong>{{ bill.service }}</strong><small v-if="bill.note">{{ bill.note }}</small></div></div></TableCell>
+                        <TableCell><div class="service-cell"><span class="provider-mark"><ToolLogo :platform="bill.service" :size="21" /></span><div><strong>{{ bill.service }}</strong><small v-if="bill.note">{{ bill.note }}</small></div></div></TableCell>
                         <TableCell><span class="cat-tag">{{ BILL_CATEGORY_LABEL[bill.category] }}</span></TableCell>
                         <TableCell class="muted-cell">{{ BILL_PAYMENT_LABEL[bill.paymentMethod] }}</TableCell>
                         <TableCell><span class="src-text" :class="bill.source">{{ BILL_SOURCE_LABEL[bill.source] }}</span></TableCell>
@@ -437,7 +450,7 @@ watch(usdToCnyRate, (value) => {
             </Tabs>
           </div>
 
-          <Dialog :open="showForm" @update:open="showForm = $event">
+          <Dialog :open="showForm" content-class="subscription-editor-dialog" @update:open="showForm = $event">
             <form class="editor" @submit.prevent="submit">
               <div class="editor-head">
                 <h3>{{ editing ? "编辑订阅" : "新增订阅" }}</h3>
@@ -446,7 +459,7 @@ watch(usdToCnyRate, (value) => {
               <div class="fields">
                 <label>
                   <span>服务商</span>
-                  <Select v-model="form.providerChoice" :options="[...COMMON_PROVIDERS.map((provider) => ({ value: provider, label: provider })), { value: CUSTOM_PROVIDER, label: '自定义服务商' }]" />
+                  <Select v-model="form.providerChoice" :options="PROVIDER_OPTIONS" />
                 </label>
                 <label v-if="isCustomProvider">
                   <span>自定义服务商名称</span>
@@ -497,7 +510,7 @@ watch(usdToCnyRate, (value) => {
             </form>
           </Dialog>
 
-          <Dialog :open="showBillForm" @update:open="showBillForm = $event">
+          <Dialog :open="showBillForm" content-class="subscription-editor-dialog" @update:open="showBillForm = $event">
             <form class="editor" @submit.prevent="submitBill">
               <div class="editor-head">
                 <h3>{{ editingBill ? "编辑账单" : "手动记账" }}</h3>
@@ -624,11 +637,18 @@ watch(usdToCnyRate, (value) => {
   gap: 10px;
   flex-wrap: wrap;
 }
-.ws-actions :deep(.cn-month-picker-trigger) {
+.bill-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: -4px 0 18px;
+}
+.bill-toolbar :deep(.cn-month-picker-trigger) {
   width: 150px;
   height: 34px;
 }
-.ws-actions :deep(.cn-select-trigger) {
+.bill-toolbar :deep(.cn-select-trigger) {
   width: 128px;
   height: 34px;
 }
@@ -866,7 +886,7 @@ watch(usdToCnyRate, (value) => {
 
 .editor {
   padding: 24px;
-  background: var(--surface);
+  background: transparent;
 }
 .editor-head,
 .editor-foot {
@@ -922,12 +942,16 @@ watch(usdToCnyRate, (value) => {
   .ws-actions {
     width: 100%;
   }
-  .ws-actions :deep(.cn-month-picker-trigger),
-  .ws-actions :deep(.cn-select-trigger) {
+  .bill-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .bill-toolbar :deep(.cn-month-picker-trigger),
+  .bill-toolbar :deep(.cn-select-trigger) {
     flex: 1;
     width: auto;
   }
-  .ws-actions > :deep(.cn-button) {
+  .bill-toolbar > :deep(.cn-button) {
     flex: 1;
   }
   .fields {
@@ -937,4 +961,37 @@ watch(usdToCnyRate, (value) => {
     grid-column: auto;
   }
 }
+
+/* Glass prototype */
+.panel.embedded {
+  position: relative;
+  width: 100%;
+  max-width: none;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+.panel.embedded .panel-head { margin: 0; padding: 19px 26px 0; }
+.panel.embedded .eyebrow { display: none; }
+.panel.embedded .panel-head h2 { margin: 0 0 3px; font-size: 17px; font-weight: 700; }
+.panel.embedded .panel-head p { margin: 0; color: var(--text-subtle); font-size: 12.5px; }
+.panel.embedded .ws-bar { position: absolute; top: 19px; right: 26px; z-index: 2; margin: 0; padding: 0; border: 0; }
+.panel.embedded .ws-bar .ws-actions { display: none; }
+.panel.embedded .bill-toolbar { margin: 0; padding: 14px 26px 12px; }
+.panel.embedded :deep(.cn-tabs-list) { gap: 3px; padding: 4px; border-radius: 12px; background: var(--segment-bg); }
+.panel.embedded :deep(.cn-tabs-trigger) { padding: 7px 16px; border-radius: 9px; color: var(--text-muted); font-size: 12.5px; font-weight: 600; }
+.panel.embedded :deep(.cn-tabs-trigger[data-state="active"]) { background: var(--segment-active); box-shadow: var(--shadow-sm); color: var(--text); }
+.panel.embedded .directory,
+.panel.embedded .bill-workspace { padding: 0 26px 22px; }
+.panel.embedded .empty-state,
+.panel.embedded .bill-empty { min-height: 194px; border: 0; border-radius: 0; color: var(--text-subtle); }
+.panel.embedded .empty-state > div { display: grid; width: 46px; height: 46px; place-items: center; margin: 0 auto 14px; border-radius: 15px; background: rgba(91, 95, 239, 0.1); color: #5b5fef; font-size: 24px; }
+.panel.embedded .empty-state strong { color: var(--text); font-size: 15px; font-weight: 700; }
+.panel.embedded .empty-state p { margin: 6px 0 18px; color: var(--text-subtle); font-size: 12.5px; }
+.panel.embedded :deep(.workspace-table th),
+.panel.embedded :deep(.workspace-table td) { border-color: var(--border); }
 </style>

@@ -10,6 +10,7 @@
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -23,6 +24,26 @@
         "titleBarStyle": "Transparent",
         "hiddenTitle": true,
         "theme": "Light"
+      },
+      {
+        "label": "tray-panel",
+        "url": "tray-panel.html",
+        "title": "AI 用量",
+        "width": 314,
+        "height": 360,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": true,
+        "focus": false,
+        "windowEffects": {
+          "effects": ["popover"],
+          "state": "active",
+          "radius": 14
+        }
       }
     ],
     "security": {

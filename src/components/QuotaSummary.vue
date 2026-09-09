@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import ToolLogo from "@/components/ToolLogo.vue";
 import type { PlatformQuotaView } from "@/types/usage";
 
 const props = defineProps<{ views: PlatformQuotaView[] }>();
@@ -9,7 +10,6 @@ type Tone = "ok" | "warn" | "crit";
 interface Row {
   platform: string;
   name: string;
-  logoClass: string;
   planTag: string;
   pct: number | null;
   tone: Tone;
@@ -36,7 +36,6 @@ const rows = computed<Row[]>(() =>
     return {
       platform: v.platform,
       name: v.name,
-      logoClass: v.logoClass,
       planTag: v.planTag,
       pct,
       tone,
@@ -61,7 +60,7 @@ const rows = computed<Row[]>(() =>
     <ul class="qsummary-rows">
       <li v-for="r in rows" :key="r.platform" class="qrow">
         <span class="qname">
-          <i class="qdot" :class="r.logoClass" aria-hidden="true" />
+          <ToolLogo :platform="r.platform" :size="18" />
           {{ r.name }}
           <em class="qtag">{{ r.planTag }}</em>
         </span>
@@ -153,18 +152,6 @@ const rows = computed<Row[]>(() =>
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.qdot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border-radius: 50%;
-  background: var(--text-subtle);
-}
-.qdot.codex { background: var(--brand-codex); }
-.qdot.ark { background: var(--brand-ark); }
-.qdot.kiro { background: var(--brand-kiro); }
-.qdot.qoder { background: var(--brand-qoder); }
-.qdot.open { background: var(--brand-open); }
 .qbar {
   height: 6px;
   border-radius: 999px;
@@ -206,5 +193,42 @@ const rows = computed<Row[]>(() =>
   .qname {
     grid-column: 1 / -1;
   }
+}
+
+/* Glass prototype */
+.qsummary {
+  padding: 0 0 7px;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+.qsummary-head {
+  align-items: baseline;
+  margin: 0;
+  padding: 21px 26px 5px;
+}
+.qsummary-head h2 { margin: 0 0 3px; font-size: 16.5px; font-weight: 700; }
+.qsummary-head p { margin: 0; color: var(--text-subtle); font-size: 12.5px; }
+.qsummary-link { color: var(--accent); font-size: 12.5px; font-weight: 600; }
+.qrow {
+  grid-template-columns: 175px 1fr 66px;
+  gap: 14px;
+  padding: 13px 26px;
+  border-top: 1px solid var(--border);
+}
+.qrow:first-child { border-top: 0; }
+.qname { gap: 8px; color: var(--text); font-size: 14px; font-weight: 600; }
+.qtag { padding: 2px 8px; border-radius: 7px; background: var(--surface-3); color: var(--text-subtle); font-family: var(--font-sans); font-size: 10.5px; font-weight: 600; }
+.qbar { height: 7px; background: var(--track); }
+.qval { width: 66px; color: var(--text); font-size: 13px; font-weight: 700; }
+.qval.crit { color: #d8405c; }
+.qnote { color: var(--text-subtle); font-size: 12px; }
+
+@media (max-width: 640px) {
+  .qrow { grid-template-columns: 1fr 52px; padding: 13px 18px; }
+  .qname { grid-column: 1 / -1; }
 }
 </style>

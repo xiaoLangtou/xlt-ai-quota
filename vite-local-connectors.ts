@@ -78,6 +78,15 @@ function localDate(value: unknown): string | undefined {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+/** 本地「日期 小时」桶键，如 "2026-09-09 14"；用于「今天按小时」聚合。 */
+function localDateHour(value: unknown): string | undefined {
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return undefined;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}`;
+}
+
 function listJsonlFiles(root: string): string[] {
   if (!existsSync(root)) return [];
   const files: string[] = [];
@@ -147,7 +156,7 @@ function datesInRange(start: string, end: string): string[] {
   return dates;
 }
 
-function collectCodexTokenStats(start: string, end: string): LocalTokenStats[] {
+function collectCodexTokenStats(start: string, end: string, byHour = false): LocalTokenStats[] {
   const sessions = join(homedir(), ".codex", "sessions");
   const stats = new Map<string, LocalTokenStats>();
   for (const date of datesInRange(start, end)) {
@@ -159,9 +168,10 @@ function collectCodexTokenStats(start: string, end: string): LocalTokenStats[] {
         const usage = info && isRecord(info.last_token_usage) ? info.last_token_usage : undefined;
         const eventDate = localDate(event.timestamp);
         if (event.type !== "event_msg" || payload?.type !== "token_count" || !usage || eventDate !== date) return;
+        const key = byHour ? (localDateHour(event.timestamp) ?? date) : date;
         addStats(
           stats,
-          date,
+          key,
           numeric(usage.input_tokens),
           numeric(usage.output_tokens),
           numeric(usage.cached_input_tokens) + numeric(usage.cache_write_input_tokens),
@@ -172,17 +182,30 @@ function collectCodexTokenStats(start: string, end: string): LocalTokenStats[] {
   return statsRows(stats);
 }
 
-function collectClaudeTokenStats(start: string, end: string): LocalTokenStats[] {
+/** 文件最后修改日期（本地）；用于跳过明显早于窗口的文件，降低高频刷新开销。 */
+function fileMtimeDate(file: string): string | undefined {
+  try {
+    return localDate(statSync(file).mtimeMs);
+  } catch {
+    return undefined;
+  }
+}
+
+function collectClaudeTokenStats(start: string, end: string, byHour = false): LocalTokenStats[] {
   const stats = new Map<string, LocalTokenStats>();
   for (const file of listJsonlFiles(join(homedir(), ".claude", "projects"))) {
+    // 文件在窗口起点之前就没再改动过，其内容不可能落在 [start,end]，直接跳过。
+    const mtimeDate = fileMtimeDate(file);
+    if (mtimeDate && mtimeDate < start) continue;
     readJsonLines(file, (event) => {
       const message = isRecord(event.message) ? event.message : undefined;
       const usage = message && isRecord(message.usage) ? message.usage : undefined;
       const date = localDate(event.timestamp);
       if (event.type !== "assistant" || message?.role !== "assistant" || !usage || !date || date < start || date > end) return;
       const cached = numeric(usage.cache_creation_input_tokens) + numeric(usage.cache_read_input_tokens);
+      const key = byHour ? (localDateHour(event.timestamp) ?? date) : date;
       // Claude 将缓存 Token 独立于 input_tokens 返回；合并后才是完整输入量。
-      addStats(stats, date, numeric(usage.input_tokens) + cached, numeric(usage.output_tokens), cached);
+      addStats(stats, key, numeric(usage.input_tokens) + cached, numeric(usage.output_tokens), cached);
     });
   }
   return statsRows(stats);
@@ -251,27 +274,43 @@ function loadKiroSessionModel(dir: string, sessionId: string): string {
   }
 }
 
-function collectKiroTokenStats(start: string, end: string): LocalTokenStats[] {
-  const dir = join(homedir(), ".kiro", "sessions", "cli");
-  const stats = new Map<string, LocalTokenStats>();
-  if (!existsSync(dir)) return [];
+function bumpStats(
+  stats: Map<string, LocalTokenStats>,
+  date: string,
+  input: number,
+  output: number,
+  reqInc: number,
+): void {
+  if (input === 0 && output === 0 && reqInc === 0) return;
+  const cur = stats.get(date) ?? { d: date, inp: 0, outp: 0, cache: 0, requests: 0 };
+  cur.inp += input;
+  cur.outp += output;
+  cur.requests += reqInc;
+  stats.set(date, cur);
+}
+
+/** Kiro CLI：sessions/cli/*.jsonl（Prompt/AssistantMessage 事件，按文本估算）。 */
+function collectKiroCliStats(
+  dir: string,
+  start: string,
+  end: string,
+  stats: Map<string, LocalTokenStats>,
+  byHour = false,
+): void {
+  if (!existsSync(dir)) return;
   let names: string[];
   try {
     names = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
   } catch {
-    return [];
+    return;
   }
 
   for (const name of names) {
     const filePath = join(dir, name);
     const sessionId = name.slice(0, -".jsonl".length);
+    const fallbackDate = fileMtimeDate(filePath);
+    if (fallbackDate && fallbackDate < start) continue;
     const model = loadKiroSessionModel(dir, sessionId);
-    let fallbackDate: string | undefined;
-    try {
-      fallbackDate = localDate(statSync(filePath).mtimeMs);
-    } catch {
-      fallbackDate = undefined;
-    }
 
     const events: JsonRecord[] = [];
     readJsonLines(filePath, (rec) => events.push(rec));
@@ -304,8 +343,13 @@ function collectKiroTokenStats(start: string, end: string): LocalTokenStats[] {
           else output += estTokensText(cd, model);
         }
         if (pendingInput > 0 || output > 0) {
-          const date = (curTs != null ? localDate(curTs) : undefined) ?? fallbackDate;
-          if (date && date >= start && date <= end) addStats(stats, date, pendingInput, output, 0);
+          const dateOnly = (curTs != null ? localDate(curTs) : undefined) ?? fallbackDate;
+          if (dateOnly && dateOnly >= start && dateOnly <= end) {
+            const key = byHour
+              ? ((curTs != null ? localDateHour(curTs) : undefined) ?? `${dateOnly} 00`)
+              : dateOnly;
+            addStats(stats, key, pendingInput, output, 0);
+          }
         }
         pendingInput = 0;
       } else if (ev.kind === "Compaction") {
@@ -313,6 +357,81 @@ function collectKiroTokenStats(start: string, end: string): LocalTokenStats[] {
       }
     }
   }
+}
+
+/** 列出 Kiro IDE 工作区会话文件：sessions 下各 workspace 的 sess_<id>/messages.jsonl */
+function listKiroIdeMessageFiles(sessionsRoot: string): string[] {
+  const out: string[] = [];
+  let workspaces: ReturnType<typeof readdirSync>;
+  try {
+    workspaces = readdirSync(sessionsRoot, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const ws of workspaces) {
+    if (!ws.isDirectory() || ws.name === "cli") continue;
+    const wsDir = join(sessionsRoot, ws.name);
+    let sessions: ReturnType<typeof readdirSync>;
+    try {
+      sessions = readdirSync(wsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const s of sessions) {
+      if (!s.isDirectory() || !s.name.startsWith("sess_")) continue;
+      const mf = join(wsDir, s.name, "messages.jsonl");
+      if (existsSync(mf)) out.push(mf);
+    }
+  }
+  return out;
+}
+
+/**
+ * Kiro IDE：sessions 下各 workspace 的 sess_<id>/messages.jsonl。
+ * 每行 {timestamp(ISO), payload:{type, content/args}}；IDE 只记 credits 不记 token，
+ * 故按文本估算：user/tool_result/tool_call → 输入，assistant → 输出。
+ */
+function collectKiroIdeStats(
+  sessionsRoot: string,
+  start: string,
+  end: string,
+  stats: Map<string, LocalTokenStats>,
+  byHour = false,
+): void {
+  for (const filePath of listKiroIdeMessageFiles(sessionsRoot)) {
+    const mtimeDate = fileMtimeDate(filePath);
+    if (mtimeDate && mtimeDate < start) continue;
+    readJsonLines(filePath, (rec) => {
+      const ts = typeof rec.timestamp === "string" ? rec.timestamp : undefined;
+      if (!ts) return;
+      const dateOnly = localDate(ts);
+      if (!dateOnly || dateOnly < start || dateOnly > end) return; // 先按日期裁剪，避免无谓估算
+      const key = byHour ? (localDateHour(ts) ?? dateOnly) : dateOnly;
+      const payload = isRecord(rec.payload) ? rec.payload : undefined;
+      if (!payload) return;
+      switch (payload.type) {
+        case "user":
+        case "tool_result":
+          bumpStats(stats, key, estTokensText(payload.content, "kiro-ide"), 0, 0);
+          break;
+        case "tool_call":
+          bumpStats(stats, key, estTokensText(payload.args, "kiro-ide"), 0, 0);
+          break;
+        case "assistant":
+          bumpStats(stats, key, 0, estTokensText(payload.content, "kiro-ide"), 1);
+          break;
+        default:
+          break;
+      }
+    });
+  }
+}
+
+function collectKiroTokenStats(start: string, end: string, byHour = false): LocalTokenStats[] {
+  const sessionsRoot = join(homedir(), ".kiro", "sessions");
+  const stats = new Map<string, LocalTokenStats>();
+  collectKiroCliStats(join(sessionsRoot, "cli"), start, end, stats, byHour); // Kiro CLI
+  collectKiroIdeStats(sessionsRoot, start, end, stats, byHour); // Kiro IDE 工作区会话
   return statsRows(stats);
 }
 
@@ -371,11 +490,18 @@ async function querySqliteJson(dbPath: string, sql: string): Promise<JsonRecord[
   }
 }
 
-async function collectQoderTokenStats(start: string, end: string): Promise<LocalTokenStats[]> {
+async function collectQoderTokenStats(
+  start: string,
+  end: string,
+  byHour = false,
+): Promise<LocalTokenStats[]> {
   const stats = new Map<string, LocalTokenStats>();
+  // 用秒级下界裁剪（同时兼容毫秒/秒时间戳），精确的 [start,end] 仍由下方按本地日期过滤。
+  const lowerBoundSec = Math.floor(new Date(`${start}T00:00:00`).getTime() / 1000);
   const sql =
     "SELECT token_info, gmt_create FROM chat_message " +
-    "WHERE role='assistant' AND token_info IS NOT NULL AND length(token_info) > 2";
+    "WHERE role='assistant' AND token_info IS NOT NULL AND length(token_info) > 2 " +
+    `AND gmt_create >= ${lowerBoundSec}`;
 
   for (const dbPath of qoderDbPaths()) {
     if (!existsSync(dbPath)) continue;
@@ -405,10 +531,95 @@ async function collectQoderTokenStats(start: string, end: string): Promise<Local
       const ms = gmt < 1e12 ? gmt * 1000 : gmt; // 容忍秒级
       const date = localDate(ms);
       if (!date || date < start || date > end) continue;
-      addStats(stats, date, input, completion, cached);
+      const key = byHour ? (localDateHour(ms) ?? date) : date;
+      addStats(stats, key, input, completion, cached);
     }
   }
+
+  // Qoder CLI transcript（~/.qoder/projects），credits-only 无真实 token，按文本估算。
+  collectQoderCliTokenStats(start, end, stats, byHour);
   return statsRows(stats);
+}
+
+/**
+ * Qoder CLI：~/.qoder/projects 下的 anthropic 风格 transcript（message.role + content[]）。
+ * usage 只记 credits、token 全为 0，故按文本估算：user → 输入，assistant → 输出。
+ */
+function collectQoderCliTokenStats(
+  start: string,
+  end: string,
+  stats: Map<string, LocalTokenStats>,
+  byHour = false,
+): void {
+  const root = join(homedir(), ".qoder", "projects");
+  if (!existsSync(root)) return;
+  for (const filePath of listJsonlFiles(root)) {
+    const mtimeDate = fileMtimeDate(filePath);
+    if (mtimeDate && mtimeDate < start) continue;
+    readJsonLines(filePath, (rec) => {
+      const message = isRecord(rec.message) ? rec.message : undefined;
+      if (!message) return;
+      const role = message.role;
+      if (role !== "user" && role !== "assistant") return;
+      const dateOnly = localDate(rec.timestamp);
+      if (!dateOnly || dateOnly < start || dateOnly > end) return;
+      const key = byHour ? (localDateHour(rec.timestamp) ?? dateOnly) : dateOnly;
+      if (role === "user") {
+        bumpStats(stats, key, estTokensText(message.content, "claude"), 0, 0);
+      } else {
+        bumpStats(stats, key, 0, estTokensText(message.content, "claude"), 1);
+      }
+    });
+  }
+}
+
+/** OpenCode 今日按小时（改 SQL 用 strftime 分组到小时）。 */
+async function collectOpenCodeHourly(today: string): Promise<LocalTokenStats[]> {
+  try {
+    const sql =
+      "SELECT strftime('%Y-%m-%d %H', time_created/1000,'unixepoch','localtime') AS d, " +
+      "sum(json_extract(data,'$.tokens.input')) AS inp, " +
+      "sum(json_extract(data,'$.tokens.output')) AS outp, " +
+      "sum(COALESCE(json_extract(data,'$.tokens.cache.read'),0)) AS cache " +
+      "FROM message " +
+      "WHERE json_extract(data,'$.role')='assistant' " +
+      "AND json_extract(data,'$.tokens.input') IS NOT NULL " +
+      `AND date(time_created/1000,'unixepoch','localtime')='${today}' ` +
+      "GROUP BY d ORDER BY d";
+    const { stdout } = await run(OPENCODE, ["db", sql, "--format", "json"]);
+    const rows = JSON.parse(stdout || "[]") as JsonRecord[];
+    return rows.map((r) => ({
+      d: String(r.d),
+      inp: numeric(r.inp),
+      outp: numeric(r.outp),
+      cache: numeric(r.cache),
+      requests: 0,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** 汇总今天所有本地源的「按小时 × 平台」用量（供分析页「今天」时间轴使用）。 */
+async function collectTodayHourly(): Promise<
+  { platform: string; hour: number; input: number; output: number }[]
+> {
+  const today = todayStr();
+  const out: { platform: string; hour: number; input: number; output: number }[] = [];
+  const tag = (platform: string, rows: LocalTokenStats[]): void => {
+    for (const r of rows) {
+      const hourPart = r.d.split(" ")[1];
+      const hour = hourPart != null ? Number(hourPart) : Number.NaN;
+      if (Number.isNaN(hour)) continue;
+      out.push({ platform, hour, input: r.inp, output: r.outp });
+    }
+  };
+  tag("codex", collectCodexTokenStats(today, today, true));
+  tag("claude", collectClaudeTokenStats(today, today, true));
+  tag("kiro", collectKiroTokenStats(today, today, true));
+  tag("qoder", await collectQoderTokenStats(today, today, true));
+  tag("opencode-go", await collectOpenCodeHourly(today));
+  return out;
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -623,6 +834,15 @@ export function localConnectorsDevPlugin(): Plugin {
             return sendJson(res, 200, collectClaudeTokenStats(start, end));
           } catch (e) {
             return sendJson(res, 502, { error: "Claude Code 本地 Token 聚合失败: " + summarizeErr(e) });
+          }
+        }
+
+        // ---- 今日按小时 × 平台（分析页「今天」时间轴）----
+        if (p === "/api/today-hourly") {
+          try {
+            return sendJson(res, 200, await collectTodayHourly());
+          } catch (e) {
+            return sendJson(res, 502, { error: "今日按小时聚合失败: " + summarizeErr(e) });
           }
         }
 

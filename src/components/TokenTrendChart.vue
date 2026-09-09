@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { TrendPoint } from "@/types/usage";
-import { shortDate } from "@/utils/format";
+import { formatTokens, shortDate } from "@/utils/format";
 import { useTheme } from "@/composables/useTheme";
 import { VChart } from "@/echarts";
 
-const props = defineProps<{ data: TrendPoint[] }>();
+const props = defineProps<{ data: TrendPoint[]; labels?: string[] }>();
 const { resolved } = useTheme();
 
 function cssVar(name: string): string {
@@ -19,22 +19,23 @@ const option = computed(() => {
   const axis = cssVar("--border") || "#e5e7ec";
   const label = cssVar("--text-subtle") || "#8b93a2";
   const surface = cssVar("--surface") || "#ffffff";
+  const tooltipBg = cssVar("--tooltip-bg") || "#ffffff";
   const border = cssVar("--border") || "#e5e7ec";
   const text = cssVar("--text") || "#171b23";
 
-  const xData = props.data.map((p) => shortDate(p.date));
+  const xData = props.labels ?? props.data.map((p) => shortDate(p.date));
   const totals = props.data.map((p) => p.total);
   return {
     grid: { left: 8, right: 8, top: 10, bottom: 28, containLabel: false },
     tooltip: {
       trigger: "axis",
-      backgroundColor: surface,
+      backgroundColor: tooltipBg,
       borderColor: border,
       borderWidth: 1,
       textStyle: { color: text, fontSize: 12 },
       formatter: (params: { name: string; value: number }[]) => {
         const p = params[0];
-        return `${p.name}<br/>总 Token: <b>${p.value.toLocaleString()}</b>`;
+        return `${p.name}<br/>总 Token: <b>${formatTokens(p.value)}</b>（${p.value.toLocaleString()}）`;
       },
     },
     xAxis: {
@@ -99,23 +100,27 @@ const option = computed(() => {
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-card);
 }
+
 .chart-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
+
 .chart h3 {
   margin: 0;
   color: var(--text);
   font-size: 15px;
   font-weight: 650;
 }
+
 .chart p {
   margin: 6px 0 0;
   color: var(--text-muted);
   font-size: 12px;
 }
+
 .chart-chip {
   padding: 4px 8px;
   border: 1px solid var(--border);
@@ -126,6 +131,7 @@ const option = computed(() => {
   font-size: 10px;
   font-weight: 600;
 }
+
 .graph {
   position: relative;
   width: 100%;
@@ -134,13 +140,39 @@ const option = computed(() => {
   margin-top: 12px;
   border-top: 1px solid var(--border);
 }
+
 @media (max-width: 600px) {
   .chart {
     min-height: 272px;
     padding: 18px;
   }
+
   .graph {
     height: 180px;
   }
+}
+
+.chart {
+  border-color: var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+}
+
+.chart h3 {
+  font-family: "Manrope", "PingFang SC", sans-serif;
+  font-size: 16.5px;
+  font-weight: 700;
+}
+
+.chart p {
+  margin-top: 3px;
+  color: var(--text-subtle);
+  font-size: 12.5px;
+}
+
+.graph {
+  border-color: var(--border);
 }
 </style>

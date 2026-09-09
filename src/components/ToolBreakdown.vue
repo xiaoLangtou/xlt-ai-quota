@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ToolUsage } from "@/types/usage";
 import { formatTokens } from "@/utils/format";
+import ToolLogo from "@/components/ToolLogo.vue";
 
 defineProps<{ tools: ToolUsage[]; rangeLabel: string }>();
 
@@ -48,7 +49,7 @@ function brandVar(platform: string): string {
       </div>
       <div v-for="t in tools" :key="t.platform" class="tb-row" role="row">
         <span class="tb-name">
-          <i class="tb-dot" :style="{ background: `var(${brandVar(t.platform)})` }" />
+          <ToolLogo :platform="t.platform" :size="20" />
           {{ label(t.platform) }}
         </span>
         <span class="tb-share">
@@ -116,12 +117,6 @@ function brandVar(platform: string): string {
   color: var(--text);
   font-size: 13px;
   font-weight: 550;
-}
-.tb-dot {
-  width: 9px;
-  height: 9px;
-  flex: 0 0 9px;
-  border-radius: 2px;
 }
 .tb-share {
   display: flex;
@@ -195,4 +190,21 @@ function brandVar(platform: string): string {
     display: none;
   }
 }
+
+/* Glass prototype */
+.toolbreak {
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+.tb-head { padding: 21px 26px 5px; }
+.tb-head h3 { font-family: "Manrope", "PingFang SC", sans-serif; font-size: 16.5px; font-weight: 700; }
+.tb-head p { margin-top: 3px; color: var(--text-subtle); font-size: 12.5px; }
+.tb-table { margin-top: 6px; padding: 0 26px 8px; }
+.tb-row { border-color: var(--border); }
+.tb-empty { min-height: 0; padding: 36px 0; color: var(--text-subtle); font-size: 13px; }
 </style>

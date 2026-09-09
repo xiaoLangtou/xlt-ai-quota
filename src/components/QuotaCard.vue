@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PlatformQuotaView, QuotaWindowView } from "@/types/usage";
+import ToolLogo from "@/components/ToolLogo.vue";
 
 defineProps<{ view: PlatformQuotaView }>();
 
@@ -33,7 +34,7 @@ function usedCredits(view: PlatformQuotaView): number {
   >
     <div class="platform">
       <span class="brand">
-        <i class="platform-dot" :class="view.logoClass" aria-hidden="true" />
+        <ToolLogo :platform="view.platform" :size="19" />
         {{ view.name }}
       </span>
       <span class="tag">{{ view.planTag }}</span>
@@ -138,28 +139,6 @@ function usedCredits(view: PlatformQuotaView): number {
   gap: 9px;
   align-items: center;
   color: var(--text);
-}
-.platform-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--text-subtle);
-  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 0%, transparent);
-}
-.platform-dot.codex {
-  background: var(--brand-codex);
-}
-.platform-dot.ark {
-  background: var(--brand-ark);
-}
-.platform-dot.kiro {
-  background: var(--brand-kiro);
-}
-.platform-dot.qoder {
-  background: var(--brand-qoder);
-}
-.platform-dot.open {
-  background: var(--brand-open);
 }
 .tag {
   margin-left: auto;
@@ -337,4 +316,38 @@ function usedCredits(view: PlatformQuotaView): number {
     margin-bottom: 14px;
   }
 }
+
+/* Glass prototype */
+.quota {
+  min-height: 0;
+  padding: 19px 20px;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+.quota:hover { border-color: var(--glass-border); }
+.platform { margin-bottom: 11px; font-size: 14.5px; font-weight: 700; }
+.brand { gap: 8px; }
+.tag { padding: 3px 8px; border-radius: 8px; background: var(--accent-weak); color: var(--accent); font-family: var(--font-sans); font-size: 10.5px; font-weight: 600; }
+.plan-meters { gap: 11px; }
+.plan-meter {
+  padding: 11px 13px;
+  border: 1px solid var(--glass-border);
+  border-radius: 13px;
+  background: var(--glass-inner);
+}
+.plan-meter.is-exhausted { border-color: rgba(233, 85, 107, 0.25); background: rgba(233, 85, 107, 0.08); }
+.plan-meter-header { gap: 5px; font-size: 12px; }
+.plan-meter-label { color: var(--text-muted); font-size: 12px; font-weight: 400; }
+.plan-meter-reset { color: var(--text); font-family: var(--font-sans); font-size: 12px; font-weight: 600; }
+.plan-meter-header strong { color: var(--text); font-size: 12px; font-weight: 700; }
+.credit-total .plan-meter-header strong { color: var(--text); font-size: 19px; font-weight: 800; }
+.usage-state { padding: 2px 8px; border-radius: 7px; background: rgba(233, 85, 107, 0.14); color: #d8405c; font-size: 10.5px; }
+.plan-meter .meter-top { color: var(--text-muted); font-size: 12px; }
+.plan-meter-value { color: var(--text); font-size: 13px; font-weight: 700; }
+.bar { height: 6px; margin-top: 7px; background: var(--track); }
+.empty { padding: 14px 0; color: var(--text-subtle); font-size: 12px; }
 </style>

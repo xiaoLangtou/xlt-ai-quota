@@ -169,6 +169,13 @@ export interface HeatmapDay {
   /** YYYY-MM-DD */
   date: string;
   total: number;
+  details: HeatmapDetail[];
+}
+
+export interface HeatmapDetail {
+  platform: string;
+  model?: string;
+  total: number;
 }
 
 export interface PlatformDailyPoint {

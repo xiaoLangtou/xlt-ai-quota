@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { PlatformDailyPoint } from "@/types/usage";
-import { shortDate } from "@/utils/format";
+import { formatTokens, shortDate } from "@/utils/format";
 import { useTheme } from "@/composables/useTheme";
 import { VChart } from "@/echarts";
 
-const props = defineProps<{ data: PlatformDailyPoint[] }>();
+const props = defineProps<{ data: PlatformDailyPoint[]; labels?: string[] }>();
 const { resolved } = useTheme();
 
 function cssVar(name: string, fallback: string): string {
@@ -34,7 +34,7 @@ const option = computed(() => {
   void resolved.value;
   const axis = cssVar("--border", "#e5e7ec");
   const label = cssVar("--text-subtle", "#8b93a2");
-  const surface = cssVar("--surface", "#ffffff");
+  const tooltipBg = cssVar("--tooltip-bg", "#ffffff");
   const text = cssVar("--text", "#171b23");
 
   // 累计每个平台在整个周期内的用量，只渲染有实际用量的平台，避免图例与柱子不一致。
@@ -64,10 +64,17 @@ const option = computed(() => {
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "shadow" },
-      backgroundColor: surface,
+      backgroundColor: tooltipBg,
       borderColor: axis,
       borderWidth: 1,
       textStyle: { color: text, fontSize: 12 },
+      formatter: (params: { name: string; seriesName: string; value: number; marker: string }[]) => {
+        const items = params
+          .filter((p) => Number(p.value) > 0)
+          .map((p) => `${p.marker}${p.seriesName}: <b>${formatTokens(Number(p.value))}</b>`);
+        if (items.length === 0) return `${params[0]?.name ?? ""}<br/>无用量`;
+        return `${params[0].name}<br/>${items.join("<br/>")}`;
+      },
     },
     legend: {
       data: series.map((s) => s.name),
@@ -78,7 +85,7 @@ const option = computed(() => {
     },
     xAxis: {
       type: "category",
-      data: props.data.map((d) => shortDate(d.date)),
+      data: props.labels ?? props.data.map((d) => shortDate(d.date)),
       axisLine: { lineStyle: { color: axis } },
       axisTick: { show: false },
       axisLabel: { color: label, fontSize: 11 },
@@ -157,4 +164,8 @@ const option = computed(() => {
     height: 168px;
   }
 }
+.chart { border-color: var(--glass-border); border-radius: 20px; background: var(--glass-fill); box-shadow: var(--glass-shadow); backdrop-filter: blur(18px) saturate(180%); }
+.chart h3 { font-family: "Manrope", "PingFang SC", sans-serif; font-size: 16.5px; font-weight: 700; }
+.chart p { margin-top: 3px; color: var(--text-subtle); font-size: 12.5px; }
+.graph { border-color: var(--border); }
 </style>

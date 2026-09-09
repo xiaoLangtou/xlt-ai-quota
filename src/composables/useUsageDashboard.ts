@@ -1,6 +1,6 @@
 import { computed, reactive, type Reactive } from "vue";
 import { setupUsageTray, updateUsageTrayStatus } from "@/desktop/tray";
-import { usageService } from "@/services/usage-service";
+import { usageService, type TodayHourly } from "@/services/usage-service";
 import { isTauriDesktop } from "@/connectors/types";
 import type {
   PlatformQuotaView,
@@ -21,6 +21,7 @@ interface DashboardState {
   platformDaily: PlatformDailyPoint[];
   toolUsage: ToolUsage[];
   heatmap: HeatmapDay[];
+  todayHourly: TodayHourly;
   sync: SyncInfo;
   loading: boolean;
   syncError: string | null;
@@ -34,12 +35,15 @@ const state = reactive<DashboardState>({
   platformDaily: [],
   toolUsage: [],
   heatmap: [],
+  todayHourly: { labels: [], trend: [], platform: [] },
   sync: { lastSyncAt: null, syncing: false },
   loading: false,
   syncError: null,
 });
 
 let autoSyncStarted = false;
+let autoRefreshStarted = false;
+let todayRefreshing = false;
 
 function readAll(): void {
   state.quotas = usageService.getPlatformQuotaViews();
@@ -70,6 +74,37 @@ export function useUsageDashboard() {
     state.trend = usageService.getTokenTrend(preset);
     state.platformDaily = usageService.getPlatformDaily(preset);
     state.toolUsage = usageService.getToolBreakdown(preset);
+    // 切到「今天」时立即拉最新本地用量 + 按小时时间轴，避免看到过期数据。
+    if (preset === "today") {
+      void syncToday();
+      void loadTodayHourly();
+    }
+  }
+
+  /** 加载「今天」按小时的趋势/平台分布（分析页时间轴）。 */
+  async function loadTodayHourly(): Promise<void> {
+    if (state.range !== "today") return;
+    try {
+      state.todayHourly = await usageService.getTodayHourly();
+    } catch {
+      // 忽略：拉取失败时保留上一次数据
+    }
+  }
+
+  /** 轻量自动刷新：静默重拉本地会话类 Token 的「今天」数据（不含 arkcli，不动 loading）。 */
+  async function syncToday(): Promise<void> {
+    if (todayRefreshing || state.loading) return;
+    todayRefreshing = true;
+    try {
+      await usageService.syncTodayTokens();
+      readAll();
+      updateTray();
+      if (state.range === "today") void loadTodayHourly();
+    } catch {
+      // 自动刷新失败不打扰用户
+    } finally {
+      todayRefreshing = false;
+    }
   }
 
   async function sync(): Promise<void> {
@@ -139,6 +174,18 @@ export function useUsageDashboard() {
     void (isTauriDesktop() ? syncSubscriptionQuotas() : sync());
   }
 
+  // 自动刷新「今天」：每 60s + 窗口可见/聚焦时，静默更新本地用量，实现近实时。
+  if (!autoRefreshStarted && typeof window !== "undefined") {
+    autoRefreshStarted = true;
+    window.setInterval(() => {
+      if (document.visibilityState === "visible") void syncToday();
+    }, 60_000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") void syncToday();
+    });
+    window.addEventListener("focus", () => void syncToday());
+  }
+
   return {
     state: state as Reactive<DashboardState>,
     range: computed(() => state.range),
@@ -148,10 +195,12 @@ export function useUsageDashboard() {
     platformDaily: computed(() => state.platformDaily),
     toolUsage: computed(() => state.toolUsage),
     heatmap: computed(() => state.heatmap),
+    todayHourly: computed(() => state.todayHourly),
     loading: computed(() => state.loading),
     syncError: computed(() => state.syncError),
     setRange,
     sync,
+    syncToday,
     syncSubscriptionQuotas,
     loadSettings,
     saveSettings,

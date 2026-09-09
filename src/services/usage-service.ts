@@ -24,10 +24,18 @@ import { OpenCodeConnector } from "@/connectors/opencode";
 import { ClaudeConnector } from "@/connectors/claude";
 import {
   ConnectorError,
+  httpGet,
   type Connector,
   type QuotaConnector,
   type TokenConnector,
 } from "@/connectors/types";
+
+/** 分析页「今天」时间轴用：按小时聚合的趋势与平台分布。 */
+export interface TodayHourly {
+  labels: string[];
+  trend: TrendPoint[];
+  platform: PlatformDailyPoint[];
+}
 
 interface Range {
   start: string; // YYYY-MM-DD
@@ -305,29 +313,77 @@ export class UsageService {
       .sort((a, b) => b.total - a.total);
   }
 
-  /**
-   * 贡献热力图数据：从对齐到周日的起点到今天，逐日 Token 总量（缺失补 0）。
-   * @param weeks 展示的周数（列数），默认约 40 周（~9 个月）。
-   */
-  getDailyHeatmap(weeks = 40): HeatmapDay[] {
+  /** 近一年贡献热力图：按周日对齐，缺失日期补 0，并保留工具/模型明细。 */
+  getDailyHeatmap(weeks = 52): HeatmapDay[] {
     const end = new Date();
     end.setHours(0, 0, 0, 0);
     const start = new Date(end);
     // 回退到 (weeks-1) 周前那一周的周日，保证首列从周日开始。
     start.setDate(end.getDate() - end.getDay() - (weeks - 1) * 7);
     const rows = this.storage.listTokensByRange(ymd(start), ymd(end));
-    const byDate = new Map<string, number>();
+    const byDate = new Map<string, { total: number; details: Map<string, HeatmapDay["details"][number]> }>();
     for (const r of rows) {
-      byDate.set(r.date, (byDate.get(r.date) ?? 0) + r.inputTokens + r.outputTokens);
+      const tokens = r.inputTokens + r.outputTokens;
+      const day = byDate.get(r.date) ?? { total: 0, details: new Map() };
+      const detailKey = `${r.platform}\u0000${r.model ?? ""}`;
+      const detail = day.details.get(detailKey) ?? {
+        platform: r.platform,
+        model: r.model,
+        total: 0,
+      };
+      day.total += tokens;
+      detail.total += tokens;
+      day.details.set(detailKey, detail);
+      byDate.set(r.date, day);
     }
     const out: HeatmapDay[] = [];
     const cursor = new Date(start);
     while (cursor <= end) {
       const key = ymd(cursor);
-      out.push({ date: key, total: byDate.get(key) ?? 0 });
+      const day = byDate.get(key);
+      out.push({
+        date: key,
+        total: day?.total ?? 0,
+        details: [...(day?.details.values() ?? [])].sort((a, b) => b.total - a.total),
+      });
       cursor.setDate(cursor.getDate() + 1);
     }
     return out;
+  }
+
+  /**
+   * 今日按小时的趋势与平台分布（0 点到当前小时，缺失补 0）。
+   * 走 /api/today-hourly，直连本地会话按小时聚合，不落日粒度存储。
+   */
+  async getTodayHourly(): Promise<TodayHourly> {
+    const maxHour = new Date().getHours();
+    let rows: { platform: string; hour: number; input: number; output: number }[] = [];
+    try {
+      const data = await httpGet({ baseUrl: "/api", path: "/today-hourly" });
+      if (Array.isArray(data)) {
+        rows = data as { platform: string; hour: number; input: number; output: number }[];
+      }
+    } catch {
+      rows = [];
+    }
+    const labels: string[] = [];
+    const trend: TrendPoint[] = [];
+    const platform: PlatformDailyPoint[] = [];
+    for (let h = 0; h <= maxHour; h += 1) {
+      const label = `${String(h).padStart(2, "0")}:00`;
+      labels.push(label);
+      const hourRows = rows.filter((r) => Number(r.hour) === h);
+      const input = hourRows.reduce((s, r) => s + (Number(r.input) || 0), 0);
+      const output = hourRows.reduce((s, r) => s + (Number(r.output) || 0), 0);
+      trend.push({ date: label, total: input + output, input, output, requests: 0 });
+      const byPlatform: Record<string, number> = {};
+      for (const r of hourRows) {
+        byPlatform[r.platform] =
+          (byPlatform[r.platform] ?? 0) + (Number(r.input) || 0) + (Number(r.output) || 0);
+      }
+      platform.push({ date: label, byPlatform });
+    }
+    return { labels, trend, platform };
   }
 
   private prevRange(range: Range, preset: RangePreset): Range {
@@ -492,6 +548,30 @@ export class UsageService {
 
   setSyncing(flag: boolean): void {
     this.storage.saveSyncInfo({ ...this.storage.getSyncInfo(), syncing: flag });
+  }
+
+  /**
+   * 轻量「今天」刷新：仅重拉本地会话类 Token 连接器（排除 arkcli 网络调用），
+   * 只覆盖今天这一天的数据，供定时/聚焦自动刷新使用，不改动同步状态与 loading。
+   */
+  async syncTodayTokens(): Promise<void> {
+    const range = this.getRange("today");
+    const local = this.tokenConnectors.filter((c) => c.id !== "ark" && c.isConfigured());
+    await Promise.all(
+      local.map(async (c) => {
+        try {
+          const rows = await Promise.race([
+            c.fetchTokens(range),
+            new Promise<never>((_, reject) =>
+              window.setTimeout(() => reject(new Error(`${c.id} 刷新超时`)), 15_000),
+            ),
+          ]);
+          this.storage.replaceTokensForPlatform(c.platformId(), range.start, range.end, rows);
+        } catch {
+          // 单个连接器刷新失败不影响其他平台，也不打断自动刷新。
+        }
+      }),
+    );
   }
 
   // ---- 设置 ----

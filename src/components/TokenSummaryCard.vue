@@ -102,4 +102,23 @@ const deltaUp = computed(() => (props.deltaPct ?? 0) >= 0);
   color: var(--text-subtle);
   font-size: 12px;
 }
+
+/* Glass prototype */
+.stat {
+  gap: 9px;
+  padding: 21px 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+.stat label { color: var(--text-subtle); font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
+.delta-pill { padding: 3px 9px; border-radius: 20px; font-size: 11px; }
+.delta-pill.up { background: rgba(233, 85, 107, 0.14); color: #d8405c; }
+.delta-pill.down { background: rgba(47, 190, 143, 0.14); color: #1e9a76; }
+.stat strong { color: var(--text); font-size: 27px; font-weight: 800; line-height: normal; letter-spacing: -0.02em; }
+.stat-spark { display: none; }
+.stat-hint { color: var(--text-subtle); font-size: 12px; }
 </style>

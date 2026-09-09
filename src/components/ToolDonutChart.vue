@@ -4,6 +4,7 @@ import type { ToolUsage } from "@/types/usage";
 import { formatTokens } from "@/utils/format";
 import { useTheme } from "@/composables/useTheme";
 import { VChart } from "@/echarts";
+import ToolLogo from "@/components/ToolLogo.vue";
 
 const props = defineProps<{ tools: ToolUsage[]; title?: string }>();
 const { resolved } = useTheme();
@@ -51,6 +52,7 @@ const legend = computed(() =>
 const option = computed(() => {
   void resolved.value; // 主题切换重算
   const surface = cssVar("--surface", "#fff");
+  const tooltipBg = cssVar("--tooltip-bg", "#fff");
   const border = cssVar("--border", "#e5e7ec");
   const text = cssVar("--text", "#171b23");
   const data = props.tools
@@ -59,7 +61,7 @@ const option = computed(() => {
   return {
     tooltip: {
       trigger: "item",
-      backgroundColor: surface,
+      backgroundColor: tooltipBg,
       borderColor: border,
       borderWidth: 1,
       textStyle: { color: text, fontSize: 12 },
@@ -99,7 +101,7 @@ const option = computed(() => {
       </div>
       <ul class="donut-legend">
         <li v-for="item in legend" :key="item.platform">
-          <i class="dot" :style="{ background: item.color }" />
+          <ToolLogo :platform="item.platform" :size="18" />
           <span class="lg-name">{{ item.name }}</span>
           <span class="lg-val">{{ formatTokens(item.total) }}</span>
           <span class="lg-pct">{{ item.pct }}%</span>
@@ -187,16 +189,11 @@ const option = computed(() => {
 }
 .donut-legend li {
   display: grid;
-  grid-template-columns: 10px 1fr auto auto;
+  grid-template-columns: 18px 1fr auto auto;
   align-items: center;
   gap: 8px;
   padding: 6px 0;
   font-size: 12.5px;
-}
-.donut-legend .dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
 }
 .lg-name {
   overflow: hidden;
@@ -226,4 +223,25 @@ const option = computed(() => {
     align-self: center;
   }
 }
+
+/* Glass prototype */
+.donut-card {
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+.donut-head { padding: 21px 26px 0; }
+.donut-head h3 { font-family: "Manrope", "PingFang SC", sans-serif; font-size: 16.5px; font-weight: 700; }
+.donut-head p { margin-top: 3px; color: var(--text-subtle); font-size: 12.5px; }
+.donut-body { flex-direction: column; justify-content: center; gap: 8px; margin: 0; padding: 16px 24px 24px; }
+.donut-wrap,
+.donut,
+.donut-empty { width: 132px; height: 132px; flex-basis: 132px; }
+.donut-empty { border: 2px dashed var(--border-strong); color: var(--text-subtle); font-size: 12.5px; }
+.donut-legend { width: 100%; }
+.donut-center strong { font-size: 17px; }
 </style>

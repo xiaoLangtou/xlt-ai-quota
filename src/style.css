@@ -45,6 +45,12 @@
   --brand-claude: #cf7350;
   --brand-open: #17b8a6;
 
+  --heatmap-0: color-mix(in srgb, var(--accent) 5%, var(--surface-3));
+  --heatmap-1: color-mix(in srgb, var(--accent) 24%, var(--surface-2));
+  --heatmap-2: color-mix(in srgb, var(--accent) 46%, var(--surface-2));
+  --heatmap-3: color-mix(in srgb, var(--accent) 72%, var(--surface-2));
+  --heatmap-4: var(--accent);
+
   /* 圆角 */
   --r-sm: 8px;
   --r-md: 12px;
@@ -100,12 +106,22 @@
   --brand-claude: #db8161;
   --brand-open: #2ec9b6;
 
+  --heatmap-0: color-mix(in srgb, var(--accent) 7%, var(--surface-3));
+  --heatmap-1: color-mix(in srgb, var(--accent) 25%, var(--surface-2));
+  --heatmap-2: color-mix(in srgb, var(--accent) 47%, var(--surface-2));
+  --heatmap-3: color-mix(in srgb, var(--accent) 73%, var(--surface-2));
+  --heatmap-4: var(--accent);
+
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.45);
   --shadow-pop: 0 22px 60px rgba(0, 0, 0, 0.6);
 
   --scroll-thumb: #333a48;
   --scroll-thumb-hover: #454d5f;
+}
+
+[data-theme="dark"] .tool-logo.monochrome {
+  filter: invert(1);
 }
 
 /* 向后兼容别名：旧组件仍引用的历史变量名，统一映射到新 token，随主题自适应。 */
@@ -169,6 +185,150 @@ button {
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Glass prototype tokens */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e9edf9;
+  --surface: rgba(255, 255, 255, 0.5);
+  --surface-2: rgba(255, 255, 255, 0.5);
+  --surface-3: rgba(27, 32, 54, 0.06);
+  --sidebar-bg: rgba(255, 255, 255, 0.5);
+  --border: rgba(27, 32, 54, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.6);
+  --text: #1b2036;
+  --text-muted: #4b5169;
+  --text-subtle: #8b90a6;
+  --accent: #5b5fef;
+  --accent-hover: #5257e6;
+  --accent-contrast: #ffffff;
+  --accent-weak: rgba(91, 95, 239, 0.1);
+  --accent-ring: rgba(91, 95, 239, 0.28);
+  --u-ok: #2fbe8f;
+  --u-warn: #f2924a;
+  --u-crit: #e9556b;
+  --brand-ark: #f2924a;
+  --brand-codex: #4c7cf3;
+  --brand-kiro: #7c6bf0;
+  --brand-qoder: #ef5a82;
+  --brand-claude: #ef5a82;
+  --brand-open: #22b8a0;
+  --shadow-sm: 0 2px 8px rgba(27, 32, 54, 0.1);
+  --shadow-card: 0 4px 24px rgba(45, 50, 95, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --shadow-pop: 0 18px 44px rgba(45, 50, 95, 0.16);
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --glass-fill: rgba(255, 255, 255, 0.5);
+  --glass-fill-strong: rgba(255, 255, 255, 0.68);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-shadow: 0 4px 24px rgba(45, 50, 95, 0.07), inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  --glass-inner: rgba(255, 255, 255, 0.5);
+  --glass-control: rgba(255, 255, 255, 0.6);
+  --track: rgba(27, 32, 54, 0.07);
+  --segment-bg: rgba(27, 32, 54, 0.05);
+  --segment-active: #ffffff;
+  --popover: #f8f9ff;
+  --tooltip-bg: #f8f9ff;
+  --icon-hover-bg: #ffffff;
+  --editor-dialog-bg: rgba(238, 242, 253, 0.94);
+  --heatmap-0: #e3e7f2;
+  --heatmap-1: #cdd0fb;
+  --heatmap-2: #a9adf8;
+  --heatmap-3: #7f83f4;
+  --heatmap-4: var(--accent);
+  --orb-opacity: 0.4;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111526;
+  --surface: rgba(28, 33, 53, 0.62);
+  --surface-2: rgba(255, 255, 255, 0.055);
+  --surface-3: rgba(255, 255, 255, 0.08);
+  --sidebar-bg: rgba(25, 30, 49, 0.68);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text: #f0f2ff;
+  --text-muted: #b0b6cc;
+  --text-subtle: #7f879f;
+  --accent: #7c80ff;
+  --accent-hover: #8f92ff;
+  --accent-contrast: #ffffff;
+  --accent-weak: rgba(124, 128, 255, 0.16);
+  --accent-ring: rgba(124, 128, 255, 0.35);
+  --u-ok: #35cfa0;
+  --u-warn: #f4a35f;
+  --u-crit: #f2667b;
+  --brand-ark: #f4a35f;
+  --brand-codex: #6e9aff;
+  --brand-kiro: #988bff;
+  --brand-qoder: #f0759a;
+  --brand-claude: #e58467;
+  --brand-open: #35c9b2;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.24);
+  --shadow-card: 0 8px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --shadow-pop: 0 18px 44px rgba(0, 0, 0, 0.45);
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --glass-fill: rgba(25, 30, 49, 0.62);
+  --glass-fill-strong: rgba(25, 30, 49, 0.76);
+  --glass-border: rgba(255, 255, 255, 0.11);
+  --glass-shadow: 0 8px 28px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --glass-inner: rgba(255, 255, 255, 0.055);
+  --glass-control: rgba(255, 255, 255, 0.075);
+  --track: rgba(255, 255, 255, 0.09);
+  --segment-bg: rgba(255, 255, 255, 0.06);
+  --segment-active: rgba(255, 255, 255, 0.13);
+  --popover: #1b2034;
+  --tooltip-bg: #1b2034;
+  --icon-hover-bg: #252b42;
+  --editor-dialog-bg: rgba(23, 28, 47, 0.95);
+  --heatmap-0: #252b42;
+  --heatmap-1: #343a69;
+  --heatmap-2: #4d5396;
+  --heatmap-3: #666bdd;
+  --heatmap-4: var(--accent);
+  --orb-opacity: 0.22;
+}
+
+html,
+body {
+  height: 100%;
+  min-width: 320px;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: "Manrope", "PingFang SC", sans-serif;
+}
+
+#app {
+  position: relative;
+  background: var(--bg);
+}
+
+.cn-button-default {
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #6e7bf2, #5257e6);
+  box-shadow: 0 6px 16px rgba(82, 87, 230, 0.3);
+}
+
+.cn-dialog-content,
+.cn-select-content,
+.cn-date-picker-content,
+.cn-month-picker-content,
+.cn-menu-content {
+  border-color: var(--glass-border);
+  background: var(--popover);
+  backdrop-filter: blur(24px) saturate(180%);
 }
 
 @media (max-width: 760px) {
@@ -582,4 +742,50 @@ button {
 }
 .cn-menu-item.danger[data-highlighted] {
   background: color-mix(in srgb, var(--u-crit) 12%, transparent);
+}
+
+/* Final glass overrides for reusable controls (declared after component base CSS). */
+.cn-button-default {
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #6e7bf2, #5257e6);
+  box-shadow: 0 6px 16px rgba(82, 87, 230, 0.3);
+  color: #fff;
+}
+.cn-button-outline {
+  border-color: var(--glass-border);
+  background: var(--glass-control);
+}
+.cn-button-ghost:hover { background: var(--icon-hover-bg); }
+.cn-input,
+.cn-select-trigger {
+  border-color: var(--glass-border);
+  background: var(--glass-control);
+}
+.cn-dialog-content,
+.cn-select-content,
+.cn-date-picker-content,
+.cn-month-picker-content,
+.cn-menu-content {
+  border-color: var(--glass-border);
+  background: var(--popover);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+
+.subscription-editor-dialog {
+  border-color: var(--glass-border);
+  border-radius: 22px;
+  background: var(--editor-dialog-bg);
+  box-shadow: 0 24px 72px rgba(31, 36, 70, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+}
+
+@media (max-width: 760px) {
+  #app {
+    height: 100vh;
+    min-height: 0;
+    overflow: hidden;
+  }
 }

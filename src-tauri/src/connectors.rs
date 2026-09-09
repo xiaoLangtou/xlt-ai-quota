@@ -20,8 +20,6 @@ pub struct ConnectorRequest {
     path: String,
     #[serde(default)]
     query: BTreeMap<String, String>,
-    #[serde(default)]
-    headers: BTreeMap<String, String>,
 }
 
 #[tauri::command]
@@ -37,12 +35,12 @@ fn connector_get_blocking(request: ConnectorRequest) -> Result<Value, String> {
         ("/api/ark", "/plan") => ark_plan(),
         ("/api/ark", "/stats") => ark_stats(&request.query),
         ("/api/kiro", "/usage") => kiro_usage(),
+        ("/api/qoder", "/usage") => qoder_usage(),
         ("/api/opencode", "/stats") => opencode_stats(),
         ("/api/codex", "/status") => codex_status(),
         ("/api/codex", "/usage") => codex_usage(),
         ("/api/codex", "/stats") => codex_stats(&request.query),
         ("/api/claude", "/stats") => claude_stats(&request.query),
-        ("/proxy-openai", "/v1/organization/usage/completions") => openai_usage(&request),
         _ => Err("桌面端不支持该连接器请求".to_owned()),
     }
 }
@@ -123,6 +121,66 @@ fn kiro_usage() -> Result<Value, String> {
         &["chat", "/usage", "--no-interactive"],
     )?;
     parse_kiro_usage(&format!("{stdout}\n{stderr}"))
+}
+
+/// Qoder CLI 的用量查询只通过官方 Agent SDK 暴露。桌面开发模式从项目内的
+/// SDK 脚本启动独立进程，复用已登录的 qodercli 凭证，避免前端绕过 Tauri 访问本机状态。
+fn qoder_usage() -> Result<Value, String> {
+    let root = qoder_sdk_project_root()?;
+    let script = root.join("scripts").join("qoder-usage.mjs");
+    if !script.is_file() {
+        return Err("未找到 Qoder 用量查询脚本".to_owned());
+    }
+    let node = executable("node", "NODE_BIN");
+    let args = vec![script.to_string_lossy().into_owned()];
+    let (stdout, stderr) = run_program_in_dir(&node, &args, 35, &root)?;
+    serde_json::from_str(&stdout).map_err(|_| {
+        if stderr.trim().is_empty() {
+            "Qoder 用量查询没有返回 JSON".to_owned()
+        } else {
+            format!("Qoder 用量查询失败: {}", snippet(&stderr))
+        }
+    })
+}
+
+fn qoder_sdk_project_root() -> Result<PathBuf, String> {
+    let build_project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf);
+    let executable_dir = env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(Path::to_path_buf));
+    for candidate in [
+        env::var_os("QODER_SDK_PROJECT_ROOT").map(PathBuf::from),
+        build_project_root,
+        env::current_dir().ok(),
+        executable_dir,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(root) = find_qoder_sdk_project_root(candidate) {
+            return Ok(root);
+        }
+    }
+    Err("未找到 Qoder Agent SDK；请重新安装项目依赖".to_owned())
+}
+
+fn find_qoder_sdk_project_root(mut current: PathBuf) -> Option<PathBuf> {
+    loop {
+        if current
+            .join("node_modules")
+            .join("@qoder-ai")
+            .join("qoder-agent-sdk")
+            .join("package.json")
+            .is_file()
+        {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
 }
 
 fn opencode_stats() -> Result<Value, String> {
@@ -314,22 +372,6 @@ fn codex_usage() -> Result<Value, String> {
     }))
 }
 
-fn openai_usage(request: &ConnectorRequest) -> Result<Value, String> {
-    let mut args = vec!["-sS".to_owned(), "--max-time".to_owned(), "30".to_owned()];
-    for (name, value) in &request.headers {
-        let normalized = name.to_ascii_lowercase();
-        if normalized == "authorization" || normalized == "openai-organization" {
-            args.push("-H".to_owned());
-            args.push(format!("{name}: {value}"));
-        }
-    }
-    let query = encode_query(&request.query);
-    add_https_proxy(&mut args);
-    args.push(format!("https://api.openai.com{}{}", request.path, query));
-    let (stdout, stderr) = run_program("curl", &args, 35)?;
-    serde_json::from_str(&stdout).map_err(|_| format!("OpenAI 响应不是 JSON: {}", snippet(&stderr)))
-}
-
 fn parse_kiro_usage(output: &str) -> Result<Value, String> {
     let ansi = Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]").map_err(|error| error.to_string())?;
     let text = ansi.replace_all(output, "");
@@ -424,6 +466,50 @@ fn run_program(
 ) -> Result<(String, String), String> {
     let mut child = Command::new(program)
         .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("无法运行 {program}: {error}"))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_seconds);
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait_with_output();
+                return Err(format!("{program} 超过 {timeout_seconds} 秒未返回，已终止"));
+            }
+            Err(error) => return Err(format!("无法等待 {program}: {error}")),
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("无法读取 {program} 输出: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if stdout.trim().is_empty() && stderr.trim().is_empty() {
+        return Err(format!(
+            "{program} 以退出码 {} 结束且未返回数据",
+            output.status
+        ));
+    }
+    Ok((stdout, stderr))
+}
+
+fn run_program_in_dir(
+    program: &str,
+    args: &[String],
+    timeout_seconds: u64,
+    cwd: &Path,
+) -> Result<(String, String), String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -663,30 +749,6 @@ fn capitalize(value: &str) -> String {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
     }
-}
-
-fn encode_query(query: &BTreeMap<String, String>) -> String {
-    if query.is_empty() {
-        return String::new();
-    }
-    let pairs = query
-        .iter()
-        .map(|(key, value)| format!("{}={}", percent_encode(key), percent_encode(value)))
-        .collect::<Vec<_>>();
-    format!("?{}", pairs.join("&"))
-}
-
-fn percent_encode(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-                (byte as char).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
 }
 
 fn snippet(value: &str) -> String {

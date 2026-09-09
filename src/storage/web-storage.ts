@@ -1,4 +1,11 @@
-import type { QuotaSnapshot, SyncInfo, TokenDailyUsage } from "@/types/usage";
+import type {
+  AiSubscription,
+  BillEntry,
+  QuotaSnapshot,
+  SubscriptionPreferences,
+  SyncInfo,
+  TokenDailyUsage,
+} from "@/types/usage";
 import type { ConnectorConfigPersist, UsageStorage } from "./storage";
 
 const KEYS = {
@@ -6,6 +13,9 @@ const KEYS = {
   tokens: "xlt.tokens",
   sync: "xlt.sync",
   config: "xlt.config",
+  subscriptions: "xlt.subscriptions",
+  bills: "xlt.bills",
+  subscriptionPreferences: "xlt.subscription-preferences",
   version: "xlt.v",
 } as const;
 
@@ -85,6 +95,25 @@ export const webStorage: UsageStorage = {
     write(KEYS.sync, info);
   },
 
+  listSubscriptions() {
+    return read<AiSubscription[]>(KEYS.subscriptions, []);
+  },
+  saveSubscriptions(subscriptions) {
+    write(KEYS.subscriptions, subscriptions);
+  },
+  listBills() {
+    return read<BillEntry[]>(KEYS.bills, []);
+  },
+  saveBills(bills) {
+    write(KEYS.bills, bills);
+  },
+  getSubscriptionPreferences() {
+    return read<SubscriptionPreferences>(KEYS.subscriptionPreferences, { usdToCnyRate: 7.2 });
+  },
+  saveSubscriptionPreferences(preferences) {
+    write(KEYS.subscriptionPreferences, preferences);
+  },
+
   getConnectorConfig() {
     return read<ConnectorConfigPersist>(KEYS.config, {});
   },
@@ -106,6 +135,33 @@ export const webStorage: UsageStorage = {
 function tokenKey(r: TokenDailyUsage): string {
   return `${r.platform}|${r.date}|${r.model ?? ""}`;
 }
+
+/**
+ * 一次性迁移：旧版「订阅自动生成」的账单 source=auto_renew 静默改为 usage_settlement
+ * （语义最接近：系统曾推断的一笔结算），并清理已废弃的去重键 xlt.bill-auto-keys。
+ * 历史账单是已发生的事实，保留不删除。
+ */
+function migrateLegacyBills(): void {
+  try {
+    const raw = localStorage.getItem(KEYS.bills);
+    if (raw) {
+      const bills = JSON.parse(raw) as BillEntry[];
+      let changed = false;
+      const migrated = bills.map((b) => {
+        if ((b.source as string) === "auto_renew") {
+          changed = true;
+          return { ...b, source: "usage_settlement" as const };
+        }
+        return b;
+      });
+      if (changed) localStorage.setItem(KEYS.bills, JSON.stringify(migrated));
+    }
+    localStorage.removeItem("xlt.bill-auto-keys");
+  } catch {
+    /* 忽略迁移失败 */
+  }
+}
+migrateLegacyBills();
 
 /** 工厂：当前环境仅提供 web 实现 */
 export function createStorage(): UsageStorage {

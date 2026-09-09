@@ -12,12 +12,14 @@ import {
   type TokenSummary,
   type TrendPoint,
   type PlatformDailyPoint,
+  type ToolUsage,
+  type HeatmapDay,
   type QuotaWindowView,
 } from "@/types/usage";
 import { ArkConnector } from "@/connectors/ark";
-import { OpenAIApiConnector } from "@/connectors/openai-api";
 import { CodexConnector } from "@/connectors/codex";
 import { KiroConnector } from "@/connectors/kiro";
+import { QoderConnector } from "@/connectors/qoder";
 import { OpenCodeConnector } from "@/connectors/opencode";
 import { ClaudeConnector } from "@/connectors/claude";
 import {
@@ -39,6 +41,7 @@ const WINDOW_SPEC: Record<
   ark: [], // 动态：按快照实际周期渲染（coding-plan 为 session/weekly/monthly，agent-plan 为 5h/weekly/monthly）
   codex: [], // 动态：five_hour + weekly（来自 /wham/usage）
   kiro: [{ metric: "credits", label: "本周期已消耗", tone: "purple" }],
+  qoder: [{ metric: "credits", label: "套餐已消耗", tone: "purple" }],
   "opencode-go": [
     { metric: "five_hour", label: "5 小时额度", tone: "green" },
     { metric: "weekly", label: "周额度", tone: "green" },
@@ -55,7 +58,8 @@ const METRIC_META: Record<
   weekly: { label: "周额度", tone: "blue", order: 2 },
   monthly: { label: "月额度", tone: "blue", order: 3 },
   credits: { label: "本周期已消耗", tone: "purple", order: 4 },
-  account: { label: "账户", tone: "blue", order: 5 },
+  addon_credits: { label: "加购已消耗", tone: "purple", order: 5 },
+  account: { label: "账户", tone: "blue", order: 6 },
 };
 
 /** 火山方舟套餐页使用的周期名称，与控制台保持一致。 */
@@ -80,14 +84,15 @@ export class UsageService {
   constructor(storage: UsageStorage = createStorage()) {
     this.storage = storage;
     const ark = new ArkConnector();
-    const openai = new OpenAIApiConnector();
     const codex = new CodexConnector();
     const kiro = new KiroConnector();
+    const qoder = new QoderConnector();
     const opencode = new OpenCodeConnector();
     const claude = new ClaudeConnector();
     // Kiro 仅 Credits；Codex、OpenCode 与 Claude Code 的 Token 来自本机会话记录。
-    this.quotaConnectors = [ark, codex, kiro];
-    this.tokenConnectors = [ark, openai, codex, opencode, claude];
+    this.quotaConnectors = [ark, codex, kiro, qoder];
+    // Kiro CLI 本地会话经 estimateTokens 估算；Qoder 读本地 SQLite 的真实 token。
+    this.tokenConnectors = [ark, codex, opencode, claude, kiro, qoder];
   }
 
   /** 数据版本变更时清空旧数据（含历史种子）；不再注入任何默认值 */
@@ -99,7 +104,7 @@ export class UsageService {
 
   getPlatformQuotaViews(): PlatformQuotaView[] {
     const all = this.storage.listQuotas();
-    const order: Platform[] = ["codex", "ark", "kiro"];
+    const order: Platform[] = ["codex", "ark", "kiro", "qoder"];
     return order.map((platform) => this.buildPlatformView(platform, all));
   }
 
@@ -130,14 +135,22 @@ export class UsageService {
       if (snap?.accountName) view.planTag = snap.accountName;
     }
 
-    if (platform === "kiro") {
+    if (platform === "kiro" || platform === "qoder") {
       const c = latest.find((q) => q.metric === "credits");
       if (c) {
-        view.planTag = c.accountName || PLAN_TAG.kiro;
+        view.planTag = c.accountName || PLAN_TAG[platform];
+        const addon = latest.find((q) => q.metric === "addon_credits");
         view.credits = {
           remaining: Math.max(0, c.limit - c.used),
           total: c.limit,
-          refreshIn: formatRelative(c.resetsAt, "刷新"),
+          refreshIn: platform === "kiro" ? formatRelative(c.resetsAt, "刷新") : undefined,
+          expiresIn: platform === "qoder" ? formatRelative(c.resetsAt, "到期") : undefined,
+          addOn: addon
+            ? {
+                remaining: Math.max(0, addon.limit - addon.used),
+                total: addon.limit,
+              }
+            : undefined,
         };
       }
     }
@@ -147,7 +160,7 @@ export class UsageService {
       platform === "ark" || platform === "codex"
         ? latest
             .map((s) => s.metric)
-            .filter((m) => m !== "account" && m !== "credits")
+            .filter((m) => m !== "account" && m !== "credits" && m !== "addon_credits")
             .sort((a, b) => METRIC_META[a].order - METRIC_META[b].order)
             .slice(0, platform === "ark" ? 3 : 2)
             .map((metric) => ({
@@ -202,9 +215,9 @@ export class UsageService {
   getRange(preset: RangePreset): Range {
     const end = new Date();
     end.setHours(0, 0, 0, 0);
-    const days = preset === "today" ? 0 : preset === "7d" ? 6 : 29;
+    const offset = preset === "today" ? 0 : preset === "7d" ? 6 : preset === "30d" ? 29 : 89;
     const start = new Date(end);
-    start.setDate(start.getDate() - days);
+    start.setDate(start.getDate() - offset);
     return { start: ymd(start), end: ymd(end) };
   }
 
@@ -215,15 +228,27 @@ export class UsageService {
     const input = sum(rows, (r) => r.inputTokens);
     const output = sum(rows, (r) => r.outputTokens);
     const cached = sum(rows, (r) => r.cachedTokens ?? 0);
+    const requests = sum(rows, (r) => r.requestCount ?? 0);
 
-    // 上一周期对比
+    // 上一周期对比（各指标独立）
     const prev = this.prevRange(range, preset);
     const prevRows = this.storage.listTokensByRange(prev.start, prev.end);
     const prevTotal = sum(prevRows, (r) => r.inputTokens + r.outputTokens);
-    const deltaPct =
-      prevTotal > 0 ? Math.round(((total - prevTotal) / prevTotal) * 1000) / 10 : undefined;
+    const prevInput = sum(prevRows, (r) => r.inputTokens);
+    const prevOutput = sum(prevRows, (r) => r.outputTokens);
+    const prevReq = sum(prevRows, (r) => r.requestCount ?? 0);
 
-    return { total, input, output, cached: cached || undefined, deltaPct };
+    return {
+      total,
+      input,
+      output,
+      cached: cached || undefined,
+      requests,
+      deltaPct: deltaPct(total, prevTotal),
+      inputDeltaPct: deltaPct(input, prevInput),
+      outputDeltaPct: deltaPct(output, prevOutput),
+      requestsDeltaPct: deltaPct(requests, prevReq),
+    };
   }
 
   getTokenTrend(preset: RangePreset): TrendPoint[] {
@@ -233,10 +258,11 @@ export class UsageService {
     for (const r of rows) {
       const cur =
         byDate.get(r.date) ??
-        ({ date: r.date, total: 0, input: 0, output: 0 } satisfies TrendPoint);
+        ({ date: r.date, total: 0, input: 0, output: 0, requests: 0 } satisfies TrendPoint);
       cur.input += r.inputTokens;
       cur.output += r.outputTokens;
       cur.total += r.inputTokens + r.outputTokens;
+      cur.requests += r.requestCount ?? 0;
       byDate.set(r.date, cur);
     }
     return fillMissingDays(range, byDate);
@@ -257,13 +283,60 @@ export class UsageService {
     return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
   }
 
+  /** 按 AI 工具（平台）聚合所选周期的用量，用于「按工具统计」。 */
+  getToolBreakdown(preset: RangePreset): ToolUsage[] {
+    const range = this.getRange(preset);
+    const rows = this.storage.listTokensByRange(range.start, range.end);
+    const byTool = new Map<string, ToolUsage>();
+    let grand = 0;
+    for (const r of rows) {
+      const cur =
+        byTool.get(r.platform) ??
+        ({ platform: r.platform, total: 0, input: 0, output: 0, requests: 0, pct: 0 } satisfies ToolUsage);
+      cur.input += r.inputTokens;
+      cur.output += r.outputTokens;
+      cur.total += r.inputTokens + r.outputTokens;
+      cur.requests += r.requestCount ?? 0;
+      byTool.set(r.platform, cur);
+      grand += r.inputTokens + r.outputTokens;
+    }
+    return [...byTool.values()]
+      .map((t) => ({ ...t, pct: grand > 0 ? Math.round((t.total / grand) * 1000) / 10 : 0 }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  /**
+   * 贡献热力图数据：从对齐到周日的起点到今天，逐日 Token 总量（缺失补 0）。
+   * @param weeks 展示的周数（列数），默认约 40 周（~9 个月）。
+   */
+  getDailyHeatmap(weeks = 40): HeatmapDay[] {
+    const end = new Date();
+    end.setHours(0, 0, 0, 0);
+    const start = new Date(end);
+    // 回退到 (weeks-1) 周前那一周的周日，保证首列从周日开始。
+    start.setDate(end.getDate() - end.getDay() - (weeks - 1) * 7);
+    const rows = this.storage.listTokensByRange(ymd(start), ymd(end));
+    const byDate = new Map<string, number>();
+    for (const r of rows) {
+      byDate.set(r.date, (byDate.get(r.date) ?? 0) + r.inputTokens + r.outputTokens);
+    }
+    const out: HeatmapDay[] = [];
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      const key = ymd(cursor);
+      out.push({ date: key, total: byDate.get(key) ?? 0 });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return out;
+  }
+
   private prevRange(range: Range, preset: RangePreset): Range {
     if (preset === "today") {
       const start = new Date(range.start);
       start.setDate(start.getDate() - 1);
       return { start: ymd(start), end: ymd(start) };
     }
-    const days = preset === "7d" ? 7 : 30;
+    const days = preset === "7d" ? 7 : preset === "30d" ? 30 : 90;
     const end = new Date(range.start);
     end.setDate(end.getDate() - 1);
     const start = new Date(end);
@@ -426,19 +499,8 @@ export class UsageService {
   getArkConfigView(): { baseUrl: string } {
     return settings.getArkConfig();
   }
-  getOpenAIConfigView(): { adminKey: string; orgId: string; baseUrl: string } {
-    return settings.getOpenAIConfig();
-  }
-
   saveArkBaseUrl(baseUrl: string): void {
     settings.saveArkBaseUrl(baseUrl);
-  }
-  saveOpenAIConfig(patch: {
-    adminKey?: string;
-    orgId?: string;
-    baseUrl?: string;
-  }): void {
-    settings.saveOpenAIConfig(patch);
   }
 }
 
@@ -446,6 +508,7 @@ const PLAN_TAG: Record<Platform, string> = {
   codex: "Plus",
   ark: "企业版",
   kiro: "Pro",
+  qoder: "Pro",
   "opencode-go": "个人版",
 };
 
@@ -462,6 +525,12 @@ function sum<T>(arr: T[], pick: (x: T) => number): number {
   return arr.reduce((a, x) => a + pick(x), 0);
 }
 
+/** 与上一周期对比的百分比（保留一位小数）；上一周期为 0 时返回 undefined。 */
+function deltaPct(current: number, previous: number): number | undefined {
+  if (previous <= 0) return undefined;
+  return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
 function ymd(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -474,7 +543,7 @@ function fillMissingDays(range: Range, byDate: Map<string, TrendPoint>): TrendPo
   while (cursor <= end) {
     const key = ymd(cursor);
     out.push(
-      byDate.get(key) ?? { date: key, total: 0, input: 0, output: 0 },
+      byDate.get(key) ?? { date: key, total: 0, input: 0, output: 0, requests: 0 },
     );
     cursor.setDate(cursor.getDate() + 1);
   }

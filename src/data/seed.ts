@@ -61,6 +61,9 @@ export function buildSeedQuotas(collectedAt: string): QuotaSnapshot[] {
     q("ark", "ARK 企业版", "weekly", 83, 100, "percent", isoOffset(2, 0, 0)),
     // Kiro Pro（Credits）
     q("kiro", "Kiro Pro", "credits", 760, 2000, "credits", isoOffset(9, 0, 0)),
+    // Qoder Pro（Credits）
+    q("qoder", "Qoder Pro", "credits", 480, 1600, "credits", isoOffset(12, 0, 0)),
+    q("qoder", "Qoder Pro", "addon_credits", 147, 2000, "credits", isoOffset(12, 0, 0)),
     // OpenCode Go 个人版
     q("opencode-go", "OpenCode Go 个人版", "five_hour", 21, 100, "percent", isoOffset(0, 4, 7)),
     q("opencode-go", "OpenCode Go 个人版", "weekly", 64, 100, "percent", isoOffset(5, 0, 0)),

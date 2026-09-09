@@ -9,27 +9,40 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "test:unit": "pnpm exec tsx scripts/smoke-data.mts && pnpm exec tsx scripts/smoke-ark-mapping.mts && pnpm exec tsx scripts/smoke-settings.mts",
+    "test:unit": "pnpm exec tsx scripts/smoke-data.mts && pnpm exec tsx scripts/smoke-ark-mapping.mts && pnpm exec tsx scripts/smoke-subscriptions.mts && pnpm exec tsx scripts/smoke-token-estimate.mts",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test": "pnpm typecheck && pnpm test:unit && pnpm test:e2e",
     "tauri": "tauri"
   },
   "dependencies": {
+    "@internationalized/date": "^3.12.4",
     "@tauri-apps/api": "2.11.1",
+    "@vueuse/core": "^14.4.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "echarts": "^5.5.1",
+    "js-tiktoken": "^1.0.21",
+    "lucide-vue-next": "^1.0.0",
+    "reka-ui": "^2.10.4",
+    "tailwind-merge": "^3.6.0",
     "vue": "^3.5.13",
     "vue-echarts": "^7.0.3"
   },
   "devDependencies": {
+    "@qoder-ai/qoder-agent-sdk": "^1.0.34",
+    "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "2.11.4",
     "@vitejs/plugin-vue": "^5.2.1",
+    "tailwindcss": "^4.3.3",
     "tsx": "^4.23.12",
     "typescript": "^5.7.2",
     "vite": "^6.0.0",
-    "vue-tsc": "^2.2.0"
+    "vue-tsc": "^2.2.0",
+    "zod": "^4.5.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@qoder-ai/qoder-agent-sdk",
       "esbuild",
       "vue-demi"
     ]

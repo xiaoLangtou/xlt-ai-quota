@@ -1,9 +1,19 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
+import { qodercliAuth, query } from "@qoder-ai/qoder-agent-sdk";
+import { estimateTokens } from "./src/utils/token-estimate";
 import type { Plugin } from "vite";
 import type { ServerResponse } from "node:http";
 
@@ -178,6 +188,229 @@ function collectClaudeTokenStats(start: string, end: string): LocalTokenStats[] 
   return statsRows(stats);
 }
 
+// ---- Kiro CLI 本地会话 Token 估算（~/.kiro/sessions/cli/*.jsonl）----
+// Kiro CLI 不在会话里记录真实 token 数，参考 juejin-usage 的做法：
+// 逐轮累计 Prompt/ToolResults 为输入、AssistantMessage 为输出，文本量用
+// estimateTokens（中文友好）估算，再按本地日期聚合。
+
+const KIRO_NON_TEXT_KEYS = new Set([
+  "signature",
+  "redactedContent",
+  "toolUseId",
+  "modelId",
+  "message_id",
+  "format",
+  "id",
+]);
+
+/** 递归累计文本 token（跳过非文本字段）；图片单独计固定量。 */
+function estTokensText(value: unknown, model: string): number {
+  if (typeof value === "string") return estimateTokens(value, model);
+  if (Array.isArray(value)) {
+    let n = 0;
+    for (const v of value) n += estTokensText(v, model);
+    return n;
+  }
+  if (isRecord(value)) {
+    let n = 0;
+    for (const [k, v] of Object.entries(value)) {
+      if (KIRO_NON_TEXT_KEYS.has(k)) continue;
+      n += estTokensText(v, model);
+    }
+    return n;
+  }
+  return 0;
+}
+
+/** 规范化 Kiro 模型名，仅用于为 estimateTokens 选择编码。 */
+function canonicalizeKiroModel(raw: unknown): string {
+  if (typeof raw !== "string") return "kiro-cli-agent";
+  let name = raw.trim().toLowerCase();
+  if (!name || name === "auto") return "kiro-cli-agent";
+  name = name.replace(
+    /^(?:arn:aws:bedrock:[^:]*:[^:]*:(?:foundation-model\/)?|anthropic\.|openai\.|aws\.)/,
+    "",
+  );
+  name = name
+    .replace(/:\d+$/, "")
+    .replace(/-\d{8}-v\d+$/i, "")
+    .replace(/-v\d+$/i, "")
+    .replace(/-\d{8}$/, "")
+    .replace(/\.v\d+$/i, "");
+  return name || "kiro-cli-agent";
+}
+
+function loadKiroSessionModel(dir: string, sessionId: string): string {
+  try {
+    const d = JSON.parse(readFileSync(join(dir, `${sessionId}.json`), "utf8")) as {
+      session_state?: { rts_model_state?: { model_info?: { model_id?: string } } };
+    };
+    return canonicalizeKiroModel(d.session_state?.rts_model_state?.model_info?.model_id ?? null);
+  } catch {
+    return "kiro-cli-agent";
+  }
+}
+
+function collectKiroTokenStats(start: string, end: string): LocalTokenStats[] {
+  const dir = join(homedir(), ".kiro", "sessions", "cli");
+  const stats = new Map<string, LocalTokenStats>();
+  if (!existsSync(dir)) return [];
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+  } catch {
+    return [];
+  }
+
+  for (const name of names) {
+    const filePath = join(dir, name);
+    const sessionId = name.slice(0, -".jsonl".length);
+    const model = loadKiroSessionModel(dir, sessionId);
+    let fallbackDate: string | undefined;
+    try {
+      fallbackDate = localDate(statSync(filePath).mtimeMs);
+    } catch {
+      fallbackDate = undefined;
+    }
+
+    const events: JsonRecord[] = [];
+    readJsonLines(filePath, (rec) => events.push(rec));
+
+    let curTs: number | null = null;
+    let pendingInput = 0;
+    for (const ev of events) {
+      const data = isRecord(ev.data) ? ev.data : undefined;
+      if (!data) continue;
+      const content = Array.isArray(data.content) ? data.content : [];
+
+      if (ev.kind === "Prompt") {
+        const meta = isRecord(data.meta) ? data.meta : undefined;
+        const ts = meta && typeof meta.timestamp === "number" ? meta.timestamp : undefined;
+        if (ts && ts > 0) curTs = ts * 1000;
+        for (const item of content) {
+          const row = isRecord(item) ? item : undefined;
+          pendingInput += row?.kind === "image" ? 1600 : estTokensText(row?.data, model);
+        }
+      } else if (ev.kind === "ToolResults") {
+        for (const item of content) {
+          pendingInput += estTokensText(isRecord(item) ? item.data : undefined, model);
+        }
+      } else if (ev.kind === "AssistantMessage") {
+        let output = 0;
+        for (const item of content) {
+          const row = isRecord(item) ? item : undefined;
+          const cd = row?.data;
+          if (row?.kind === "thinking" && isRecord(cd)) output += estTokensText(cd.text, model);
+          else output += estTokensText(cd, model);
+        }
+        if (pendingInput > 0 || output > 0) {
+          const date = (curTs != null ? localDate(curTs) : undefined) ?? fallbackDate;
+          if (date && date >= start && date <= end) addStats(stats, date, pendingInput, output, 0);
+        }
+        pendingInput = 0;
+      } else if (ev.kind === "Compaction") {
+        pendingInput = 0;
+      }
+    }
+  }
+  return statsRows(stats);
+}
+
+// ---- Qoder IDE 本地 SQLite Token（chat_message.token_info，真实计数）----
+// Qoder 桌面端把每条 assistant 消息的真实 token 存在 SharedClientCache 的 local.db，
+// token_info = {prompt_tokens, completion_tokens, cached_tokens}，gmt_create 为毫秒。
+
+function appSupportBase(): string {
+  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support");
+  if (process.platform === "win32") {
+    return process.env.APPDATA?.trim() || join(homedir(), "AppData", "Roaming");
+  }
+  return process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), ".config");
+}
+
+function qoderDbPaths(): string[] {
+  return ["Qoder", "QoderCN"].map((name) =>
+    join(appSupportBase(), name, "SharedClientCache", "cache", "db", "local.db"),
+  );
+}
+
+function isLockError(e: unknown): boolean {
+  const msg = String(
+    (e as { stderr?: unknown })?.stderr ?? (e as { message?: unknown })?.message ?? e,
+  );
+  return /database is locked|SQLITE_BUSY|resource busy|being used by another process|unable to open database file|readonly/i.test(
+    msg,
+  );
+}
+
+/** 查询 SQLite（sqlite3 -json）；库被占用锁定时，快照复制后再查。 */
+async function querySqliteJson(dbPath: string, sql: string): Promise<JsonRecord[]> {
+  const parse = (out: string): JsonRecord[] => {
+    const trimmed = out.trim();
+    if (!trimmed || trimmed === "[]") return [];
+    return JSON.parse(trimmed) as JsonRecord[];
+  };
+  try {
+    const { stdout } = await run("sqlite3", ["-json", dbPath, sql], 45_000);
+    return parse(stdout);
+  } catch (e) {
+    if (!isLockError(e)) throw e;
+    const dir = mkdtempSync(join(tmpdir(), "xlt-qoder-"));
+    const snap = join(dir, "local.db");
+    try {
+      copyFileSync(dbPath, snap);
+      for (const suffix of ["-wal", "-shm"]) {
+        const companion = `${dbPath}${suffix}`;
+        if (existsSync(companion)) copyFileSync(companion, `${snap}${suffix}`);
+      }
+      const { stdout } = await run("sqlite3", ["-json", snap, sql], 45_000);
+      return parse(stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+async function collectQoderTokenStats(start: string, end: string): Promise<LocalTokenStats[]> {
+  const stats = new Map<string, LocalTokenStats>();
+  const sql =
+    "SELECT token_info, gmt_create FROM chat_message " +
+    "WHERE role='assistant' AND token_info IS NOT NULL AND length(token_info) > 2";
+
+  for (const dbPath of qoderDbPaths()) {
+    if (!existsSync(dbPath)) continue;
+    let rows: JsonRecord[];
+    try {
+      rows = await querySqliteJson(dbPath, sql);
+    } catch {
+      continue;
+    }
+    for (const row of rows) {
+      const raw = typeof row.token_info === "string" ? row.token_info : null;
+      if (!raw) continue;
+      let info: JsonRecord;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!isRecord(parsed)) continue;
+        info = parsed;
+      } catch {
+        continue;
+      }
+      const prompt = Math.max(0, numeric(info.prompt_tokens));
+      const completion = Math.max(0, numeric(info.completion_tokens));
+      const cached = Math.max(0, numeric(info.cached_tokens));
+      const input = Math.max(0, prompt - cached); // 未命中缓存的输入
+      const gmt = numeric(row.gmt_create);
+      if (gmt <= 0) continue;
+      const ms = gmt < 1e12 ? gmt * 1000 : gmt; // 容忍秒级
+      const date = localDate(ms);
+      if (!date || date < start || date > end) continue;
+      addStats(stats, date, input, completion, cached);
+    }
+  }
+  return statsRows(stats);
+}
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -307,6 +540,20 @@ export function localConnectorsDevPlugin(): Plugin {
           }
         }
 
+        // ---- Kiro CLI 本地会话 Token（~/.kiro/sessions/cli，estimateTokens 估算）----
+        if (p === "/api/kiro/stats") {
+          const start = url.searchParams.get("start") ?? todayStr();
+          const end = url.searchParams.get("end") ?? todayStr();
+          if (!DATE_RE.test(start) || !DATE_RE.test(end) || start > end) {
+            return sendJson(res, 400, { error: "start/end must be ordered YYYY-MM-DD dates" });
+          }
+          try {
+            return sendJson(res, 200, collectKiroTokenStats(start, end));
+          } catch (e) {
+            return sendJson(res, 502, { error: "Kiro 本地 Token 聚合失败: " + summarizeErr(e) });
+          }
+        }
+
         // ---- kiro-cli /usage（Credits）----
         if (p === "/api/kiro/usage") {
           try {
@@ -321,6 +568,32 @@ export function localConnectorsDevPlugin(): Plugin {
             return sendJson(res, 502, {
               error: "kiro-cli /usage 失败: " + summarizeErr(e),
               hint: "若提示未登录，请在终端运行 `kiro-cli login`",
+            });
+          }
+        }
+
+        // ---- Qoder 本地会话 Token（IDE 本地 SQLite 的 token_info，真实计数）----
+        if (p === "/api/qoder/stats") {
+          const start = url.searchParams.get("start") ?? todayStr();
+          const end = url.searchParams.get("end") ?? todayStr();
+          if (!DATE_RE.test(start) || !DATE_RE.test(end) || start > end) {
+            return sendJson(res, 400, { error: "start/end must be ordered YYYY-MM-DD dates" });
+          }
+          try {
+            return sendJson(res, 200, await collectQoderTokenStats(start, end));
+          } catch (e) {
+            return sendJson(res, 502, { error: "Qoder 本地 Token 聚合失败: " + summarizeErr(e) });
+          }
+        }
+
+        // ---- Qoder Agent SDK（套餐 Credits）----
+        if (p === "/api/qoder/usage") {
+          try {
+            return sendJson(res, 200, await fetchQoderUsage());
+          } catch (e) {
+            return sendJson(res, 502, {
+              error: "Qoder Credits 查询失败: " + summarizeErr(e),
+              hint: "请先在终端运行 qodercli login 完成登录",
             });
           }
         }
@@ -384,6 +657,63 @@ export function localConnectorsDevPlugin(): Plugin {
       });
     },
   };
+}
+
+async function fetchQoderUsage(): Promise<{
+  used: number;
+  total: number;
+  remaining: number;
+  planTag?: string;
+  expiresAt?: string;
+  addOnUsed?: number;
+  addOnTotal?: number;
+}> {
+  let releaseInput: (() => void) | undefined;
+  async function* idlePrompt(): AsyncGenerator<never> {
+    await new Promise<void>((resolve) => {
+      releaseInput = resolve;
+    });
+  }
+
+  const q = query({
+    prompt: idlePrompt(),
+    options: {
+      auth: qodercliAuth(),
+      cwd: process.cwd(),
+    },
+  });
+  try {
+    await q.initializationResult();
+    const usage = await q.getUsageInfo();
+    const quota = usage?.userQuota;
+    if (!quota || !Number.isFinite(quota.used) || !Number.isFinite(quota.total)) {
+      throw new Error("Qoder 未返回套餐 Credits，请确认已登录且 CLI 为最新版本");
+    }
+    return {
+      used: quota.used,
+      total: quota.total,
+      remaining: Number.isFinite(quota.remaining) ? quota.remaining : quota.total - quota.used,
+      planTag: formatQoderPlan(usage.userType),
+      expiresAt:
+        typeof usage.expiresAt === "number"
+          ? new Date(usage.expiresAt).toISOString()
+          : undefined,
+      addOnUsed: Number.isFinite(usage.addOnQuota?.used) ? usage.addOnQuota?.used : undefined,
+      addOnTotal: Number.isFinite(usage.addOnQuota?.total) ? usage.addOnQuota?.total : undefined,
+    };
+  } finally {
+    releaseInput?.();
+    await q.close();
+  }
+}
+
+function formatQoderPlan(userType: string | undefined): string | undefined {
+  const plans: Record<string, string> = {
+    personal_free: "Free",
+    personal_professional: "Pro",
+    personal_teams: "Teams",
+  };
+  return userType ? (plans[userType] ?? userType) : undefined;
 }
 
 /** 解析 kiro-cli /usage 的文本输出为结构化 Credits 数据 */

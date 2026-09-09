@@ -80,7 +80,7 @@ AI 用量看板
 
 | 来源类型 | 适用平台 | 获取的数据 |
 | --- | --- | --- |
-| 官方用量 API | 火山方舟、OpenAI API | Token、请求数、费用或套餐用量 |
+| 官方用量 API | 火山方舟 | Token、请求数、费用或套餐用量 |
 | 官方账户控制台 | Codex、Kiro、OpenCode Go | 订阅额度、Credits、周期和重置时间 |
 | 请求返回的 usage 字段 | OpenCode Go 等兼容 API | 输入 Token、输出 Token、缓存 Token |
 
@@ -90,17 +90,9 @@ AI 用量看板
 
 采集器按平台提供的凭证拉取套餐用量和可用的用量统计，并将结果按天保存。
 
-### OpenAI API
-
-OpenAI API 使用组织级 Usage API 获取 Token 用量。该接口可提供输入 Token、输出 Token、缓存 Token、请求数，并支持按模型、项目和 API Key 分组；Costs API 提供费用聚合数据。[OpenAI Usage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage)
-
-该连接需要组织级 Admin Key。Codex 的 ChatGPT 订阅额度与 OpenAI API 用量必须作为不同数据源处理。
-
 ### Codex
 
 Codex 订阅额度由用户已登录的 Codex 或 ChatGPT 用量页面提供。浏览器连接器读取页面中显示的 5 小时额度、周额度和重置时间，并保存为额度快照。
-
-Codex 订阅额度不等同于 API Token 用量。用户通过 OpenAI API 产生的 Token 用量由 OpenAI Usage API 采集。
 
 ### Kiro
 
@@ -155,7 +147,6 @@ QuotaSnapshot 保存当前与历史订阅状态。TokenDailyUsage 保存按天�
 ~~~text
 connectors/
 ├─ ark.ts
-├─ openai-api.ts
 ├─ codex-browser.ts
 ├─ kiro-browser.ts
 └─ opencode-browser.ts
@@ -209,7 +200,7 @@ src/
 
 ### 第二阶段：官方 API Connector
 
-接入火山方舟和 OpenAI API。验证套餐额度、输入 Token、输出 Token 和日趋势的数据正确性。
+接入火山方舟。验证套餐额度、输入 Token、输出 Token 和日趋势的数据正确性。
 
 ### 第三阶段：浏览器连接器
 
@@ -223,6 +214,6 @@ src/
 
 - 看板可同时展示 Codex、火山方舟、Kiro、OpenCode Go 的当前订阅额度。
 - 每个平台卡片显示原生单位和重置时间。
-- 火山方舟与 OpenAI API 显示真实输入、输出和总 Token 日趋势。
+- 火山方舟显示真实输入、输出和总 Token 日趋势。
 - Kiro 使用 Credits 展示，OpenCode Go 使用美元价值额度展示。
 - 用户的历史数据和访问凭证保留在本机。

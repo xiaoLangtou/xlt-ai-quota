@@ -31,7 +31,6 @@ export class ConnectorError extends Error {
 interface HttpGetOptions {
   baseUrl: string;
   path: string;
-  headers?: Record<string, string>;
   query?: Record<string, string | undefined>;
 }
 
@@ -48,7 +47,6 @@ export async function httpGet(opts: HttpGetOptions): Promise<unknown> {
         request: {
           baseUrl: opts.baseUrl,
           path: opts.path,
-          headers: opts.headers ?? {},
           query: opts.query ?? {},
         },
       });
@@ -69,7 +67,7 @@ export async function httpGet(opts: HttpGetOptions): Promise<unknown> {
   const url = `${opts.baseUrl.replace(/\/$/, "")}${opts.path}${search}`;
   let resp: Response;
   try {
-    resp = await fetch(url, { headers: opts.headers });
+    resp = await fetch(url);
   } catch (err) {
     throw new Error(`网络请求失败: ${String(err)}`);
   }

@@ -9,10 +9,6 @@ declare module "*.vue" {
 interface ImportMetaEnv {
   readonly VITE_ARK_API_KEY?: string;
   readonly VITE_ARK_BASE_URL?: string;
-  readonly VITE_OPENAI_ADMIN_KEY?: string;
-  readonly VITE_OPENAI_API_KEY?: string;
-  readonly VITE_OPENAI_ORG_ID?: string;
-  readonly VITE_OPENAI_BASE_URL?: string;
 }
 
 interface ImportMeta {

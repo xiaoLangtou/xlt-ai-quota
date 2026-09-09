@@ -2,6 +2,8 @@
 import { ref, watch } from "vue";
 import { httpGet } from "@/connectors/types";
 import { useUsageDashboard } from "@/composables/useUsageDashboard";
+import { Dialog } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 type ArkStatusPayload = {
   logged_in?: boolean;
@@ -13,7 +15,7 @@ type ArkStatusPayload = {
   error?: { message?: unknown };
 };
 
-const props = defineProps<{ open: boolean }>();
+const props = defineProps<{ open?: boolean; embedded?: boolean }>();
 const emit = defineEmits<{
   (e: "update:open", value: boolean): void;
   (e: "synced"): void;
@@ -22,25 +24,32 @@ const emit = defineEmits<{
 const { loadSettings, saveSettings } = useUsageDashboard();
 
 const arkBase = ref("");
-const openaiKey = ref("");
-const openaiOrg = ref("");
-const openaiBase = ref("");
-const showOpenai = ref(false);
 const arkStatus = ref<{ checking: boolean; ok: boolean | null; message: string }>({
   checking: false,
   ok: null,
   message: "",
 });
-const connectors = ref<{ id: string; configured: boolean }[]>([]);
 const saved = ref(false);
+
+/** 除火山方舟外的本机 CLI 连接器：登录态由各自 CLI 维护，同步时自动汇总。 */
+const CONNECTORS = [
+  { key: "codex", name: "Codex", brand: "--brand-codex", desc: "读取 ~/.codex/sessions 的逐请求 Token", badge: "自动采集", tone: "ok" },
+  { key: "claude", name: "Claude Code", brand: "--brand-claude", desc: "读取 ~/.claude/projects 的逐请求 Token", badge: "自动采集", tone: "ok" },
+  { key: "opencode", name: "OpenCode", brand: "--brand-open", desc: "读取本机 OpenCode 数据库的逐请求 Token", badge: "自动采集", tone: "ok" },
+  { key: "kiro", name: "Kiro CLI", brand: "--brand-kiro", desc: "官方 Credits + 本地会话 Token（estimateTokens 估算）", badge: "额度+估算", tone: "ok" },
+  { key: "qoder", name: "Qoder", brand: "--brand-qoder", desc: "套餐 Credits + 本地 SQLite 会话 Token（真实计数）", badge: "额度+Token", tone: "ok" },
+] as const;
+
+function markStyle(brand: string) {
+  return {
+    background: `color-mix(in srgb, var(${brand}) 16%, transparent)`,
+    color: `var(${brand})`,
+  };
+}
 
 function fillForm() {
   const cfg = loadSettings();
   arkBase.value = cfg.ark.baseUrl;
-  openaiKey.value = cfg.openai.adminKey;
-  openaiOrg.value = cfg.openai.orgId;
-  openaiBase.value = cfg.openai.baseUrl;
-  connectors.value = cfg.connectors;
 }
 
 async function checkArkStatus() {
@@ -50,9 +59,6 @@ async function checkArkStatus() {
       baseUrl: "/api/ark",
       path: "/status",
     })) as ArkStatusPayload;
-    // arkcli auth status --format json 的真实结构：
-    // { logged_in, control_plane_auth:{status,reason}, volc_sso:{expired}, active_profile, profiles_summary }
-    // 旧版裸命令会返回 { ok:false, error:{message} }，一并兼容
     const cp = data?.control_plane_auth;
     const loggedIn = data?.logged_in === true || data?.ok === true;
     const cpOk = cp?.status === "ok";
@@ -103,14 +109,7 @@ function close() {
 }
 
 function persist(andSync: boolean) {
-  saveSettings({
-    ark: { baseUrl: arkBase.value },
-    openai: {
-      adminKey: openaiKey.value,
-      orgId: openaiOrg.value,
-      baseUrl: openaiBase.value,
-    },
-  });
+  saveSettings({ ark: { baseUrl: arkBase.value } });
   fillForm();
   if (andSync) {
     emit("synced");
@@ -122,262 +121,247 @@ function persist(andSync: boolean) {
 </script>
 
 <template>
-  <Teleport to="body">
-    <Transition name="fade">
-      <div v-if="open" class="overlay" @click.self="close">
-        <div class="panel">
-          <header class="panel-head">
-            <h2>设置</h2>
-            <button class="close" @click="close">×</button>
-          </header>
+  <Dialog :open="Boolean(open)" :static="embedded" @update:open="close">
+    <div v-if="embedded || open" :class="{ 'embedded-root': embedded }">
+      <div class="panel" :class="{ embedded }">
+        <header class="panel-head">
+          <div>
+            <span class="eyebrow">CONNECTORS</span>
+            <h2>连接与设置</h2>
+            <p>数据源均为本机 CLI，登录态只保存在本机；点击同步统一汇总。</p>
+          </div>
+          <Button v-if="!embedded" variant="ghost" size="icon" aria-label="关闭" @click="close">×</Button>
+        </header>
 
-          <section class="block">
-            <div class="block-title">
-              <span>火山方舟</span>
-              <span class="badge" :class="arkStatus.ok ? 'on' : 'off'">
-                {{ arkStatus.checking ? "检测中" : arkStatus.ok ? "arkcli 已登录" : "未登录" }}
-              </span>
+        <div class="connector-list">
+          <!-- 火山方舟：需登录，展示动态状态 -->
+          <div class="connector-row">
+            <span class="conn-mark" :style="markStyle('--brand-ark')">V</span>
+            <div class="conn-info">
+              <strong>火山方舟</strong>
+              <small>套餐额度 + Token 用量 · 需 Volc SSO 登录</small>
             </div>
-            <p class="status-msg" :class="{ err: !arkStatus.ok && !arkStatus.checking }">
-              {{ arkStatus.message }}
-            </p>
-            <p class="hint">
+            <div class="conn-side">
+              <span class="conn-badge" :class="arkStatus.ok ? 'ok' : arkStatus.checking ? 'neutral' : 'off'">
+                {{ arkStatus.checking ? "检测中" : arkStatus.ok ? "已登录" : "未登录" }}
+              </span>
+              <Button variant="ghost" size="sm" :disabled="arkStatus.checking" @click="checkArkStatus">重新检测</Button>
+            </div>
+          </div>
+          <div v-if="!arkStatus.ok && !arkStatus.checking" class="connector-note">
+            <p>
               Ark 用量需 Volc 签名（AK/SK 或 SSO），<b>不能</b>用 <code>ark-*</code> Bearer Key。
-              应用调用本机 <code>arkcli</code>，请在终端执行登录：
+              请在终端登录后再同步：
             </p>
             <pre class="cmd">arkcli auth login volc-sso</pre>
-            <button class="btn ghost" @click="checkArkStatus" :disabled="arkStatus.checking">
-              重新检测
-            </button>
-          </section>
+            <p v-if="arkStatus.message" class="conn-msg">{{ arkStatus.message }}</p>
+          </div>
 
-          <section class="block">
-            <div class="block-title">
-              <span>OpenAI API</span>
-              <span
-                class="badge"
-                :class="connectors.find((c) => c.id === 'openai-api')?.configured ? 'on' : ''"
-              >
-                {{ connectors.find((c) => c.id === "openai-api")?.configured ? "已配置" : "未配置" }}
-              </span>
+          <!-- 其他本机 CLI：自动采集，无需登录配置 -->
+          <div v-for="c in CONNECTORS" :key="c.key" class="connector-row">
+            <span class="conn-mark" :style="markStyle(c.brand)">{{ c.name.slice(0, 1) }}</span>
+            <div class="conn-info">
+              <strong>{{ c.name }}</strong>
+              <small>{{ c.desc }}</small>
             </div>
-            <label class="field">
-              <span>Admin Key（组织级）</span>
-              <div class="secret">
-                <input
-                  :type="showOpenai ? 'text' : 'password'"
-                  v-model="openaiKey"
-                  placeholder="sk-admin-..."
-                  autocomplete="off"
-                />
-                <button type="button" @click="showOpenai = !showOpenai">
-                  {{ showOpenai ? "隐藏" : "显示" }}
-                </button>
-              </div>
-            </label>
-            <label class="field">
-              <span>Organization ID（可选）</span>
-              <input v-model="openaiOrg" placeholder="org-..." />
-            </label>
-            <label class="field">
-              <span>Base URL（可选）</span>
-              <input v-model="openaiBase" placeholder="/proxy-openai" />
-            </label>
-            <p class="hint">仅 Token 用量。ChatGPT/Codex 订阅额度属第三阶段。</p>
-          </section>
-
-          <footer class="panel-foot">
-            <span v-if="saved" class="saved">已保存</span>
-            <span v-else />
-            <div class="actions">
-              <button class="btn ghost" @click="close">取消</button>
-              <button class="btn" @click="persist(false)">保存</button>
-              <button class="btn primary" @click="persist(true)">保存并同步</button>
+            <div class="conn-side">
+              <span class="conn-badge" :class="c.tone">{{ c.badge }}</span>
             </div>
-          </footer>
+          </div>
         </div>
+
+        <footer class="panel-foot">
+          <span class="foot-hint">
+            <template v-if="saved">已保存</template>
+            <template v-else>WebStorm ACP 只是启动这些 CLI 的入口，不单独保存 Token。</template>
+          </span>
+          <div class="actions">
+            <Button v-if="!embedded" variant="ghost" @click="close">关闭</Button>
+            <Button @click="persist(true)">立即同步</Button>
+          </div>
+        </footer>
       </div>
-    </Transition>
-  </Teleport>
+    </div>
+  </Dialog>
 </template>
 
 <style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(20, 24, 35, 0.42);
-  display: grid;
-  place-items: center;
-  z-index: 50;
-  padding: 24px;
-}
 .panel {
   width: min(560px, 100%);
   max-height: 88vh;
   overflow: auto;
-  background: var(--card);
-  border-radius: 20px;
-  box-shadow: 0 24px 60px rgba(20, 24, 35, 0.22);
+  background: var(--surface);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-pop);
   padding: 22px 24px 18px;
+}
+.embedded-root {
+  width: 100%;
+}
+.panel.embedded {
+  width: 100%;
+  max-width: 1320px;
+  max-height: none;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .panel-head {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 18px;
+  gap: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.eyebrow {
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
 }
 .panel-head h2 {
-  margin: 0;
-  font-size: 18px;
-}
-.close {
-  border: 0;
-  background: transparent;
+  margin: 5px 0 0;
   font-size: 22px;
-  color: var(--muted);
-  cursor: pointer;
-  line-height: 1;
+  font-weight: 650;
 }
-.block {
-  padding: 16px 0;
-  border-top: 1px solid var(--line);
+.panel-head p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
 }
-.block:first-of-type {
-  border-top: 0;
+
+.connector-list {
+  display: grid;
+  gap: 10px;
 }
-.block-title {
+.connector-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  font-weight: 700;
-  font-size: 14px;
-  margin-bottom: 12px;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
 }
-.badge {
-  padding: 3px 9px;
-  border-radius: 99px;
-  background: #f1f3f6;
-  color: #7b8190;
-  font-size: 11px;
+.conn-mark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: var(--r-sm);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+}
+.conn-info {
+  min-width: 0;
+  flex: 1;
+}
+.conn-info strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 600;
 }
-.badge.on {
-  background: #e3f4ec;
-  color: var(--green);
-}
-.badge.off {
-  background: #fdece6;
-  color: #d65745;
-}
-.status-msg {
-  margin: 0 0 10px;
-  color: var(--muted);
+.conn-info small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
   font-size: 12px;
 }
-.status-msg.err {
-  color: #d65745;
+.conn-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
-.hint {
-  margin: 0 0 8px;
-  color: #969ba6;
+.conn-badge {
+  padding: 3px 9px;
+  border-radius: 999px;
   font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.conn-badge.ok {
+  background: color-mix(in srgb, var(--u-ok) 16%, transparent);
+  color: var(--u-ok);
+}
+.conn-badge.neutral {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+.conn-badge.off {
+  background: color-mix(in srgb, var(--u-warn) 16%, transparent);
+  color: var(--u-warn);
+}
+.connector-note {
+  margin: -2px 0 2px;
+  padding: 14px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.connector-note p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
   line-height: 1.6;
 }
-.hint code {
-  background: #f1f3f6;
+.connector-note code {
   padding: 1px 5px;
   border-radius: 4px;
+  background: var(--surface-3);
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 .cmd {
-  margin: 0 0 10px;
+  margin: 10px 0;
   padding: 9px 12px;
-  background: #262b34;
-  color: #e6e8ee;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--text);
+  font-family: var(--font-mono);
   font-size: 12px;
   overflow-x: auto;
 }
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.field > span {
-  color: var(--muted);
-  font-size: 12px;
-}
-.field input {
-  padding: 9px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  font-size: 13px;
-  outline: none;
-}
-.field input:focus {
-  border-color: var(--blue);
-}
-.secret {
-  display: flex;
-  gap: 8px;
-}
-.secret input {
-  flex: 1;
-}
-.secret button {
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #f6f7f9;
-  color: var(--muted);
-  font-size: 12px;
-  cursor: pointer;
+.conn-msg {
+  color: var(--u-warn);
 }
 .panel-foot {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-top: 8px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
-.saved {
-  color: var(--green);
+.foot-hint {
+  color: var(--text-subtle);
   font-size: 12px;
 }
 .actions {
   display: flex;
   gap: 8px;
+  flex: 0 0 auto;
 }
-.btn {
-  padding: 8px 16px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--card);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.btn.primary {
-  background: var(--blue);
-  border-color: var(--blue);
-  color: white;
-}
-.btn.ghost {
-  border-color: transparent;
-  color: var(--muted);
-}
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+
+@media (max-width: 640px) {
+  .connector-row {
+    flex-wrap: wrap;
+  }
+  .conn-side {
+    width: 100%;
+    justify-content: flex-start;
+    padding-left: 46px;
+  }
 }
 </style>

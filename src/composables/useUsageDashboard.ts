@@ -9,6 +9,8 @@ import type {
   TokenSummary,
   TrendPoint,
   PlatformDailyPoint,
+  ToolUsage,
+  HeatmapDay,
 } from "@/types/usage";
 
 interface DashboardState {
@@ -17,6 +19,8 @@ interface DashboardState {
   summary: TokenSummary;
   trend: TrendPoint[];
   platformDaily: PlatformDailyPoint[];
+  toolUsage: ToolUsage[];
+  heatmap: HeatmapDay[];
   sync: SyncInfo;
   loading: boolean;
   syncError: string | null;
@@ -25,9 +29,11 @@ interface DashboardState {
 const state = reactive<DashboardState>({
   range: "7d",
   quotas: [],
-  summary: { total: 0, input: 0, output: 0 },
+  summary: { total: 0, input: 0, output: 0, requests: 0 },
   trend: [],
   platformDaily: [],
+  toolUsage: [],
+  heatmap: [],
   sync: { lastSyncAt: null, syncing: false },
   loading: false,
   syncError: null,
@@ -40,6 +46,8 @@ function readAll(): void {
   state.summary = usageService.getTokenSummary(state.range);
   state.trend = usageService.getTokenTrend(state.range);
   state.platformDaily = usageService.getPlatformDaily(state.range);
+  state.toolUsage = usageService.getToolBreakdown(state.range);
+  state.heatmap = usageService.getDailyHeatmap();
   state.sync = usageService.getSyncInfo();
   state.syncError = state.sync.error ?? null;
 }
@@ -61,6 +69,7 @@ export function useUsageDashboard() {
     state.summary = usageService.getTokenSummary(preset);
     state.trend = usageService.getTokenTrend(preset);
     state.platformDaily = usageService.getPlatformDaily(preset);
+    state.toolUsage = usageService.getToolBreakdown(preset);
   }
 
   async function sync(): Promise<void> {
@@ -115,17 +124,13 @@ export function useUsageDashboard() {
   function loadSettings() {
     return {
       ark: usageService.getArkConfigView(),
-      openai: usageService.getOpenAIConfigView(),
-      connectors: usageService.getConnectorStatus(),
     };
   }
 
   function saveSettings(patch: {
     ark?: { baseUrl?: string };
-    openai?: { adminKey?: string; orgId?: string; baseUrl?: string };
   }): void {
     if (patch.ark) usageService.saveArkBaseUrl(patch.ark.baseUrl ?? "");
-    if (patch.openai) usageService.saveOpenAIConfig(patch.openai);
   }
 
   if (!autoSyncStarted) {
@@ -141,6 +146,8 @@ export function useUsageDashboard() {
     summary: computed(() => state.summary),
     trend: computed(() => state.trend),
     platformDaily: computed(() => state.platformDaily),
+    toolUsage: computed(() => state.toolUsage),
+    heatmap: computed(() => state.heatmap),
     loading: computed(() => state.loading),
     syncError: computed(() => state.syncError),
     setRange,

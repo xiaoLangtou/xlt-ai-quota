@@ -3,6 +3,7 @@ import { UsageService } from "@/services/usage-service";
 import type { UsageStorage } from "@/storage/storage";
 import { buildSeedQuotas, buildSeedTokens } from "@/data/seed";
 import type {
+  AiSubscription,
   QuotaSnapshot,
   SyncInfo,
   TokenDailyUsage,
@@ -12,7 +13,9 @@ function createMemoryStorage(seedQuotas: QuotaSnapshot[], seedTokens: TokenDaily
   let quotas = [...seedQuotas];
   let tokens = [...seedTokens];
   let sync: SyncInfo = { lastSyncAt: null, syncing: false };
-  let config: { baseUrl?: string; adminKey?: string; orgId?: string } = {};
+  let config: { baseUrl?: string } = {};
+  let subscriptions: AiSubscription[] = [];
+  let subscriptionPreferences = { usdToCnyRate: 7.2 };
   return {
     listQuotas: () => quotas,
     listQuotasByPlatform: (p) => quotas.filter((q) => q.platform === p),
@@ -36,9 +39,17 @@ function createMemoryStorage(seedQuotas: QuotaSnapshot[], seedTokens: TokenDaily
     saveSyncInfo: (i) => {
       sync = i;
     },
+    listSubscriptions: () => subscriptions,
+    saveSubscriptions: (items) => {
+      subscriptions = items;
+    },
+    getSubscriptionPreferences: () => subscriptionPreferences,
+    saveSubscriptionPreferences: (preferences) => {
+      subscriptionPreferences = preferences;
+    },
     getConnectorConfig: () => config,
     saveConnectorConfig: (c) => {
-      config = c as { baseUrl?: string; adminKey?: string; orgId?: string };
+      config = c as { baseUrl?: string };
     },
     resetIfVersionChanged: () => false,
   };
@@ -67,7 +78,8 @@ assert("4 个平台额度卡片", quotas.length === 4);
 assert("Codex 5h 72%", quotas[0].windows[0]?.usedPct === 72);
 assert("Ark weekly 83% warn", quotas[1].windows[1]?.usedPct === 83 && quotas[1].windows[1]?.tone === "orange");
 assert("Kiro remaining 1240", quotas[2].credits?.remaining === 1240);
-assert("OpenCode weekly 64%", quotas[3].windows[1]?.usedPct === 64);
+assert("Qoder remaining 1120", quotas[3].credits?.remaining === 1120);
+assert("Qoder add-on remaining 1853", quotas[3].credits?.addOn?.remaining === 1853);
 assert("总 Token ≈ 110.7M", Math.abs(summary.total - 110_700_000) < 200_000);
 assert("输入 ≈ 86.3M", Math.abs(summary.input - 86_300_000) < 200_000);
 assert("delta ≈ -12.6%", summary.deltaPct != null && Math.abs(summary.deltaPct - -12.6) < 0.5);

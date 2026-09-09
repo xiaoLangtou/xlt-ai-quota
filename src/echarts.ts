@@ -1,6 +1,6 @@
 import { use } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import { BarChart, LineChart } from "echarts/charts";
+import { BarChart, LineChart, PieChart } from "echarts/charts";
 import {
   GridComponent,
   LegendComponent,
@@ -12,6 +12,7 @@ use([
   CanvasRenderer,
   LineChart,
   BarChart,
+  PieChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,

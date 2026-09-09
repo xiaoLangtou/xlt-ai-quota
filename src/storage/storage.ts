@@ -1,4 +1,11 @@
-import type { QuotaSnapshot, SyncInfo, TokenDailyUsage } from "@/types/usage";
+import type {
+  AiSubscription,
+  BillEntry,
+  QuotaSnapshot,
+  SubscriptionPreferences,
+  SyncInfo,
+  TokenDailyUsage,
+} from "@/types/usage";
 
 /**
  * 本地存储抽象。当前实现为 WebStorage（localStorage），用于 Vite dev / 浏览器。
@@ -28,6 +35,16 @@ export interface UsageStorage {
   getSyncInfo(): SyncInfo;
   saveSyncInfo(info: SyncInfo): void;
 
+  // AI 订阅管理
+  listSubscriptions(): AiSubscription[];
+  saveSubscriptions(subscriptions: AiSubscription[]): void;
+  getSubscriptionPreferences(): SubscriptionPreferences;
+  saveSubscriptionPreferences(preferences: SubscriptionPreferences): void;
+
+  // 账单流水台账（真实持久化：手动记账 / 用量结算）
+  listBills(): BillEntry[];
+  saveBills(bills: BillEntry[]): void;
+
   /** 数据版本变更时清空全部本地数据（含旧种子）并写入新版本，返回是否发生了重置 */
   resetIfVersionChanged(version: string): boolean;
 
@@ -38,5 +55,4 @@ export interface UsageStorage {
 
 export interface ConnectorConfigPersist {
   ark?: { baseUrl?: string };
-  openai?: { adminKey?: string; orgId?: string; baseUrl?: string };
 }

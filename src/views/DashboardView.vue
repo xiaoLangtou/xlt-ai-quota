@@ -801,22 +801,13 @@ function formatCny(value: number): string {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 0 8px 10px 0;
-  scrollbar-color: var(--scroll-thumb) transparent;
-  scrollbar-width: thin;
+  padding: 0 4px 10px 0;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .page-scroll::-webkit-scrollbar {
-  width: 12px;
-}
-
-.page-scroll::-webkit-scrollbar-track {
-  margin-block: 8px;
-}
-
-.page-scroll::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  background-clip: padding-box;
+  display: none;
 }
 
 .overview-stack {

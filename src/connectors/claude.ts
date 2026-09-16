@@ -38,6 +38,7 @@ export class ClaudeConnector implements Connector, TokenConnector {
     return rows.map((row) => ({
       platform: "claude",
       date: row.d,
+      model: row.model || undefined,
       inputTokens: num(row.inp),
       outputTokens: num(row.outp),
       cachedTokens: row.cache != null ? num(row.cache) : undefined,
@@ -49,6 +50,7 @@ export class ClaudeConnector implements Connector, TokenConnector {
 
 interface ClaudeRow {
   d: string;
+  model?: string;
   inp?: number | string;
   outp?: number | string;
   cache?: number | string;

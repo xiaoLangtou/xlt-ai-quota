@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod connectors;
+mod daily_report;
+mod vault;
 
 use tauri::Manager;
 
@@ -38,13 +40,22 @@ fn hide_dashboard(app: tauri::AppHandle) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            show_dashboard(app.handle().clone()).map_err(std::io::Error::other)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             connectors::connector_get,
+            daily_report::daily_report_validate_project,
+            daily_report::daily_report_collect_commits,
+            daily_report::daily_report_generate,
+            daily_report::daily_report_import_gitreports,
+            vault::vault_read,
+            vault::vault_write,
             quit_app,
             show_dashboard,
             hide_dashboard

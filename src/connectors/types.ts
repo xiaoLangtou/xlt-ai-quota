@@ -14,7 +14,8 @@ export interface QuotaConnector extends Connector {
 }
 
 export interface TokenConnector extends Connector {
-  fetchTokens(range: { start: string; end: string }): Promise<TokenDailyUsage[]>;
+  /** tz：可选 IANA 时区，用于服务端按该时区分桶（空=系统本地）。 */
+  fetchTokens(range: { start: string; end: string; tz?: string }): Promise<TokenDailyUsage[]>;
 }
 
 export class ConnectorError extends Error {

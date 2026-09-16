@@ -25,13 +25,7 @@ function usedCredits(view: PlatformQuotaView): number {
 </script>
 
 <template>
-  <article
-    class="quota"
-    :class="{
-      'plan-rows-two': (view.credits && !view.credits.addOn) || view.windows.length === 2,
-      'plan-rows-three': Boolean(view.credits?.addOn),
-    }"
-  >
+  <article class="quota">
     <div class="platform">
       <span class="brand">
         <ToolLogo :platform="view.platform" :size="19" />
@@ -40,7 +34,7 @@ function usedCredits(view: PlatformQuotaView): number {
       <span class="tag">{{ view.planTag }}</span>
     </div>
 
-    <div v-if="view.credits" class="plan-meters credit-plans">
+    <div v-if="view.credits" class="plan-meters">
       <div class="plan-meter credit-total">
         <div class="plan-meter-header">
           <span class="plan-meter-label">总额度</span>
@@ -112,143 +106,119 @@ function usedCredits(view: PlatformQuotaView): number {
 <style scoped>
 .quota {
   display: flex;
-  flex-direction: column;
   height: 100%;
-  min-height: 196px;
-  padding: 18px;
-  background: var(--surface);
+  min-height: 176px;
+  flex-direction: column;
+  padding: 17px;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
+  background: var(--surface);
   box-shadow: var(--shadow-card);
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, transform 0.15s ease;
 }
+
 .quota:hover {
   border-color: var(--border-strong);
+  transform: translateY(-1px);
 }
+
 .platform {
   display: flex;
   align-items: center;
-  gap: 12px;
   justify-content: space-between;
-  margin-bottom: 16px;
-  font-size: 15px;
-  font-weight: 600;
+  gap: 10px;
+  margin-bottom: 12px;
 }
+
 .brand {
   display: flex;
-  gap: 9px;
+  min-width: 0;
   align-items: center;
+  gap: 8px;
   color: var(--text);
+  font-size: 13.5px;
+  font-weight: 680;
 }
+
 .tag {
-  margin-left: auto;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
+  max-width: 46%;
+  overflow: hidden;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border));
+  border-radius: 5px;
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .plan-meters {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
 }
+
 .plan-meter {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 10px 12px;
+  padding: 10px 11px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);
 }
+
 .plan-meter.is-exhausted {
-  border-color: color-mix(in srgb, var(--u-crit) 40%, var(--border));
-  background: color-mix(in srgb, var(--u-crit) 8%, var(--surface-2));
+  border-color: color-mix(in srgb, var(--u-crit) 36%, var(--border));
+  background: color-mix(in srgb, var(--u-crit) 7%, var(--surface-2));
 }
+
 .plan-meter-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
   min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
+
 .plan-meter-label {
   flex: 0 0 auto;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 550;
 }
+
 .plan-meter-reset {
   min-width: 0;
   overflow: hidden;
   color: var(--text-subtle);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .plan-meter-header strong {
   margin-left: auto;
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 15px;
+  font-weight: 680;
   line-height: 1;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
 }
+
 .credit-total .plan-meter-header strong {
-  color: var(--brand-kiro);
-  font-size: 22px;
-  letter-spacing: -1px;
+  color: var(--accent);
+  font-size: 20px;
 }
+
 .credit-addon .plan-meter-header strong {
   color: var(--brand-kiro);
 }
-.plan-meter-header strong small {
-  margin-left: 1px;
-  color: var(--text-subtle);
-  font-size: 10px;
-  letter-spacing: 0;
-}
-.usage-state {
-  margin-left: auto;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--u-crit) 16%, transparent);
-  color: var(--u-crit);
-  font-size: 10px;
-  font-weight: 600;
-}
-.plan-meter .meter-top {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.25;
-}
-.plan-meter .meter-top span {
-  min-width: 0;
-  white-space: nowrap;
-}
-.plan-meter .meter-top span:last-child {
-  overflow: hidden;
-  text-align: right;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-}
-.plan-meter-value {
-  margin-top: 7px;
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 16px;
-  font-weight: 650;
-  line-height: 1;
-  letter-spacing: -0.5px;
-}
+
+.plan-meter-header strong small,
 .plan-meter-value small {
   margin-left: 1px;
   color: var(--text-subtle);
@@ -256,98 +226,109 @@ function usedCredits(view: PlatformQuotaView): number {
   letter-spacing: 0;
 }
 
-/* 利用率热力进度条：轨道 + 圆角实心填充，颜色由 tone 决定 */
+.usage-state {
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--u-crit) 14%, transparent);
+  color: var(--u-crit);
+  font-size: 9.5px;
+  font-weight: 650;
+}
+
+.meter-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.25;
+}
+
+.meter-top span {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.meter-top span:last-child {
+  overflow: hidden;
+  color: var(--text-subtle);
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.plan-meter-value {
+  margin-top: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
 .bar {
   height: 6px;
-  margin-top: 8px;
-  border-radius: 999px;
-  background: var(--surface-3);
+  margin-top: 7px;
   overflow: hidden;
+  border-radius: 999px;
+  background: var(--track);
 }
-.plan-meter:not(.credit-total) > .bar {
-  margin-top: 6px;
-}
+
 .bar span {
   display: block;
   height: 100%;
   min-width: 3px;
-  border-radius: 999px;
+  border-radius: inherit;
   background: var(--accent);
-  transition: width 0.4s ease;
+  transition: width 0.3s ease;
 }
+
 .bar span.blue {
   background: var(--accent);
 }
+
 .bar span.orange {
   background: var(--u-warn);
 }
+
 .bar span.purple {
   background: var(--brand-kiro);
 }
+
 .bar span.green {
   background: var(--u-ok);
 }
+
 .plan-meter.is-exhausted .bar span {
   background: var(--u-crit);
 }
 
 .empty {
-  margin: 0;
+  margin: auto 0;
   color: var(--text-subtle);
-  font-size: 12px;
+  font-size: 11.5px;
 }
-.account-label {
-  display: block;
-  color: var(--text);
-  font-weight: 600;
-  font-size: 13px;
-}
+
+.account-label,
 .account-note {
   display: block;
+}
+
+.account-label {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 620;
+}
+
+.account-note {
   margin-top: 4px;
 }
 
 @media (max-width: 640px) {
   .quota {
     min-height: 0;
-    padding: 16px;
-  }
-  .platform {
-    margin-bottom: 14px;
+    padding: 15px;
   }
 }
-
-/* Glass prototype */
-.quota {
-  min-height: 0;
-  padding: 19px 20px;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-.quota:hover { border-color: var(--glass-border); }
-.platform { margin-bottom: 11px; font-size: 14.5px; font-weight: 700; }
-.brand { gap: 8px; }
-.tag { padding: 3px 8px; border-radius: 8px; background: var(--accent-weak); color: var(--accent); font-family: var(--font-sans); font-size: 10.5px; font-weight: 600; }
-.plan-meters { gap: 11px; }
-.plan-meter {
-  padding: 11px 13px;
-  border: 1px solid var(--glass-border);
-  border-radius: 13px;
-  background: var(--glass-inner);
-}
-.plan-meter.is-exhausted { border-color: rgba(233, 85, 107, 0.25); background: rgba(233, 85, 107, 0.08); }
-.plan-meter-header { gap: 5px; font-size: 12px; }
-.plan-meter-label { color: var(--text-muted); font-size: 12px; font-weight: 400; }
-.plan-meter-reset { color: var(--text); font-family: var(--font-sans); font-size: 12px; font-weight: 600; }
-.plan-meter-header strong { color: var(--text); font-size: 12px; font-weight: 700; }
-.credit-total .plan-meter-header strong { color: var(--text); font-size: 19px; font-weight: 800; }
-.usage-state { padding: 2px 8px; border-radius: 7px; background: rgba(233, 85, 107, 0.14); color: #d8405c; font-size: 10.5px; }
-.plan-meter .meter-top { color: var(--text-muted); font-size: 12px; }
-.plan-meter-value { color: var(--text); font-size: 13px; font-weight: 700; }
-.bar { height: 6px; margin-top: 7px; background: var(--track); }
-.empty { padding: 14px 0; color: var(--text-subtle); font-size: 12px; }
 </style>

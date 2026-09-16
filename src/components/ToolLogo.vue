@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { Boxes } from "lucide-vue-next";
 import arkLogo from "@lobehub/icons-static-svg/icons/bytedance-color.svg";
 import antGroupLogo from "@lobehub/icons-static-svg/icons/antgroup-color.svg";
 import claudeLogo from "@lobehub/icons-static-svg/icons/claudecode-color.svg";
@@ -59,6 +60,13 @@ const logo = computed(() => LOGOS[props.platform.trim().toLowerCase().replace(/\
     alt=""
     aria-hidden="true"
   />
+  <Boxes
+    v-else
+    class="tool-logo default-logo"
+    :size="size"
+    :stroke-width="1.8"
+    aria-hidden="true"
+  />
 </template>
 
 <style scoped>
@@ -67,5 +75,9 @@ const logo = computed(() => LOGOS[props.platform.trim().toLowerCase().replace(/\
   max-width: none;
   flex: 0 0 auto;
   object-fit: contain;
+}
+
+.default-logo {
+  color: var(--text-muted);
 }
 </style>

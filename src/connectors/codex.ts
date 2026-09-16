@@ -67,6 +67,7 @@ export class CodexConnector implements Connector, QuotaConnector, TokenConnector
     return rows.map((row) => ({
       platform: "codex",
       date: row.d,
+      model: row.model || undefined,
       inputTokens: num(row.inp),
       outputTokens: num(row.outp),
       cachedTokens: row.cache != null ? num(row.cache) : undefined,
@@ -96,6 +97,7 @@ export class CodexConnector implements Connector, QuotaConnector, TokenConnector
 
 interface CodexTokenRow {
   d: string;
+  model?: string;
   inp?: number | string;
   outp?: number | string;
   cache?: number | string;

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ToolUsage } from "@/types/usage";
-import { formatTokens } from "@/utils/format";
+import { formatTokens, formatUsd } from "@/utils/format";
 import ToolLogo from "@/components/ToolLogo.vue";
 
 defineProps<{ tools: ToolUsage[]; rangeLabel: string }>();
@@ -12,6 +12,8 @@ const TOOL_LABEL: Record<string, string> = {
   kiro: "Kiro",
   qoder: "Qoder",
   "opencode-go": "OpenCode Go",
+  gemini: "Gemini CLI",
+  copilot: "GitHub Copilot",
 };
 const TOOL_BRAND: Record<string, string> = {
   ark: "--brand-ark",
@@ -20,6 +22,8 @@ const TOOL_BRAND: Record<string, string> = {
   kiro: "--brand-kiro",
   qoder: "--brand-qoder",
   "opencode-go": "--brand-open",
+  gemini: "--brand-gemini",
+  copilot: "--brand-copilot",
 };
 
 function label(platform: string): string {
@@ -44,7 +48,7 @@ function brandVar(platform: string): string {
         <span>工具</span>
         <span>占比</span>
         <span class="num">Token</span>
-        <span class="num">输入 / 输出</span>
+        <span class="num">费用</span>
         <span class="num">请求</span>
       </div>
       <div v-for="t in tools" :key="t.platform" class="tb-row" role="row">
@@ -59,7 +63,7 @@ function brandVar(platform: string): string {
           <b>{{ t.pct }}%</b>
         </span>
         <span class="num tb-total">{{ formatTokens(t.total) }}</span>
-        <span class="num tb-io">↑{{ formatTokens(t.input) }} · ↓{{ formatTokens(t.output) }}</span>
+        <span class="num tb-cost">{{ formatUsd(t.costUsd) }}</span>
         <span class="num tb-req">{{ t.requests ? t.requests.toLocaleString() : "—" }}</span>
       </div>
     </div>
@@ -69,11 +73,15 @@ function brandVar(platform: string): string {
 
 <style scoped>
 .toolbreak {
-  padding: 19px 20px 8px;
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: var(--shadow-card);
+}
+.tb-head {
+  padding: 18px 20px 4px;
 }
 .tb-head h3 {
   margin: 0;
@@ -82,16 +90,17 @@ function brandVar(platform: string): string {
   font-weight: 650;
 }
 .tb-head p {
-  margin: 6px 0 0;
+  margin: 3px 0 0;
   color: var(--text-muted);
   font-size: 12px;
 }
 .tb-table {
-  margin-top: 12px;
+  margin-top: 6px;
+  padding: 0 20px 8px;
 }
 .tb-row {
   display: grid;
-  grid-template-columns: minmax(120px, 1.1fr) minmax(140px, 1.4fr) 90px minmax(150px, 1fr) 76px;
+  grid-template-columns: minmax(120px, 1.2fr) minmax(150px, 1.6fr) 92px 92px 76px;
   align-items: center;
   gap: 14px;
   padding: 11px 0;
@@ -152,7 +161,13 @@ function brandVar(platform: string): string {
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
-.tb-io,
+.tb-cost {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .tb-req {
   color: var(--text-muted);
   font-family: var(--font-mono);
@@ -162,7 +177,8 @@ function brandVar(platform: string): string {
 .tb-empty {
   display: grid;
   place-items: center;
-  min-height: 120px;
+  min-height: 0;
+  padding: 36px 0;
   color: var(--text-subtle);
   font-size: 13px;
 }
@@ -181,30 +197,12 @@ function brandVar(platform: string): string {
   .tb-total {
     text-align: right;
   }
-  .tb-io {
-    grid-column: 1 / -1;
-    order: 4;
-    text-align: left;
+  .tb-cost {
+    text-align: right;
   }
   .tb-req {
     display: none;
   }
 }
 
-/* Glass prototype */
-.toolbreak {
-  padding: 0;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-.tb-head { padding: 21px 26px 5px; }
-.tb-head h3 { font-family: "Manrope", "PingFang SC", sans-serif; font-size: 16.5px; font-weight: 700; }
-.tb-head p { margin-top: 3px; color: var(--text-subtle); font-size: 12.5px; }
-.tb-table { margin-top: 6px; padding: 0 26px 8px; }
-.tb-row { border-color: var(--border); }
-.tb-empty { min-height: 0; padding: 36px 0; color: var(--text-subtle); font-size: 13px; }
 </style>

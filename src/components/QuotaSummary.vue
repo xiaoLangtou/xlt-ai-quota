@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { Button } from "@/components/ui/button";
 import ToolLogo from "@/components/ToolLogo.vue";
 import type { PlatformQuotaView } from "@/types/usage";
 
 const props = defineProps<{ views: PlatformQuotaView[] }>();
 const emit = defineEmits<{ (e: "navigate"): void }>();
+const platformCount = computed(() => new Set(props.views.map((view) => view.platform)).size);
 
 type Tone = "ok" | "warn" | "crit";
 interface Row {
+  id: string;
   platform: string;
   name: string;
   planTag: string;
@@ -34,6 +37,7 @@ const rows = computed<Row[]>(() =>
     const tone: Tone = pct == null ? "ok" : pct >= 100 ? "crit" : pct >= 80 ? "warn" : "ok";
     const note = pct == null ? (v.account ? "已登录 · 详情见连接器" : "暂无数据") : null;
     return {
+      id: v.id,
       platform: v.platform,
       name: v.name,
       planTag: v.planTag,
@@ -51,14 +55,14 @@ const rows = computed<Row[]>(() =>
     <div class="qsummary-head">
       <div>
         <h2>订阅额度</h2>
-        <p>{{ views.length }} 个平台 · 利用率概览</p>
+        <p>{{ platformCount }} 个平台 · {{ views.length }} 个套餐</p>
       </div>
-      <button class="qsummary-link" type="button" @click="emit('navigate')">
+      <Button class="qsummary-link" type="button" variant="ghost" size="sm" @click="emit('navigate')">
         前往订阅与账单 →
-      </button>
+      </Button>
     </div>
     <ul class="qsummary-rows">
-      <li v-for="r in rows" :key="r.platform" class="qrow">
+      <li v-for="r in rows" :key="r.id" class="qrow">
         <span class="qname">
           <ToolLogo :platform="r.platform" :size="18" />
           {{ r.name }}
@@ -81,154 +85,158 @@ const rows = computed<Row[]>(() =>
 
 <style scoped>
 .qsummary {
-  padding: 20px 22px;
+  padding-bottom: 4px;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: var(--shadow-card);
 }
+
 .qsummary-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 6px;
+  padding: 15px 18px 8px;
 }
+
 .qsummary-head h2 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 650;
-  letter-spacing: -0.2px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 680;
 }
+
 .qsummary-head p {
-  margin: 5px 0 0;
-  color: var(--text-muted);
-  font-size: 12px;
+  margin: 3px 0 0;
+  color: var(--text-subtle);
+  font-size: 11.5px;
 }
+
 .qsummary-link {
   flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  height: 28px;
+  padding: 0 6px;
   color: var(--accent);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
+  font-size: 11.5px;
 }
-.qsummary-link:hover {
-  text-decoration: underline;
-}
+
 .qsummary-rows {
   margin: 0;
   padding: 0;
   list-style: none;
 }
+
 .qrow {
   display: grid;
-  grid-template-columns: minmax(130px, 200px) 1fr 62px;
+  min-height: 46px;
+  grid-template-columns: 175px minmax(120px, 1fr) 66px;
   align-items: center;
   gap: 14px;
-  padding: 12px 0;
+  padding: 9px 18px;
   border-top: 1px solid var(--border);
 }
-.qrow:first-child {
-  border-top: 0;
-}
+
 .qname {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
-  min-width: 0;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 550;
+  font-size: 12.5px;
+  font-weight: 620;
 }
+
 .qtag {
   overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--surface-3);
   color: var(--text-subtle);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.5px;
   font-style: normal;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .qbar {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--surface-3);
+  height: 5px;
   overflow: hidden;
+  border-radius: 999px;
+  background: var(--track);
 }
+
 .qbar span {
   display: block;
   height: 100%;
   min-width: 3px;
-  border-radius: 999px;
-  transition: width 0.4s ease;
+  border-radius: inherit;
+  transition: width 0.3s ease;
 }
-.qbar span.ok { background: var(--u-ok); }
-.qbar span.warn { background: var(--u-warn); }
-.qbar span.crit { background: var(--u-crit); }
+
+.qbar span.ok {
+  background: var(--u-ok);
+}
+
+.qbar span.warn {
+  background: var(--u-warn);
+}
+
+.qbar span.crit {
+  background: var(--u-crit);
+}
+
 .qval {
+  width: 66px;
   font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 650;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
-.qval.ok { color: var(--text); }
-.qval.warn { color: var(--u-warn); }
-.qval.crit { color: var(--u-crit); }
-.qval.muted { color: var(--text-subtle); }
+
+.qval.ok {
+  color: var(--text);
+}
+
+.qval.warn {
+  color: var(--u-warn);
+}
+
+.qval.crit {
+  color: var(--u-crit);
+}
+
+.qval.muted,
+.qnote {
+  color: var(--text-subtle);
+}
+
 .qnote {
   overflow: hidden;
-  color: var(--text-subtle);
-  font-size: 12px;
+  font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-@media (max-width: 520px) {
+
+@media (max-width: 640px) {
+  .qsummary-head {
+    align-items: flex-start;
+  }
+
   .qrow {
     grid-template-columns: 1fr 52px;
+    padding: 10px 16px;
   }
+
   .qname {
     grid-column: 1 / -1;
   }
-}
 
-/* Glass prototype */
-.qsummary {
-  padding: 0 0 7px;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-.qsummary-head {
-  align-items: baseline;
-  margin: 0;
-  padding: 21px 26px 5px;
-}
-.qsummary-head h2 { margin: 0 0 3px; font-size: 16.5px; font-weight: 700; }
-.qsummary-head p { margin: 0; color: var(--text-subtle); font-size: 12.5px; }
-.qsummary-link { color: var(--accent); font-size: 12.5px; font-weight: 600; }
-.qrow {
-  grid-template-columns: 175px 1fr 66px;
-  gap: 14px;
-  padding: 13px 26px;
-  border-top: 1px solid var(--border);
-}
-.qrow:first-child { border-top: 0; }
-.qname { gap: 8px; color: var(--text); font-size: 14px; font-weight: 600; }
-.qtag { padding: 2px 8px; border-radius: 7px; background: var(--surface-3); color: var(--text-subtle); font-family: var(--font-sans); font-size: 10.5px; font-weight: 600; }
-.qbar { height: 7px; background: var(--track); }
-.qval { width: 66px; color: var(--text); font-size: 13px; font-weight: 700; }
-.qval.crit { color: #d8405c; }
-.qnote { color: var(--text-subtle); font-size: 12px; }
-
-@media (max-width: 640px) {
-  .qrow { grid-template-columns: 1fr 52px; padding: 13px 18px; }
-  .qname { grid-column: 1 / -1; }
+  .qval {
+    width: 52px;
+  }
 }
 </style>

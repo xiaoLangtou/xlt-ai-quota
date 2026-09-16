@@ -83,6 +83,7 @@ export class QoderConnector implements Connector, QuotaConnector, TokenConnector
     return rows.map((row) => ({
       platform: "qoder",
       date: row.d,
+      model: row.model || undefined,
       inputTokens: num(row.inp),
       outputTokens: num(row.outp),
       cachedTokens: row.cache != null ? num(row.cache) : undefined,
@@ -94,6 +95,7 @@ export class QoderConnector implements Connector, QuotaConnector, TokenConnector
 
 interface QoderTokenRow {
   d: string;
+  model?: string;
   inp?: number | string;
   outp?: number | string;
   cache?: number | string;

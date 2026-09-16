@@ -29,7 +29,7 @@
         "label": "tray-panel",
         "url": "tray-panel.html",
         "title": "AI 用量",
-        "width": 314,
+        "width": 336,
         "height": 360,
         "visible": false,
         "decorations": false,

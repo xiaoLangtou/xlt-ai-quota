@@ -11,9 +11,11 @@ tauri-build = { version = "2", features = [] }
 base64 = "0.22.1"
 chrono = "0.4.42"
 regex = "1.11.1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-dialog = "2"
 
 [profile.release]
 panic = "abort"

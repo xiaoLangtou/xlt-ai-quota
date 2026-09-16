@@ -16,6 +16,8 @@ const TOOL_LABEL: Record<string, string> = {
   kiro: "Kiro",
   qoder: "Qoder",
   "opencode-go": "OpenCode Go",
+  gemini: "Gemini CLI",
+  copilot: "GitHub Copilot",
 };
 const TOOL_BRAND: Record<string, [string, string]> = {
   ark: ["--brand-ark", "#ef8c4a"],
@@ -24,6 +26,8 @@ const TOOL_BRAND: Record<string, [string, string]> = {
   kiro: ["--brand-kiro", "#8b7ff0"],
   qoder: ["--brand-qoder", "#e5697a"],
   "opencode-go": ["--brand-open", "#17b8a6"],
+  gemini: ["--brand-gemini", "#4989f5"],
+  copilot: ["--brand-copilot", "#6e7681"],
 };
 
 function cssVar(name: string, fallback: string): string {
@@ -224,24 +228,4 @@ const option = computed(() => {
   }
 }
 
-/* Glass prototype */
-.donut-card {
-  padding: 0;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-.donut-head { padding: 21px 26px 0; }
-.donut-head h3 { font-family: "Manrope", "PingFang SC", sans-serif; font-size: 16.5px; font-weight: 700; }
-.donut-head p { margin-top: 3px; color: var(--text-subtle); font-size: 12.5px; }
-.donut-body { flex-direction: column; justify-content: center; gap: 8px; margin: 0; padding: 16px 24px 24px; }
-.donut-wrap,
-.donut,
-.donut-empty { width: 132px; height: 132px; flex-basis: 132px; }
-.donut-empty { border: 2px dashed var(--border-strong); color: var(--text-subtle); font-size: 12.5px; }
-.donut-legend { width: 100%; }
-.donut-center strong { font-size: 17px; }
 </style>

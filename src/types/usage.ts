@@ -2,6 +2,14 @@
 
 export type Platform = "ark" | "codex" | "kiro" | "qoder" | "opencode-go";
 
+/** 会在「套餐额度」区域展示的平台。 */
+export const QUOTA_PLATFORMS = ["codex", "ark", "kiro", "qoder"] as const;
+export type QuotaPlatform = (typeof QUOTA_PLATFORMS)[number];
+
+/** 套餐额度视图的显示开关；方舟的两种套餐可独立控制。 */
+export const QUOTA_DISPLAY_TARGETS = ["codex", "ark-coding", "ark-agent", "kiro", "qoder"] as const;
+export type QuotaDisplayTarget = (typeof QUOTA_DISPLAY_TARGETS)[number];
+
 export type QuotaMetric =
   | "five_hour"
   | "weekly"
@@ -149,11 +157,14 @@ export interface TokenSummary {
   output: number;
   cached?: number;
   requests: number;
+  /** 预估费用（USD），按模型单价估算 */
+  costUsd: number;
   /** 与上一周期对比的总变化百分比，负值表示下降 */
   deltaPct?: number;
   inputDeltaPct?: number;
   outputDeltaPct?: number;
   requestsDeltaPct?: number;
+  costDeltaPct?: number;
 }
 
 export interface TrendPoint {
@@ -162,6 +173,8 @@ export interface TrendPoint {
   input: number;
   output: number;
   requests: number;
+  /** 当日预估费用（USD） */
+  costUsd: number;
 }
 
 /** 贡献热力图的单日数据。 */
@@ -192,6 +205,27 @@ export interface ToolUsage {
   input: number;
   output: number;
   requests: number;
+  /** 预估费用（USD） */
+  costUsd: number;
+  /** 占所选周期总 Token 的百分比 */
+  pct: number;
+}
+
+/** 按模型聚合的用量，用于「按模型统计」。 */
+export interface ModelUsage {
+  /** 规范化后的模型名（如 claude-opus-4-8、gpt-5.5、quest-ultimate） */
+  model: string;
+  /** 该模型主要归属的平台（Token 最多的那个），用于配色/图标 */
+  platform: string;
+  total: number;
+  input: number;
+  output: number;
+  cached: number;
+  requests: number;
+  /** 预估费用（USD），按模型单价估算 */
+  costUsd: number;
+  /** 该模型是否命中内置定价（false 表示走默认价，UI 标注预估） */
+  priced: boolean;
   /** 占所选周期总 Token 的百分比 */
   pct: number;
 }
@@ -209,6 +243,8 @@ export interface SyncInfo {
 
 /** 卡片展示用：单个平台聚合后的额度视图 */
 export interface PlatformQuotaView {
+  /** 视图唯一标识；同一平台有多个套餐时仍保持稳定。 */
+  id: string;
   platform: Platform;
   name: string;
   planTag: string;

@@ -27,11 +27,12 @@ export class OpenCodeConnector implements Connector, TokenConnector {
     return true;
   }
 
-  async fetchTokens(range: { start: string; end: string }): Promise<TokenDailyUsage[]> {
+  async fetchTokens(range: { start: string; end: string; tz?: string }): Promise<TokenDailyUsage[]> {
     const collectedAt = new Date().toISOString();
     const payload = (await httpGet({
       baseUrl: this.baseUrl,
       path: "/stats",
+      query: { tz: range.tz },
     }).catch((e: unknown) => {
       throw new ConnectorError(this.id, "拉取 OpenCode Token 用量失败", e);
     })) as OpenCodeRow[];
@@ -42,6 +43,7 @@ export class OpenCodeConnector implements Connector, TokenConnector {
       .map((r) => ({
         platform: "opencode-go",
         date: r.d,
+        model: r.model || undefined,
         inputTokens: num(r.inp),
         outputTokens: num(r.outp),
         cachedTokens: r.cache != null ? num(r.cache) : undefined,
@@ -52,6 +54,7 @@ export class OpenCodeConnector implements Connector, TokenConnector {
 
 interface OpenCodeRow {
   d: string;
+  model?: string;
   inp?: number | string;
   outp?: number | string;
   cache?: number | string;

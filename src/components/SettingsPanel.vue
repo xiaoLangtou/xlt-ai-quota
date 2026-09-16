@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { httpGet } from "@/connectors/types";
 import { useUsageDashboard } from "@/composables/useUsageDashboard";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import ToolLogo from "@/components/ToolLogo.vue";
+import { type QuotaDisplayTarget } from "@/types/usage";
 
 type ArkStatusPayload = {
   logged_in?: boolean;
@@ -16,7 +21,11 @@ type ArkStatusPayload = {
   error?: { message?: unknown };
 };
 
-const props = defineProps<{ open?: boolean; embedded?: boolean }>();
+const props = withDefaults(defineProps<{
+  open?: boolean;
+  embedded?: boolean;
+  syncSignal?: number;
+}>(), { syncSignal: 0 });
 const emit = defineEmits<{
   (e: "update:open", value: boolean): void;
   (e: "synced"): void;
@@ -25,12 +34,50 @@ const emit = defineEmits<{
 const { loadSettings, saveSettings } = useUsageDashboard();
 
 const arkBase = ref("");
+const timezone = ref("");
+const statsSince = ref("");
+const hiddenQuotaTargets = ref<QuotaDisplayTarget[]>([]);
+const oilProvince = ref("");
+const oilApiKey = ref("");
+const systemTz = ref("");
 const arkStatus = ref<{ checking: boolean; ok: boolean | null; message: string }>({
   checking: false,
   ok: null,
   message: "",
 });
 const saved = ref(false);
+
+// 常见时区选项（含跟随系统）。
+const TIMEZONE_OPTIONS = [
+  "Asia/Shanghai",
+  "Asia/Hong_Kong",
+  "Asia/Tokyo",
+  "Asia/Singapore",
+  "UTC",
+  "America/Los_Angeles",
+  "America/New_York",
+  "Europe/London",
+  "Europe/Paris",
+];
+
+const OIL_PROVINCES = [
+  "北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江",
+  "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南", "湖北",
+  "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州", "云南", "西藏",
+  "陕西", "甘肃", "青海", "宁夏", "新疆",
+];
+const OIL_PROVINCE_OPTIONS = OIL_PROVINCES.map((province) => ({
+  value: province,
+  label: province,
+}));
+
+const QUOTA_DISPLAY_OPTIONS: { value: QuotaDisplayTarget; label: string; platform: string }[] = [
+  { value: "codex", label: "Codex", platform: "codex" },
+  { value: "ark-coding", label: "火山方舟 · Coding Plan", platform: "ark" },
+  { value: "ark-agent", label: "火山方舟 · Agent Plan", platform: "ark" },
+  { value: "kiro", label: "Kiro", platform: "kiro" },
+  { value: "qoder", label: "Qoder", platform: "qoder" },
+];
 
 /** 除火山方舟外的本机 CLI 连接器：登录态由各自 CLI 维护，同步时自动汇总。 */
 const CONNECTORS = [
@@ -39,12 +86,29 @@ const CONNECTORS = [
   { key: "opencode", name: "OpenCode", desc: "读取本机 OpenCode 数据库的逐请求 Token", badge: "自动采集", tone: "ok" },
   { key: "kiro", name: "Kiro CLI", desc: "官方 Credits + 本地会话 Token（estimateTokens 估算）", badge: "额度+估算", tone: "ok" },
   { key: "qoder", name: "Qoder", desc: "套餐 Credits + 本地 SQLite 会话 Token（真实计数）", badge: "额度+Token", tone: "ok" },
+  { key: "gemini", name: "Gemini CLI", desc: "读取 ~/.gemini/tmp 会话的真实 Token", badge: "自动采集", tone: "ok" },
+  { key: "copilot", name: "GitHub Copilot", desc: "读取 ~/.copilot 会话的真实 Token", badge: "自动采集", tone: "ok" },
 ] as const;
 
 function fillForm() {
   const cfg = loadSettings();
   arkBase.value = cfg.ark.baseUrl;
+  oilProvince.value = cfg.oil.province;
+  oilApiKey.value = cfg.oil.apiKey;
+  systemTz.value = cfg.systemTimezone;
+  timezone.value = cfg.preferences.timezone;
+  statsSince.value = cfg.preferences.statsSince ?? "";
+  hiddenQuotaTargets.value = [...cfg.quotaDisplay.hiddenPlatforms];
 }
+
+/** 时区下拉选项：系统时区置顶，去重后拼接常见时区。 */
+const timezoneOptions = computed(() => {
+  const list = [systemTz.value, ...TIMEZONE_OPTIONS];
+  return [...new Set(list.filter(Boolean))].map((value) => ({
+    value,
+    label: value === systemTz.value ? `${value}（系统）` : value,
+  }));
+});
 
 async function checkArkStatus() {
   arkStatus.value = { checking: true, ok: null, message: "检测中…" };
@@ -89,7 +153,7 @@ async function checkArkStatus() {
 watch(
   () => props.open,
   (v) => {
-    if (v) {
+    if (v || props.embedded) {
       saved.value = false;
       fillForm();
       checkArkStatus();
@@ -98,12 +162,24 @@ watch(
   { immediate: true },
 );
 
+watch(
+  () => props.syncSignal,
+  (value, previous) => {
+    if (props.embedded && value !== previous) persist(true);
+  },
+);
+
 function close() {
   emit("update:open", false);
 }
 
 function persist(andSync: boolean) {
-  saveSettings({ ark: { baseUrl: arkBase.value } });
+  saveSettings({
+    ark: { baseUrl: arkBase.value },
+    oil: { province: oilProvince.value, apiKey: oilApiKey.value },
+    quotaDisplay: { hiddenPlatforms: hiddenQuotaTargets.value },
+    preferences: { timezone: timezone.value, statsSince: statsSince.value || null },
+  });
   fillForm();
   if (andSync) {
     emit("synced");
@@ -111,6 +187,31 @@ function persist(andSync: boolean) {
   } else {
     saved.value = true;
   }
+}
+
+function updateQuotaDisplayTarget(target: QuotaDisplayTarget, visible: boolean): void {
+  hiddenQuotaTargets.value = visible
+    ? hiddenQuotaTargets.value.filter((item) => item !== target)
+    : [...hiddenQuotaTargets.value, target];
+  saveSettings({ quotaDisplay: { hiddenPlatforms: hiddenQuotaTargets.value } });
+  saved.value = true;
+}
+
+/** 保存偏好（不触发同步），供嵌入模式即时生效。 */
+function savePreferencesOnly() {
+  saveSettings({ preferences: { timezone: timezone.value, statsSince: statsSince.value || null } });
+  fillForm();
+  saved.value = true;
+}
+
+function updateTimezone(value: string): void {
+  timezone.value = value;
+  savePreferencesOnly();
+}
+
+function updateStatsSince(value: string): void {
+  statsSince.value = value;
+  savePreferencesOnly();
 }
 </script>
 
@@ -121,15 +222,33 @@ function persist(andSync: boolean) {
         <header class="panel-head">
           <div v-if="embedded">
             <h2>数据源</h2>
-            <p>均为本机 CLI，登录态只保存在本机；点击同步统一汇总</p>
+            <p>本机 CLI 与公开数据接口统一汇总，配置只保存在本机</p>
           </div>
           <div v-else>
             <span class="eyebrow">CONNECTORS</span>
             <h2>连接与设置</h2>
-            <p>数据源均为本机 CLI，登录态只保存在本机；点击同步统一汇总。</p>
+            <p>本机 CLI 与公开数据接口统一汇总，登录态和配置只保存在本机。</p>
           </div>
           <Button v-if="!embedded" variant="ghost" size="icon" aria-label="关闭" @click="close">×</Button>
         </header>
+
+        <div class="pref-section quota-display-section">
+          <div class="pref-head">
+            <strong>套餐额度展示</strong>
+            <small>只展示你正在订阅或需要关注的平台</small>
+          </div>
+          <div class="quota-display-grid">
+            <label v-for="option in QUOTA_DISPLAY_OPTIONS" :key="option.value" class="quota-display-option">
+              <Checkbox
+                :model-value="!hiddenQuotaTargets.includes(option.value)"
+                @update:model-value="updateQuotaDisplayTarget(option.value, $event === true)"
+              />
+              <ToolLogo :platform="option.platform" :size="18" />
+              <span>{{ option.label }}</span>
+            </label>
+          </div>
+          <p class="pref-note">隐藏后仅不在套餐额度区域显示，已采集的数据不会删除。</p>
+        </div>
 
         <div class="connector-list">
           <!-- 火山方舟：需登录，展示动态状态 -->
@@ -168,10 +287,55 @@ function persist(andSync: boolean) {
           </div>
         </div>
 
+        <div class="pref-section">
+          <div class="pref-head">
+            <strong>国内油价监控</strong>
+            <small>省级最高零售指导价、下一调价窗口与国家发改委正式公告</small>
+          </div>
+          <div class="pref-grid">
+            <label class="pref-field">
+              <span>监控省份</span>
+              <Select v-model="oilProvince" :options="OIL_PROVINCE_OPTIONS" placeholder="请选择省份" />
+            </label>
+            <label class="pref-field oil-key-field">
+              <span>极数本源预测 API KEY（可选）</span>
+              <Input v-model="oilApiKey" type="password" autocomplete="off" placeholder="匿名额度不足时填写" />
+            </label>
+          </div>
+          <p class="pref-note">今日指导价与预测分开同步；加油站实际挂牌价可能浮动，正式调价以国家发改委公告为准。</p>
+        </div>
+
+        <div class="pref-section">
+          <div class="pref-head">
+            <strong>统计偏好</strong>
+            <small>影响用量分析的分桶时区与统计起始日</small>
+          </div>
+          <div class="pref-grid">
+            <label class="pref-field">
+              <span>时区</span>
+              <Select :model-value="timezone" :options="timezoneOptions" @update:model-value="updateTimezone" />
+            </label>
+            <label class="pref-field">
+              <span>统计起始日</span>
+              <DatePicker :model-value="statsSince" placeholder="选择起始日期" @update:model-value="updateStatsSince" />
+            </label>
+            <Button
+              v-if="statsSince"
+              type="button"
+              variant="ghost"
+              size="sm"
+              @click="statsSince = ''; savePreferencesOnly()"
+            >
+              清除起始日
+            </Button>
+          </div>
+          <p class="pref-note">时区 / 起始日调整后，点击「立即同步」按新设置重新采集本机用量。</p>
+        </div>
+
         <footer class="panel-foot">
           <span class="foot-hint">
             <template v-if="saved">已保存</template>
-            <template v-else>WebStorm ACP 只是启动这些 CLI 的入口，不单独保存 Token。</template>
+            <template v-else>连接配置只保存在本机，不写入项目文件。</template>
           </span>
           <div class="actions">
             <Button v-if="!embedded" variant="ghost" @click="close">关闭</Button>
@@ -198,14 +362,14 @@ function persist(andSync: boolean) {
 }
 .panel.embedded {
   width: 100%;
-  max-width: 1320px;
+  max-width: none;
   max-height: none;
   margin: 0 auto;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  padding: 0 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 .panel-head {
   display: flex;
@@ -331,6 +495,73 @@ function persist(andSync: boolean) {
 .conn-msg {
   color: var(--u-warn);
 }
+.pref-section {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.pref-head strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.pref-head small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.pref-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+.pref-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 160px;
+}
+.oil-key-field { min-width: min(280px, 100%); flex: 1; }
+.pref-field span {
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+}
+.pref-note {
+  margin: 12px 0 0;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+.quota-display-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+.quota-display-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.quota-display-option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
 .panel-foot {
   display: flex;
   align-items: center;
@@ -350,7 +581,56 @@ function persist(andSync: boolean) {
   flex: 0 0 auto;
 }
 
+.panel.embedded .panel-head {
+  align-items: baseline;
+  margin: 0;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.panel.embedded .panel-head h2 {
+  margin: 0 0 3px;
+  font-size: 16px;
+  font-weight: 680;
+}
+.panel.embedded .panel-head p {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+.panel.embedded .connector-list {
+  display: block;
+}
+.panel.embedded .connector-row {
+  gap: 14px;
+  padding: 14px 22px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+.panel.embedded .conn-mark {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+}
+.panel.embedded .connector-note {
+  margin: 14px 22px;
+}
+.panel.embedded .pref-section {
+  margin: 14px 22px 4px;
+}
+.panel.embedded .panel-foot {
+  margin: 0;
+  padding: 14px 22px 10px;
+  border: 0;
+}
+.panel.embedded .actions {
+  display: none;
+}
+
 @media (max-width: 640px) {
+  .quota-display-grid {
+    grid-template-columns: 1fr;
+  }
   .connector-row {
     flex-wrap: wrap;
   }
@@ -361,35 +641,4 @@ function persist(andSync: boolean) {
   }
 }
 
-/* Glass prototype */
-.panel.embedded {
-  width: 100%;
-  max-width: none;
-  padding: 0 0 6px;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-.panel.embedded .panel-head { align-items: baseline; margin: 0; padding: 21px 26px 16px; border: 0; }
-.panel.embedded .panel-head h2 { margin: 0 0 3px; font-size: 16.5px; font-weight: 700; }
-.panel.embedded .panel-head p { margin: 0; color: var(--text-subtle); font-size: 12.5px; }
-.panel.embedded .connector-list { display: block; }
-.panel.embedded .connector-row { gap: 14px; padding: 16px 26px; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
-.panel.embedded .connector-row:first-child { border-top: 0; }
-.panel.embedded .conn-mark { width: 37px; height: 37px; flex-basis: 37px; border-radius: 12px; font-family: "Manrope", sans-serif; }
-.panel.embedded .conn-info strong { margin-bottom: 2px; font-size: 14px; font-weight: 700; }
-.panel.embedded .conn-info small { margin: 0; color: var(--text-subtle); font-size: 12px; }
-.panel.embedded .conn-badge { padding: 5px 11px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-.panel.embedded .conn-badge.ok { background: rgba(47, 190, 143, 0.15); color: #1e9a76; }
-.panel.embedded .conn-badge.off { background: rgba(242, 146, 74, 0.15); color: #c46a1f; }
-.panel.embedded .connector-note { margin: 0 26px 18px; padding: 14px 17px; border: 1px solid rgba(242, 146, 74, 0.24); border-radius: 15px; background: rgba(242, 146, 74, 0.08); }
-.panel.embedded .connector-note p { color: #8a5623; }
-.panel.embedded .connector-note code { background: var(--surface-3); }
-.panel.embedded .cmd { margin: 10px 0 0; padding: 10px 15px; border: 0; border-radius: 10px; background: rgba(27, 32, 54, 0.9); color: #eaf0ff; font-size: 12.5px; }
-.panel.embedded .panel-foot { margin: 0; padding: 14px 26px 13px; border: 0; }
-.panel.embedded .foot-hint { color: var(--text-subtle); font-size: 11.5px; }
-.panel.embedded .actions { display: none; }
 </style>

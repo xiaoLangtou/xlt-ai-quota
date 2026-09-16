@@ -1,5 +1,6 @@
 import { computed, reactive, type Reactive } from "vue";
 import { setupUsageTray, updateUsageTrayStatus } from "@/desktop/tray";
+import { pushToast } from "@/composables/useToast";
 import { usageService, type TodayHourly } from "@/services/usage-service";
 import { isTauriDesktop } from "@/connectors/types";
 import type {
@@ -10,7 +11,9 @@ import type {
   TrendPoint,
   PlatformDailyPoint,
   ToolUsage,
+  ModelUsage,
   HeatmapDay,
+  QuotaDisplayTarget,
 } from "@/types/usage";
 
 interface DashboardState {
@@ -20,6 +23,7 @@ interface DashboardState {
   trend: TrendPoint[];
   platformDaily: PlatformDailyPoint[];
   toolUsage: ToolUsage[];
+  modelUsage: ModelUsage[];
   heatmap: HeatmapDay[];
   todayHourly: TodayHourly;
   sync: SyncInfo;
@@ -30,10 +34,11 @@ interface DashboardState {
 const state = reactive<DashboardState>({
   range: "7d",
   quotas: [],
-  summary: { total: 0, input: 0, output: 0, requests: 0 },
+  summary: { total: 0, input: 0, output: 0, requests: 0, costUsd: 0 },
   trend: [],
   platformDaily: [],
   toolUsage: [],
+  modelUsage: [],
   heatmap: [],
   todayHourly: { labels: [], trend: [], platform: [] },
   sync: { lastSyncAt: null, syncing: false },
@@ -51,6 +56,7 @@ function readAll(): void {
   state.trend = usageService.getTokenTrend(state.range);
   state.platformDaily = usageService.getPlatformDaily(state.range);
   state.toolUsage = usageService.getToolBreakdown(state.range);
+  state.modelUsage = usageService.getModelBreakdown(state.range);
   state.heatmap = usageService.getDailyHeatmap();
   state.sync = usageService.getSyncInfo();
   state.syncError = state.sync.error ?? null;
@@ -74,6 +80,7 @@ export function useUsageDashboard() {
     state.trend = usageService.getTokenTrend(preset);
     state.platformDaily = usageService.getPlatformDaily(preset);
     state.toolUsage = usageService.getToolBreakdown(preset);
+    state.modelUsage = usageService.getModelBreakdown(preset);
     // 切到「今天」时立即拉最新本地用量 + 按小时时间轴，避免看到过期数据。
     if (preset === "today") {
       void syncToday();
@@ -120,8 +127,13 @@ export function useUsageDashboard() {
     try {
       await usageService.syncAll(readAll);
       readAll();
+      // 依据同步结果给出反馈。
+      if (state.sync.outcome === "success") pushToast("同步完成", "success");
+      else if (state.sync.outcome === "partial") pushToast(state.syncError || "部分连接器同步失败", "warn");
+      else if (state.sync.outcome === "failed") pushToast(state.syncError || "同步失败", "error");
     } catch (e) {
       state.syncError = e instanceof Error ? e.message : String(e);
+      pushToast(state.syncError, "error");
     } finally {
       state.loading = false;
       // 防止未预期异常或窗口中断后把“同步中”遗留到下次启动。
@@ -159,13 +171,27 @@ export function useUsageDashboard() {
   function loadSettings() {
     return {
       ark: usageService.getArkConfigView(),
+      oil: usageService.getOilConfigView(),
+      quotaDisplay: usageService.getQuotaDisplayConfigView(),
+      preferences: usageService.getPreferencesView(),
+      systemTimezone: usageService.getSystemTimezone(),
     };
   }
 
   function saveSettings(patch: {
     ark?: { baseUrl?: string };
+    oil?: { province: string; apiKey: string };
+    quotaDisplay?: { hiddenPlatforms: QuotaDisplayTarget[] };
+    preferences?: { timezone?: string; statsSince?: string | null };
   }): void {
     if (patch.ark) usageService.saveArkBaseUrl(patch.ark.baseUrl ?? "");
+    if (patch.oil) usageService.saveOilConfig(patch.oil);
+    if (patch.quotaDisplay) {
+      usageService.saveQuotaDisplayConfig(patch.quotaDisplay);
+      readAll();
+      updateTray();
+    }
+    if (patch.preferences) usageService.savePreferences(patch.preferences);
   }
 
   if (!autoSyncStarted) {
@@ -194,6 +220,7 @@ export function useUsageDashboard() {
     trend: computed(() => state.trend),
     platformDaily: computed(() => state.platformDaily),
     toolUsage: computed(() => state.toolUsage),
+    modelUsage: computed(() => state.modelUsage),
     heatmap: computed(() => state.heatmap),
     todayHourly: computed(() => state.todayHourly),
     loading: computed(() => state.loading),

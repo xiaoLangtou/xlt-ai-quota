@@ -4,6 +4,8 @@ import type { UsageStorage } from "@/storage/storage";
 import {
   type Platform,
   PLATFORM_META,
+  type QuotaDisplayTarget,
+  QUOTA_PLATFORMS,
   type PlatformQuotaView,
   type QuotaMetric,
   type QuotaSnapshot,
@@ -13,6 +15,7 @@ import {
   type TrendPoint,
   type PlatformDailyPoint,
   type ToolUsage,
+  type ModelUsage,
   type HeatmapDay,
   type QuotaWindowView,
 } from "@/types/usage";
@@ -22,6 +25,9 @@ import { KiroConnector } from "@/connectors/kiro";
 import { QoderConnector } from "@/connectors/qoder";
 import { OpenCodeConnector } from "@/connectors/opencode";
 import { ClaudeConnector } from "@/connectors/claude";
+import { GeminiConnector } from "@/connectors/gemini";
+import { CopilotConnector } from "@/connectors/copilot";
+import { computeCostUsd, isModelPriced } from "@/pricing";
 import {
   ConnectorError,
   httpGet,
@@ -56,7 +62,7 @@ const WINDOW_SPEC: Record<
   ],
 };
 
-/** 各周期的展示元数据与规范排序；ark 卡片按此顺序取前 2 个可用周期 */
+/** 各周期的展示元数据与规范排序。 */
 const METRIC_META: Record<
   QuotaMetric,
   { label: string; tone: QuotaWindowView["tone"]; order: number }
@@ -97,10 +103,13 @@ export class UsageService {
     const qoder = new QoderConnector();
     const opencode = new OpenCodeConnector();
     const claude = new ClaudeConnector();
+    const gemini = new GeminiConnector();
+    const copilot = new CopilotConnector();
     // Kiro 仅 Credits；Codex、OpenCode 与 Claude Code 的 Token 来自本机会话记录。
     this.quotaConnectors = [ark, codex, kiro, qoder];
     // Kiro CLI 本地会话经 estimateTokens 估算；Qoder 读本地 SQLite 的真实 token。
-    this.tokenConnectors = [ark, codex, opencode, claude, kiro, qoder];
+    // Gemini CLI / GitHub Copilot CLI 读本机会话文件的真实 token。
+    this.tokenConnectors = [ark, codex, opencode, claude, kiro, qoder, gemini, copilot];
   }
 
   /** 数据版本变更时清空旧数据（含历史种子）；不再注入任何默认值 */
@@ -112,19 +121,36 @@ export class UsageService {
 
   getPlatformQuotaViews(): PlatformQuotaView[] {
     const all = this.storage.listQuotas();
-    const order: Platform[] = ["codex", "ark", "kiro", "qoder"];
-    return order.map((platform) => this.buildPlatformView(platform, all));
+    const hidden = new Set(
+      this.storage.getConnectorConfig().quotaDisplay?.hiddenPlatforms ?? [],
+    );
+    return QUOTA_PLATFORMS
+      .filter((platform) => platform === "ark" || !hidden.has(platform))
+      .flatMap((platform) => {
+        if (platform !== "ark") return [this.buildPlatformView(platform, all)];
+        const plans = this.latestArkPlans(all);
+        return plans.length
+          ? plans
+              .filter((plan) => {
+                const target = arkQuotaDisplayTarget(plan);
+                return !target || !hidden.has(target);
+              })
+              .map((plan) => this.buildPlatformView(platform, all, plan))
+          : [this.buildPlatformView(platform, all)];
+      });
   }
 
   private buildPlatformView(
     platform: Platform,
     all: QuotaSnapshot[],
+    accountName?: string,
   ): PlatformQuotaView {
     const meta = PLATFORM_META[platform];
-    const latest = this.latestByMetric(platform, all);
+    const latest = this.latestByMetric(platform, all, accountName);
     const collectedAt =
       latest[0]?.collectedAt ?? new Date(0).toISOString();
     const view: PlatformQuotaView = {
+      id: accountName ? `${platform}:${accountName}` : platform,
       platform,
       name: meta.name,
       planTag: PLAN_TAG[platform],
@@ -135,7 +161,7 @@ export class UsageService {
     };
 
     if (platform === "ark") {
-      view.planTag = arkPlanTag(latest[0]?.accountName);
+      view.planTag = arkPlanTag(accountName ?? latest[0]?.accountName);
     }
 
     if (platform === "codex") {
@@ -211,11 +237,28 @@ export class UsageService {
   private latestByMetric(
     platform: Platform,
     all: QuotaSnapshot[],
+    accountName?: string,
   ): QuotaSnapshot[] {
     return all
-      .filter((q) => q.platform === platform)
+      .filter((q) => q.platform === platform && (!accountName || q.accountName === accountName))
       .sort((a, b) => (a.collectedAt < b.collectedAt ? 1 : -1))
       .filter((q, i, arr) => arr.findIndex((x) => x.metric === q.metric) === i);
+  }
+
+  /** 仅使用方舟最新一次采集返回的已订阅套餐，避免已退订的历史套餐继续显示。 */
+  private latestArkPlans(all: QuotaSnapshot[]): string[] {
+    const snapshots = all.filter((item) => item.platform === "ark");
+    const latestAt = snapshots.reduce(
+      (value, item) => (item.collectedAt > value ? item.collectedAt : value),
+      "",
+    );
+    if (!latestAt) return [];
+    return [...new Set(
+      snapshots
+        .filter((item) => item.collectedAt === latestAt)
+        .map((item) => item.accountName)
+        .filter(Boolean),
+    )].sort((a, b) => arkPlanOrder(a) - arkPlanOrder(b) || a.localeCompare(b));
   }
 
   // ---- 读：Token ----
@@ -226,7 +269,12 @@ export class UsageService {
     const offset = preset === "today" ? 0 : preset === "7d" ? 6 : preset === "30d" ? 29 : 89;
     const start = new Date(end);
     start.setDate(start.getDate() - offset);
-    return { start: ymd(start), end: ymd(end) };
+    const endStr = ymd(end);
+    let startStr = ymd(start);
+    // 统计起始日：早于此日期的数据不纳入分析/同步。clamp 不超过 end。
+    const since = settings.getPreferences().statsSince;
+    if (since && since > startStr) startStr = since > endStr ? endStr : since;
+    return { start: startStr, end: endStr };
   }
 
   getTokenSummary(preset: RangePreset): TokenSummary {
@@ -237,6 +285,7 @@ export class UsageService {
     const output = sum(rows, (r) => r.outputTokens);
     const cached = sum(rows, (r) => r.cachedTokens ?? 0);
     const requests = sum(rows, (r) => r.requestCount ?? 0);
+    const costUsd = sum(rows, (r) => costOf(r));
 
     // 上一周期对比（各指标独立）
     const prev = this.prevRange(range, preset);
@@ -245,6 +294,7 @@ export class UsageService {
     const prevInput = sum(prevRows, (r) => r.inputTokens);
     const prevOutput = sum(prevRows, (r) => r.outputTokens);
     const prevReq = sum(prevRows, (r) => r.requestCount ?? 0);
+    const prevCost = sum(prevRows, (r) => costOf(r));
 
     return {
       total,
@@ -252,10 +302,12 @@ export class UsageService {
       output,
       cached: cached || undefined,
       requests,
+      costUsd,
       deltaPct: deltaPct(total, prevTotal),
       inputDeltaPct: deltaPct(input, prevInput),
       outputDeltaPct: deltaPct(output, prevOutput),
       requestsDeltaPct: deltaPct(requests, prevReq),
+      costDeltaPct: deltaPct(costUsd, prevCost),
     };
   }
 
@@ -266,11 +318,12 @@ export class UsageService {
     for (const r of rows) {
       const cur =
         byDate.get(r.date) ??
-        ({ date: r.date, total: 0, input: 0, output: 0, requests: 0 } satisfies TrendPoint);
+        ({ date: r.date, total: 0, input: 0, output: 0, requests: 0, costUsd: 0 } satisfies TrendPoint);
       cur.input += r.inputTokens;
       cur.output += r.outputTokens;
       cur.total += r.inputTokens + r.outputTokens;
       cur.requests += r.requestCount ?? 0;
+      cur.costUsd += costOf(r);
       byDate.set(r.date, cur);
     }
     return fillMissingDays(range, byDate);
@@ -300,16 +353,75 @@ export class UsageService {
     for (const r of rows) {
       const cur =
         byTool.get(r.platform) ??
-        ({ platform: r.platform, total: 0, input: 0, output: 0, requests: 0, pct: 0 } satisfies ToolUsage);
+        ({ platform: r.platform, total: 0, input: 0, output: 0, requests: 0, costUsd: 0, pct: 0 } satisfies ToolUsage);
       cur.input += r.inputTokens;
       cur.output += r.outputTokens;
       cur.total += r.inputTokens + r.outputTokens;
       cur.requests += r.requestCount ?? 0;
+      cur.costUsd += costOf(r);
       byTool.set(r.platform, cur);
       grand += r.inputTokens + r.outputTokens;
     }
     return [...byTool.values()]
       .map((t) => ({ ...t, pct: grand > 0 ? Math.round((t.total / grand) * 1000) / 10 : 0 }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  /** 按模型聚合所选周期的用量，用于「按模型统计」。无模型信息的行归入 "未知模型"。 */
+  getModelBreakdown(preset: RangePreset): ModelUsage[] {
+    const range = this.getRange(preset);
+    const rows = this.storage.listTokensByRange(range.start, range.end);
+    // 每个模型再按平台记 Token，用于挑选主要归属平台。
+    const byModel = new Map<
+      string,
+      ModelUsage & { platformTotals: Map<string, number> }
+    >();
+    let grand = 0;
+    for (const r of rows) {
+      const model = r.model && r.model.trim() ? r.model : "未知模型";
+      const tokens = r.inputTokens + r.outputTokens;
+      const cur =
+        byModel.get(model) ??
+        {
+          model,
+          platform: r.platform,
+          total: 0,
+          input: 0,
+          output: 0,
+          cached: 0,
+          requests: 0,
+          costUsd: 0,
+          priced: isModelPriced(r.model),
+          pct: 0,
+          platformTotals: new Map<string, number>(),
+        };
+      cur.input += r.inputTokens;
+      cur.output += r.outputTokens;
+      cur.cached += r.cachedTokens ?? 0;
+      cur.total += tokens;
+      cur.requests += r.requestCount ?? 0;
+      cur.costUsd += costOf(r);
+      cur.platformTotals.set(r.platform, (cur.platformTotals.get(r.platform) ?? 0) + tokens);
+      byModel.set(model, cur);
+      grand += tokens;
+    }
+    return [...byModel.values()]
+      .map(({ platformTotals, ...m }) => {
+        // 主要归属平台 = 该模型下 Token 最多的平台。
+        let topPlatform = m.platform;
+        let topTokens = -1;
+        for (const [platform, tokens] of platformTotals) {
+          if (tokens > topTokens) {
+            topTokens = tokens;
+            topPlatform = platform;
+          }
+        }
+        return {
+          ...m,
+          platform: topPlatform,
+          pct: grand > 0 ? Math.round((m.total / grand) * 1000) / 10 : 0,
+        } satisfies ModelUsage;
+      })
       .sort((a, b) => b.total - a.total);
   }
 
@@ -359,7 +471,11 @@ export class UsageService {
     const maxHour = new Date().getHours();
     let rows: { platform: string; hour: number; input: number; output: number }[] = [];
     try {
-      const data = await httpGet({ baseUrl: "/api", path: "/today-hourly" });
+      const data = await httpGet({
+        baseUrl: "/api",
+        path: "/today-hourly",
+        query: { tz: settings.getPreferences().timezone },
+      });
       if (Array.isArray(data)) {
         rows = data as { platform: string; hour: number; input: number; output: number }[];
       }
@@ -375,7 +491,7 @@ export class UsageService {
       const hourRows = rows.filter((r) => Number(r.hour) === h);
       const input = hourRows.reduce((s, r) => s + (Number(r.input) || 0), 0);
       const output = hourRows.reduce((s, r) => s + (Number(r.output) || 0), 0);
-      trend.push({ date: label, total: input + output, input, output, requests: 0 });
+      trend.push({ date: label, total: input + output, input, output, requests: 0, costUsd: 0 });
       const byPlatform: Record<string, number> = {};
       for (const r of hourRows) {
         byPlatform[r.platform] =
@@ -512,7 +628,7 @@ export class UsageService {
         }
       });
 
-    const tokenRange = this.getRange("30d");
+    const tokenRange = { ...this.getRange("30d"), tz: settings.getPreferences().timezone };
     const tokenTasks = this.tokenConnectors
       .filter((c) => c.isConfigured())
       .map(async (c) => {
@@ -555,7 +671,7 @@ export class UsageService {
    * 只覆盖今天这一天的数据，供定时/聚焦自动刷新使用，不改动同步状态与 loading。
    */
   async syncTodayTokens(): Promise<void> {
-    const range = this.getRange("today");
+    const range = { ...this.getRange("today"), tz: settings.getPreferences().timezone };
     const local = this.tokenConnectors.filter((c) => c.id !== "ark" && c.isConfigured());
     await Promise.all(
       local.map(async (c) => {
@@ -582,6 +698,28 @@ export class UsageService {
   saveArkBaseUrl(baseUrl: string): void {
     settings.saveArkBaseUrl(baseUrl);
   }
+  getOilConfigView(): { province: string; apiKey: string } {
+    return settings.getOilConfig();
+  }
+  saveOilConfig(config: { province: string; apiKey: string }): void {
+    settings.saveOilConfig(config);
+  }
+  getQuotaDisplayConfigView(): { hiddenPlatforms: QuotaDisplayTarget[] } {
+    return settings.getQuotaDisplayConfig();
+  }
+  saveQuotaDisplayConfig(config: { hiddenPlatforms: QuotaDisplayTarget[] }): void {
+    settings.saveQuotaDisplayConfig(config);
+  }
+
+  getPreferencesView(): { timezone: string; statsSince: string | null } {
+    return settings.getPreferences();
+  }
+  getSystemTimezone(): string {
+    return settings.systemTimezone();
+  }
+  savePreferences(patch: { timezone?: string; statsSince?: string | null }): void {
+    settings.savePreferences(patch);
+  }
 }
 
 const PLAN_TAG: Record<Platform, string> = {
@@ -601,8 +739,35 @@ function arkPlanTag(accountName: string | undefined): string {
   return "企业版";
 }
 
+function arkPlanOrder(accountName: string): number {
+  if (accountName.includes("coding-plan")) return 0;
+  if (accountName.includes("agent-plan")) return 1;
+  return 2;
+}
+
+function arkQuotaDisplayTarget(accountName: string): QuotaDisplayTarget | undefined {
+  if (accountName.includes("coding-plan")) return "ark-coding";
+  if (accountName.includes("agent-plan")) return "ark-agent";
+  return undefined;
+}
+
 function sum<T>(arr: T[], pick: (x: T) => number): number {
   return arr.reduce((a, x) => a + pick(x), 0);
+}
+
+/** 单条日用量的预估费用（USD），按模型单价估算。 */
+function costOf(r: {
+  model?: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens?: number;
+}): number {
+  return computeCostUsd({
+    model: r.model,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    cachedTokens: r.cachedTokens,
+  });
 }
 
 /** 与上一周期对比的百分比（保留一位小数）；上一周期为 0 时返回 undefined。 */
@@ -623,7 +788,7 @@ function fillMissingDays(range: Range, byDate: Map<string, TrendPoint>): TrendPo
   while (cursor <= end) {
     const key = ymd(cursor);
     out.push(
-      byDate.get(key) ?? { date: key, total: 0, input: 0, output: 0, requests: 0 },
+      byDate.get(key) ?? { date: key, total: 0, input: 0, output: 0, requests: 0, costUsd: 0 },
     );
     cursor.setDate(cursor.getDate() + 1);
   }

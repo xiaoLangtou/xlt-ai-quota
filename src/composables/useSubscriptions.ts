@@ -30,9 +30,6 @@ export function daysUntil(date: string): number {
 
 export function useSubscriptions() {
   const active = computed(() => subscriptions.value.filter((item) => item.status === "active"));
-  const monthlyUsd = computed(() => active.value
-    .filter((item) => item.currency === "USD")
-    .reduce((sum, item) => sum + item.price / (item.billingCycle === "yearly" ? 12 : 1), 0));
   const usdToCnyRate = computed(() => preferences.value.usdToCnyRate);
   // 计划口径：订阅月支出（与账单流水的「实际已记」相互独立）。
   const monthlyCny = computed(() =>
@@ -62,7 +59,6 @@ export function useSubscriptions() {
     subscriptions: computed(() => subscriptions.value),
     bills: computed(() => bills.value),
     monthlyCny,
-    monthlyUsd,
     usdToCnyRate,
     upcomingCount,
     toCny,

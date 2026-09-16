@@ -44,7 +44,63 @@ async function run(
   });
 }
 
+/**
+ * 当前请求的时区（IANA 名）。由各 /stats 端点从 ?tz= 读取后设置，
+ * 供 localDate / localDateHour / todayStr 分桶。应用全局只用一个时区，
+ * 故并发请求携带的 tz 一致，模块级变量无竞态风险。空=跟随系统。
+ */
+let activeTz: string | undefined;
+
+/** 用配置时区拆出年/月/日/时；无 activeTz 或解析失败返回 null（回退系统本地）。 */
+function tzDateParts(ms: number): { y: string; m: string; d: string; h: string } | null {
+  if (!activeTz) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: activeTz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date(ms));
+    const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    let h = g("hour");
+    if (h === "24") h = "00"; // Intl 可能返回 24 表示午夜
+    return { y: g("year"), m: g("month"), d: g("day"), h };
+  } catch {
+    return null;
+  }
+}
+
+/** 配置时区相对 UTC 的分钟偏移（供 sqlite 分桶）；无法解析返回 null。 */
+function tzOffsetMinutes(): number | null {
+  if (!activeTz) return null;
+  try {
+    const name = new Intl.DateTimeFormat("en-US", {
+      timeZone: activeTz,
+      timeZoneName: "longOffset",
+    })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value ?? "";
+    const m = /GMT([+-])(\d{2}):(\d{2})/.exec(name);
+    if (!m) return name.includes("GMT") ? 0 : null; // 纯 "GMT" = UTC
+    const sign = m[1] === "-" ? -1 : 1;
+    return sign * (Number(m[2]) * 60 + Number(m[3]));
+  } catch {
+    return null;
+  }
+}
+
+/** OpenCode 的 sqlite 分桶修饰符：有配置时区用分钟偏移平移，否则 'localtime'。 */
+function tzSqliteModifier(): string {
+  const off = tzOffsetMinutes();
+  if (off == null) return "'localtime'";
+  return `'${off >= 0 ? "+" : "-"}${Math.abs(off)} minutes'`;
+}
+
 function todayStr(): string {
+  const parts = tzDateParts(Date.now());
+  if (parts) return `${parts.y}-${parts.m}-${parts.d}`;
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -54,10 +110,15 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface LocalTokenStats {
   d: string;
+  model: string;
   inp: number;
   outp: number;
   cache: number;
   requests: number;
+}
+
+function statKey(date: string, model: string): string {
+  return `${date}\u0000${model}`;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -71,10 +132,22 @@ function numeric(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function modelName(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function modelFromEvent(event: JsonRecord): string | undefined {
+  const payload = isRecord(event.payload) ? event.payload : undefined;
+  const candidates = [event.model, payload?.model, payload?.model_id, payload?.modelId];
+  return candidates.find((value): value is string => typeof value === "string" && Boolean(value.trim()));
+}
+
 function localDate(value: unknown): string | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return undefined;
+  const parts = tzDateParts(date.getTime());
+  if (parts) return `${parts.y}-${parts.m}-${parts.d}`;
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
@@ -83,6 +156,8 @@ function localDateHour(value: unknown): string | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return undefined;
+  const parts = tzDateParts(date.getTime());
+  if (parts) return `${parts.y}-${parts.m}-${parts.d} ${parts.h}`;
   const p = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}`;
 }
@@ -128,21 +203,30 @@ function readJsonLines(file: string, onRecord: (record: JsonRecord) => void): vo
 function addStats(
   stats: Map<string, LocalTokenStats>,
   date: string,
+  model: string,
   input: number,
   output: number,
   cached: number,
 ): void {
   if (input === 0 && output === 0 && cached === 0) return;
-  const current = stats.get(date) ?? { d: date, inp: 0, outp: 0, cache: 0, requests: 0 };
+  const key = statKey(date, model);
+  const current = stats.get(key) ?? {
+    d: date,
+    model,
+    inp: 0,
+    outp: 0,
+    cache: 0,
+    requests: 0,
+  };
   current.inp += input;
   current.outp += output;
   current.cache += cached;
   current.requests += 1;
-  stats.set(date, current);
+  stats.set(key, current);
 }
 
 function statsRows(stats: Map<string, LocalTokenStats>): LocalTokenStats[] {
-  return [...stats.values()].sort((a, b) => a.d.localeCompare(b.d));
+  return [...stats.values()].sort((a, b) => a.d.localeCompare(b.d) || a.model.localeCompare(b.model));
 }
 
 function datesInRange(start: string, end: string): string[] {
@@ -162,7 +246,11 @@ function collectCodexTokenStats(start: string, end: string, byHour = false): Loc
   for (const date of datesInRange(start, end)) {
     const [year, month, day] = date.split("-");
     for (const file of listJsonlFiles(join(sessions, year, month, day))) {
+      // Codex 把模型写在 session_meta / turn_context，token_count 继承最近一次上下文模型。
+      let currentModel = "codex-unknown";
       readJsonLines(file, (event) => {
+        const eventModel = modelFromEvent(event);
+        if (eventModel) currentModel = eventModel;
         const payload = isRecord(event.payload) ? event.payload : undefined;
         const info = payload && isRecord(payload.info) ? payload.info : undefined;
         const usage = info && isRecord(info.last_token_usage) ? info.last_token_usage : undefined;
@@ -172,6 +260,7 @@ function collectCodexTokenStats(start: string, end: string, byHour = false): Loc
         addStats(
           stats,
           key,
+          currentModel,
           numeric(usage.input_tokens),
           numeric(usage.output_tokens),
           numeric(usage.cached_input_tokens) + numeric(usage.cache_write_input_tokens),
@@ -205,7 +294,198 @@ function collectClaudeTokenStats(start: string, end: string, byHour = false): Lo
       const cached = numeric(usage.cache_creation_input_tokens) + numeric(usage.cache_read_input_tokens);
       const key = byHour ? (localDateHour(event.timestamp) ?? date) : date;
       // Claude 将缓存 Token 独立于 input_tokens 返回；合并后才是完整输入量。
-      addStats(stats, key, numeric(usage.input_tokens) + cached, numeric(usage.output_tokens), cached);
+      addStats(
+        stats,
+        key,
+        modelName(message?.model, "claude-code"),
+        numeric(usage.input_tokens) + cached,
+        numeric(usage.output_tokens),
+        cached,
+      );
+    });
+  }
+  return statsRows(stats);
+}
+
+// ---- Gemini CLI 本地会话 Token（~/.gemini/tmp/<hash>/chats/*.json[l]，真实计数）----
+// Gemini 在会话文件里写「累计」token 快照（usageMetadata / tokens），故按相邻
+// assistant 快照做增量差分，再按本地日期聚合。参考 juejin-usage gemini parser。
+
+interface GeminiTotals {
+  input: number;
+  cached: number;
+  output: number;
+  total: number;
+}
+
+function normalizeGeminiTokens(msg: JsonRecord): GeminiTotals | null {
+  const tokens = isRecord(msg.tokens) ? msg.tokens : undefined;
+  if (tokens) {
+    const input = Math.max(0, numeric(tokens.input));
+    const cached = Math.max(0, numeric(tokens.cached));
+    const output = Math.max(0, numeric(tokens.output)) + Math.max(0, numeric(tokens.tool));
+    const thoughts = Math.max(0, numeric(tokens.thoughts));
+    const total = Math.max(numeric(tokens.total), input + cached + output + thoughts);
+    if (total === 0) return null;
+    return { input, cached, output: output + thoughts, total };
+  }
+  const u = isRecord(msg.usageMetadata) ? msg.usageMetadata : isRecord(msg.usage) ? msg.usage : undefined;
+  if (!u) return null;
+  const cached = Math.max(0, numeric(u.cachedContentTokenCount));
+  const thoughts = Math.max(0, numeric(u.thoughtsTokenCount));
+  const prompt = Math.max(0, numeric(u.promptTokenCount ?? u.input_tokens));
+  const candidates = Math.max(0, numeric(u.candidatesTokenCount ?? u.output_tokens));
+  const input = Math.max(0, prompt - cached);
+  const output = Math.max(0, candidates - thoughts) + thoughts;
+  const total = input + cached + output;
+  if (total === 0) return null;
+  return { input, cached, output, total };
+}
+
+/** 累计快照差分：cur - prev，任一为空或回退（新会话）时取 cur。 */
+function diffGeminiTotals(cur: GeminiTotals, prev: GeminiTotals | null): GeminiTotals | null {
+  if (!prev) return cur;
+  if (cur.total < prev.total) return cur; // 计数回退视为新会话
+  const delta = {
+    input: Math.max(0, cur.input - prev.input),
+    cached: Math.max(0, cur.cached - prev.cached),
+    output: Math.max(0, cur.output - prev.output),
+    total: Math.max(0, cur.total - prev.total),
+  };
+  return delta.total === 0 ? null : delta;
+}
+
+function collectGeminiTokenStats(start: string, end: string, byHour = false): LocalTokenStats[] {
+  const root = join(homedir(), ".gemini", "tmp");
+  const stats = new Map<string, LocalTokenStats>();
+  if (!existsSync(root)) return [];
+  let hashes: ReturnType<typeof readdirSync>;
+  try {
+    hashes = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  for (const h of hashes) {
+    if (!h.isDirectory()) continue;
+    const chatsDir = join(root, h.name, "chats");
+    for (const filePath of listChatFiles(chatsDir)) {
+      const mtimeDate = fileMtimeDate(filePath);
+      if (mtimeDate && mtimeDate < start) continue;
+      let text: string;
+      try {
+        text = readFileSync(filePath, "utf8");
+      } catch {
+        continue;
+      }
+      const messages = parseGeminiMessages(filePath, text);
+      let prev: GeminiTotals | null = null;
+      let lastModel = "gemini";
+      for (const msg of messages) {
+        const role = msg.type ?? msg.role;
+        const isAssistant = role === "gemini" || role === "model" || role === "assistant";
+        if (typeof msg.model === "string" && msg.model) lastModel = msg.model;
+        if (!isAssistant) continue;
+        const cur = normalizeGeminiTokens(msg);
+        if (!cur) continue;
+        const delta = diffGeminiTotals(cur, prev);
+        prev = cur;
+        if (!delta) continue;
+        const ts = msg.timestamp ?? msg.createTime;
+        const dateOnly = localDate(ts);
+        if (!dateOnly || dateOnly < start || dateOnly > end) continue;
+        const key = byHour ? (localDateHour(ts) ?? dateOnly) : dateOnly;
+        // input 含缓存（与 Claude 口径一致，供成本启发式扣减）。
+        addStats(stats, key, lastModel, delta.input + delta.cached, delta.output, delta.cached);
+      }
+    }
+  }
+  return statsRows(stats);
+}
+
+/** 列出 chats 目录下的 .json / .jsonl（最多两级）。 */
+function listChatFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  const visit = (d: string, depth: number) => {
+    if (depth > 2) return;
+    let entries: ReturnType<typeof readdirSync>;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) visit(p, depth + 1);
+      else if (e.name.endsWith(".json") || e.name.endsWith(".jsonl")) out.push(p);
+    }
+  };
+  visit(dir, 0);
+  return out;
+}
+
+function parseGeminiMessages(filePath: string, raw: string): JsonRecord[] {
+  if (filePath.endsWith(".jsonl")) {
+    const out: JsonRecord[] = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const o: unknown = JSON.parse(line);
+        if (isRecord(o) && (typeof o.type === "string" || typeof o.role === "string")) out.push(o);
+      } catch {
+        // 跳过损坏行
+      }
+    }
+    return out;
+  }
+  try {
+    const data: unknown = JSON.parse(raw);
+    if (!isRecord(data)) return [];
+    const msgs = data.messages ?? data.history;
+    return Array.isArray(msgs) ? (msgs.filter(isRecord) as JsonRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// ---- GitHub Copilot CLI 本地会话 Token（~/.copilot/session-state/<id>/events.jsonl，真实计数）----
+// session.shutdown 事件的 data.modelMetrics[model].usage 记录每模型真实 token。
+// 参考 juejin-usage copilot parser。
+
+function collectCopilotTokenStats(start: string, end: string, byHour = false): LocalTokenStats[] {
+  const stats = new Map<string, LocalTokenStats>();
+  const root = join(homedir(), ".copilot", "session-state");
+  if (!existsSync(root)) return [];
+  let sessions: ReturnType<typeof readdirSync>;
+  try {
+    sessions = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  for (const s of sessions) {
+    if (!s.isDirectory()) continue;
+    const filePath = join(root, s.name, "events.jsonl");
+    if (!existsSync(filePath)) continue;
+    const mtimeDate = fileMtimeDate(filePath);
+    if (mtimeDate && mtimeDate < start) continue;
+    readJsonLines(filePath, (obj) => {
+      if (obj.type !== "session.shutdown") return;
+      const ts = typeof obj.timestamp === "string" ? obj.timestamp : undefined;
+      const dateOnly = localDate(ts);
+      if (!dateOnly || dateOnly < start || dateOnly > end) return;
+      const key = byHour ? (localDateHour(ts) ?? dateOnly) : dateOnly;
+      const data = isRecord(obj.data) ? obj.data : undefined;
+      const metrics = data && isRecord(data.modelMetrics) ? data.modelMetrics : undefined;
+      if (!metrics) return;
+      for (const [model, m] of Object.entries(metrics)) {
+        const usage = isRecord(m) && isRecord(m.usage) ? m.usage : undefined;
+        if (!usage) continue;
+        const totalInput = Math.max(0, numeric(usage.inputTokens));
+        const cacheRead = Math.max(0, numeric(usage.cacheReadTokens));
+        const output = Math.max(0, numeric(usage.outputTokens));
+        // inputTokens 含缓存，保持 input 含缓存口径。
+        addStats(stats, key, model || "copilot", totalInput, output, cacheRead);
+      }
     });
   }
   return statsRows(stats);
@@ -277,16 +557,18 @@ function loadKiroSessionModel(dir: string, sessionId: string): string {
 function bumpStats(
   stats: Map<string, LocalTokenStats>,
   date: string,
+  model: string,
   input: number,
   output: number,
   reqInc: number,
 ): void {
   if (input === 0 && output === 0 && reqInc === 0) return;
-  const cur = stats.get(date) ?? { d: date, inp: 0, outp: 0, cache: 0, requests: 0 };
+  const key = statKey(date, model);
+  const cur = stats.get(key) ?? { d: date, model, inp: 0, outp: 0, cache: 0, requests: 0 };
   cur.inp += input;
   cur.outp += output;
   cur.requests += reqInc;
-  stats.set(date, cur);
+  stats.set(key, cur);
 }
 
 /** Kiro CLI：sessions/cli/*.jsonl（Prompt/AssistantMessage 事件，按文本估算）。 */
@@ -348,7 +630,7 @@ function collectKiroCliStats(
             const key = byHour
               ? ((curTs != null ? localDateHour(curTs) : undefined) ?? `${dateOnly} 00`)
               : dateOnly;
-            addStats(stats, key, pendingInput, output, 0);
+            addStats(stats, key, model, pendingInput, output, 0);
           }
         }
         pendingInput = 0;
@@ -409,16 +691,17 @@ function collectKiroIdeStats(
       const key = byHour ? (localDateHour(ts) ?? dateOnly) : dateOnly;
       const payload = isRecord(rec.payload) ? rec.payload : undefined;
       if (!payload) return;
+      const model = "kiro-ide";
       switch (payload.type) {
         case "user":
         case "tool_result":
-          bumpStats(stats, key, estTokensText(payload.content, "kiro-ide"), 0, 0);
+          bumpStats(stats, key, model, estTokensText(payload.content, model), 0, 0);
           break;
         case "tool_call":
-          bumpStats(stats, key, estTokensText(payload.args, "kiro-ide"), 0, 0);
+          bumpStats(stats, key, model, estTokensText(payload.args, model), 0, 0);
           break;
         case "assistant":
-          bumpStats(stats, key, 0, estTokensText(payload.content, "kiro-ide"), 1);
+          bumpStats(stats, key, model, 0, estTokensText(payload.content, model), 1);
           break;
         default:
           break;
@@ -451,6 +734,17 @@ function qoderDbPaths(): string[] {
   return ["Qoder", "QoderCN"].map((name) =>
     join(appSupportBase(), name, "SharedClientCache", "cache", "db", "local.db"),
   );
+}
+
+function qoderModel(modelInfo: unknown, fallback: string): string {
+  if (typeof modelInfo !== "string") return fallback;
+  try {
+    const parsed: unknown = JSON.parse(modelInfo);
+    if (!isRecord(parsed)) return fallback;
+    return modelName(parsed.model_key ?? parsed.model_id ?? parsed.model, fallback);
+  } catch {
+    return fallback;
+  }
 }
 
 function isLockError(e: unknown): boolean {
@@ -499,7 +793,7 @@ async function collectQoderTokenStats(
   // 用秒级下界裁剪（同时兼容毫秒/秒时间戳），精确的 [start,end] 仍由下方按本地日期过滤。
   const lowerBoundSec = Math.floor(new Date(`${start}T00:00:00`).getTime() / 1000);
   const sql =
-    "SELECT token_info, gmt_create FROM chat_message " +
+    "SELECT token_info, model_info, gmt_create FROM chat_message " +
     "WHERE role='assistant' AND token_info IS NOT NULL AND length(token_info) > 2 " +
     `AND gmt_create >= ${lowerBoundSec}`;
 
@@ -532,7 +826,7 @@ async function collectQoderTokenStats(
       const date = localDate(ms);
       if (!date || date < start || date > end) continue;
       const key = byHour ? (localDateHour(ms) ?? date) : date;
-      addStats(stats, key, input, completion, cached);
+      addStats(stats, key, qoderModel(row.model_info, "qoder-ide"), input, completion, cached);
     }
   }
 
@@ -564,10 +858,11 @@ function collectQoderCliTokenStats(
       const dateOnly = localDate(rec.timestamp);
       if (!dateOnly || dateOnly < start || dateOnly > end) return;
       const key = byHour ? (localDateHour(rec.timestamp) ?? dateOnly) : dateOnly;
+      const model = modelName(message.model, "qoder-cli");
       if (role === "user") {
-        bumpStats(stats, key, estTokensText(message.content, "claude"), 0, 0);
+        bumpStats(stats, key, model, estTokensText(message.content, model), 0, 0);
       } else {
-        bumpStats(stats, key, 0, estTokensText(message.content, "claude"), 1);
+        bumpStats(stats, key, model, 0, estTokensText(message.content, model), 1);
       }
     });
   }
@@ -576,20 +871,23 @@ function collectQoderCliTokenStats(
 /** OpenCode 今日按小时（改 SQL 用 strftime 分组到小时）。 */
 async function collectOpenCodeHourly(today: string): Promise<LocalTokenStats[]> {
   try {
+    const tzMod = tzSqliteModifier();
     const sql =
-      "SELECT strftime('%Y-%m-%d %H', time_created/1000,'unixepoch','localtime') AS d, " +
+      `SELECT strftime('%Y-%m-%d %H', time_created/1000,'unixepoch',${tzMod}) AS d, ` +
+      "COALESCE(json_extract(data,'$.modelID'),json_extract(data,'$.model'),json_extract(data,'$.modelId'),'opencode-unknown') AS model, " +
       "sum(json_extract(data,'$.tokens.input')) AS inp, " +
       "sum(json_extract(data,'$.tokens.output')) AS outp, " +
       "sum(COALESCE(json_extract(data,'$.tokens.cache.read'),0)) AS cache " +
       "FROM message " +
       "WHERE json_extract(data,'$.role')='assistant' " +
       "AND json_extract(data,'$.tokens.input') IS NOT NULL " +
-      `AND date(time_created/1000,'unixepoch','localtime')='${today}' ` +
-      "GROUP BY d ORDER BY d";
+      `AND date(time_created/1000,'unixepoch',${tzMod})='${today}' ` +
+      "GROUP BY d, model ORDER BY d, model";
     const { stdout } = await run(OPENCODE, ["db", sql, "--format", "json"]);
     const rows = JSON.parse(stdout || "[]") as JsonRecord[];
     return rows.map((r) => ({
       d: String(r.d),
+      model: modelName(r.model, "opencode-unknown"),
       inp: numeric(r.inp),
       outp: numeric(r.outp),
       cache: numeric(r.cache),
@@ -602,16 +900,16 @@ async function collectOpenCodeHourly(today: string): Promise<LocalTokenStats[]> 
 
 /** 汇总今天所有本地源的「按小时 × 平台」用量（供分析页「今天」时间轴使用）。 */
 async function collectTodayHourly(): Promise<
-  { platform: string; hour: number; input: number; output: number }[]
+  { platform: string; hour: number; model: string; input: number; output: number }[]
 > {
   const today = todayStr();
-  const out: { platform: string; hour: number; input: number; output: number }[] = [];
+  const out: { platform: string; hour: number; model: string; input: number; output: number }[] = [];
   const tag = (platform: string, rows: LocalTokenStats[]): void => {
     for (const r of rows) {
       const hourPart = r.d.split(" ")[1];
       const hour = hourPart != null ? Number(hourPart) : Number.NaN;
       if (Number.isNaN(hour)) continue;
-      out.push({ platform, hour, input: r.inp, output: r.outp });
+      out.push({ platform, hour, model: r.model, input: r.inp, output: r.outp });
     }
   };
   tag("codex", collectCodexTokenStats(today, today, true));
@@ -619,6 +917,8 @@ async function collectTodayHourly(): Promise<
   tag("kiro", collectKiroTokenStats(today, today, true));
   tag("qoder", await collectQoderTokenStats(today, today, true));
   tag("opencode-go", await collectOpenCodeHourly(today));
+  tag("gemini", collectGeminiTokenStats(today, today, true));
+  tag("copilot", collectCopilotTokenStats(today, today, true));
   return out;
 }
 
@@ -637,6 +937,117 @@ function summarizeErr(e: unknown): string {
   return String(e).slice(0, 600);
 }
 
+const OIL_API_URL = "https://v1.apizero.cn/api/oil-price-forecast";
+const OIL_PRICE_SOURCE_URL = "https://www.chajiage.com/youjia";
+const NDRC_NEWS_URL = "https://www.ndrc.gov.cn/xwdt/xwfb/wap_index.html";
+const OIL_PROVINCE_SLUGS: Record<string, string> = {
+  "北京": "beijing", "天津": "tianjin", "河北": "hebei", "山西": "shanxi",
+  "内蒙古": "neimenggu", "辽宁": "liaoning", "吉林": "jilin", "黑龙江": "heilongjiang",
+  "上海": "shanghai", "江苏": "jiangsu", "浙江": "zhejiang", "安徽": "anhui",
+  "福建": "fujian", "江西": "jiangxi", "山东": "shandong", "河南": "henan",
+  "湖北": "hubei", "湖南": "hunan", "广东": "guangdong", "广西": "guangxi",
+  "海南": "hainan", "重庆": "chongqing", "四川": "sichuan", "贵州": "guizhou",
+  "云南": "yunnan", "西藏": "xizang", "陕西": "shannxi", "甘肃": "gansu",
+  "青海": "qinghai", "宁夏": "ningxia", "新疆": "xinjiang",
+};
+
+async function fetchOilForecast(province: string, apiKey: string): Promise<unknown> {
+  const target = new URL(OIL_API_URL);
+  target.searchParams.set("action", "forecast");
+  target.searchParams.set("province", province);
+  target.searchParams.set("year", String(new Date().getFullYear()));
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const response = await fetch(target, { headers, signal: AbortSignal.timeout(15_000) });
+  const body = await response.text();
+  if (!response.ok) throw new Error(`油价数据源 HTTP ${response.status}: ${body.slice(0, 240)}`);
+  return JSON.parse(body);
+}
+
+async function fetchCurrentOilPrices(province: string): Promise<JsonRecord> {
+  const slug = OIL_PROVINCE_SLUGS[province];
+  if (!slug) throw new Error("暂不支持该省份的今日油价");
+  const sourceUrl = `${OIL_PRICE_SOURCE_URL}/${slug}.html`;
+  const response = await fetch(sourceUrl, {
+    headers: { "User-Agent": "Mozilla/5.0 xlt-workbench/0.1 (+local oil monitor)" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error(`今日油价数据源 HTTP ${response.status}`);
+  const plain = (await response.text())
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;|&yen;/gi, " ")
+    .replace(/\s+/g, " ");
+  const prices = /(\d{4})年(\d{2})月(\d{2})日，?[^。]{0,40}?汽油、柴油每升最新价格为：?\s*92号汽油\s*为\s*(\d+(?:\.\d+)?)元，?\s*95号汽油\s*为\s*(\d+(?:\.\d+)?)元，?\s*98号汽油\s*为\s*(\d+(?:\.\d+)?)元，?\s*0号柴油\s*为\s*(\d+(?:\.\d+)?)元/.exec(plain);
+  if (!prices) throw new Error("今日油价页面缺少 92/95/98 号汽油或 0 号柴油价格");
+  return {
+    code: 0,
+    msg: "成功",
+    data: {
+      province,
+      price_date: `${prices[1]}-${prices[2]}-${prices[3]}`,
+      source_url: sourceUrl,
+      prices: {
+        "92号汽油": Number(prices[4]),
+        "95号汽油": Number(prices[5]),
+        "98号汽油": Number(prices[6]),
+        "0号柴油": Number(prices[7]),
+      },
+    },
+  };
+}
+
+async function fetchOfficialOilAdjustment(): Promise<JsonRecord> {
+  const listResponse = await fetch(NDRC_NEWS_URL, {
+    headers: { "User-Agent": "xlt-workbench/0.1 (+local oil monitor)" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!listResponse.ok) throw new Error(`国家发改委新闻列表 HTTP ${listResponse.status}`);
+  const listHtml = await listResponse.text();
+  const entry = /<li><a href="([^"]+)"[^>]*>([^<]*成品油价格[^<]*)<\/a><span>([^<]+)<\/span>/.exec(listHtml);
+  if (!entry) throw new Error("国家发改委新闻列表中未找到成品油调价公告");
+
+  const sourceUrl = new URL(entry[1], NDRC_NEWS_URL).toString();
+  const title = entry[2].trim();
+  const publishedAt = entry[3].trim().replaceAll("/", "-");
+  const articleResponse = await fetch(sourceUrl, {
+    headers: { "User-Agent": "xlt-workbench/0.1 (+local oil monitor)" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!articleResponse.ok) throw new Error(`国家发改委调价公告 HTTP ${articleResponse.status}`);
+  const plain = (await articleResponse.text())
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/g, " ")
+    .replace(/\s+/g, " ");
+
+  const actual = /调控后实际(上调|下调)\s*(\d+)元[、，]\s*(\d+)元/.exec(plain);
+  const normal = /汽、柴油[^。]{0,80}?价格每吨分别(?:应)?(上调|下调)\s*(\d+)元[、，]\s*(\d+)元/.exec(plain);
+  const amounts = actual ?? normal;
+  const direction = title.includes("不作调整") || plain.includes("不作调整")
+    ? "unchanged"
+    : amounts?.[1] === "下调"
+      ? "down"
+      : amounts?.[1] === "上调"
+        ? "up"
+        : undefined;
+  if (!direction) throw new Error("无法识别国家发改委公告中的调价方向");
+
+  const effectiveTime = new Date(`${publishedAt}T00:00:00+08:00`).getTime() + 24 * 60 * 60_000;
+  const sign = direction === "down" ? -1 : 1;
+  return {
+    title,
+    publishedAt,
+    effectiveAt: new Date(effectiveTime).toISOString(),
+    direction,
+    gasolineChangePerTon: amounts ? sign * Number(amounts[2]) : undefined,
+    dieselChangePerTon: amounts ? sign * Number(amounts[3]) : undefined,
+    sourceUrl,
+  };
+}
+
 /**
  * 开发期通过本机 CLI 拉取用量：
  * - arkcli：火山方舟套餐额度 + Token 用量（SSO→签名）
@@ -653,6 +1064,8 @@ export function localConnectorsDevPlugin(): Plugin {
         const raw = req.url ?? "";
         const url = new URL(raw, "http://localhost");
         const p = url.pathname;
+        // 分桶时区：由前端按用量偏好传入 ?tz=IANA；空则跟随系统本地时区。
+        activeTz = url.searchParams.get("tz")?.trim() || undefined;
 
         // ---- arkcli（火山方舟）----
         if (p.startsWith("/api/ark/")) {
@@ -714,15 +1127,17 @@ export function localConnectorsDevPlugin(): Plugin {
         // ---- opencode 本地 SQLite（Token 用量）----
         if (p === "/api/opencode/stats") {
           try {
+            const tzMod = tzSqliteModifier();
             const sql =
-              "SELECT date(time_created/1000,'unixepoch','localtime') AS d, " +
+              `SELECT date(time_created/1000,'unixepoch',${tzMod}) AS d, ` +
+              "COALESCE(json_extract(data,'$.modelID'),json_extract(data,'$.model'),json_extract(data,'$.modelId'),'opencode-unknown') AS model, " +
               "sum(json_extract(data,'$.tokens.input')) AS inp, " +
               "sum(json_extract(data,'$.tokens.output')) AS outp, " +
               "sum(COALESCE(json_extract(data,'$.tokens.cache.read'),0)) AS cache " +
               "FROM message " +
               "WHERE json_extract(data,'$.role')='assistant' " +
               "AND json_extract(data,'$.tokens.input') IS NOT NULL " +
-              "GROUP BY d ORDER BY d";
+              "GROUP BY d, model ORDER BY d, model";
             const { stdout } = await run(OPENCODE, ["db", sql, "--format", "json"]);
             return sendJson(res, 200, JSON.parse(stdout || "[]"));
           } catch (e) {
@@ -834,6 +1249,58 @@ export function localConnectorsDevPlugin(): Plugin {
             return sendJson(res, 200, collectClaudeTokenStats(start, end));
           } catch (e) {
             return sendJson(res, 502, { error: "Claude Code 本地 Token 聚合失败: " + summarizeErr(e) });
+          }
+        }
+
+        // ---- Gemini CLI 本地会话 Token（~/.gemini/tmp/<hash>/chats）----
+        if (p === "/api/gemini/stats") {
+          const start = url.searchParams.get("start") ?? todayStr();
+          const end = url.searchParams.get("end") ?? todayStr();
+          if (!DATE_RE.test(start) || !DATE_RE.test(end) || start > end) {
+            return sendJson(res, 400, { error: "start/end must be ordered YYYY-MM-DD dates" });
+          }
+          try {
+            return sendJson(res, 200, collectGeminiTokenStats(start, end));
+          } catch (e) {
+            return sendJson(res, 502, { error: "Gemini 本地 Token 聚合失败: " + summarizeErr(e) });
+          }
+        }
+
+        // ---- GitHub Copilot CLI 本地会话 Token（~/.copilot/session-state）----
+        if (p === "/api/copilot/stats") {
+          const start = url.searchParams.get("start") ?? todayStr();
+          const end = url.searchParams.get("end") ?? todayStr();
+          if (!DATE_RE.test(start) || !DATE_RE.test(end) || start > end) {
+            return sendJson(res, 400, { error: "start/end must be ordered YYYY-MM-DD dates" });
+          }
+          try {
+            return sendJson(res, 200, collectCopilotTokenStats(start, end));
+          } catch (e) {
+            return sendJson(res, 502, { error: "Copilot 本地 Token 聚合失败: " + summarizeErr(e) });
+          }
+        }
+
+        // ---- 今日按小时 × 平台（分析页「今天」时间轴）----
+        if (p === "/api/oil/price" || p === "/api/oil/forecast") {
+          const province = url.searchParams.get("province")?.trim() ?? "";
+          if (!province || province.length > 12) {
+            return sendJson(res, 400, { error: "需要有效的省份名称" });
+          }
+          try {
+            const data = p.endsWith("/price")
+              ? await fetchCurrentOilPrices(province)
+              : await fetchOilForecast(province, url.searchParams.get("apiKey")?.trim() ?? "");
+            return sendJson(res, 200, data);
+          } catch (e) {
+            return sendJson(res, 502, { error: "国内油价同步失败: " + summarizeErr(e) });
+          }
+        }
+
+        if (p === "/api/oil/adjustment") {
+          try {
+            return sendJson(res, 200, await fetchOfficialOilAdjustment());
+          } catch (e) {
+            return sendJson(res, 502, { error: "国家发改委调价公告同步失败: " + summarizeErr(e) });
           }
         }
 

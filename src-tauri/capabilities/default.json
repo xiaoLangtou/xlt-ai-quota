@@ -5,6 +5,7 @@
   "windows": ["main", "tray-panel"],
   "permissions": [
     "core:default",
+    "dialog:allow-open",
     "core:window:allow-show",
     "core:window:allow-hide",
     "core:window:allow-set-focus",

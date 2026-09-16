@@ -75,6 +75,7 @@ export class KiroConnector implements Connector, QuotaConnector, TokenConnector 
     return rows.map((row) => ({
       platform: "kiro",
       date: row.d,
+      model: row.model || undefined,
       inputTokens: num(row.inp),
       outputTokens: num(row.outp),
       cachedTokens: row.cache != null ? num(row.cache) : undefined,
@@ -86,6 +87,7 @@ export class KiroConnector implements Connector, QuotaConnector, TokenConnector 
 
 interface KiroTokenRow {
   d: string;
+  model?: string;
   inp?: number | string;
   outp?: number | string;
   cache?: number | string;

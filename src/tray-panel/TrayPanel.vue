@@ -4,10 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import ToolLogo from "@/components/ToolLogo.vue";
 import { usageService } from "@/services/usage-service";
 import type { PlatformQuotaView, SyncInfo } from "@/types/usage";
 
-const PANEL_WIDTH = 314;
+const PANEL_WIDTH = 336;
 const popoverEl = ref<HTMLElement | null>(null);
 const quotas = ref<PlatformQuotaView[]>([]);
 const sync = ref<SyncInfo>({ lastSyncAt: null, syncing: false });
@@ -26,48 +27,64 @@ async function fitWindowHeight(): Promise<void> {
   }
 }
 
-/** 平台圆点配色，对齐原型（logoClass → 品牌色）。 */
-const DOT_COLOR: Record<string, string> = {
-  codex: "#4C7CF3",
-  ark: "#F2924A",
-  kiro: "#7C6BF0",
-  qoder: "#EF5A82",
-  open: "#30C55A",
-};
-
 interface QuotaRow {
   key: string;
+  platform: string;
   name: string;
   planTag: string;
-  color: string;
   pct: number | null;
   exhausted: boolean;
-  note: string | null;
+  tone: "ok" | "warn" | "critical" | "muted";
+  detail: string;
+  reset: string | null;
 }
 
 /** 复用主应用同款口径：有积分算积分利用率，否则取利用率最高的窗口。 */
 const rows = computed<QuotaRow[]>(() =>
   quotas.value.map((v) => {
     let pct: number | null = null;
+    let detail = v.account ? "已登录" : "暂无额度数据";
+    let reset: string | null = null;
     if (v.credits) {
+      const used = Math.max(0, v.credits.total - v.credits.remaining);
       pct =
         v.credits.total > 0
-          ? Math.round(((v.credits.total - v.credits.remaining) / v.credits.total) * 100)
+          ? Math.round((used / v.credits.total) * 100)
           : 0;
+      detail = `已用 ${used.toLocaleString()} / ${v.credits.total.toLocaleString()} Credits`;
+      reset = compactReset(v.credits.expiresIn ?? v.credits.refreshIn ?? v.windows[0]?.resetsIn);
     } else if (v.windows.length) {
-      pct = v.windows.reduce((a, b) => (b.usedPct > a.usedPct ? b : a)).usedPct;
+      const window = v.windows.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
+      pct = window.usedPct;
+      detail = window.label;
+      reset = compactReset(window.resetsIn);
     }
+    const exhausted = pct != null && pct >= 100;
     return {
-      key: v.platform,
+      key: v.id,
+      platform: v.platform,
       name: v.name,
       planTag: v.planTag,
-      color: DOT_COLOR[v.logoClass] ?? "#8A8A8E",
       pct,
-      exhausted: pct != null && pct >= 100,
-      note: pct == null ? (v.account ? "已登录" : "暂无数据") : null,
+      exhausted,
+      tone: pct == null ? "muted" : exhausted ? "critical" : pct >= 80 ? "warn" : "ok",
+      detail,
+      reset,
     };
   }),
 );
+
+function compactReset(value?: string): string | null {
+  if (!value) return null;
+  return value
+    .replace(/(\d+) 小时 (\d+) 分钟后重置/, "$1h $2m 后")
+    .replace(/(\d+) 小时后重置/, "$1h 后")
+    .replace(/(\d+) 分钟后重置/, "$1m 后")
+    .replace(/(\d+) 天后重置/, "$1d 后")
+    .replace("后重置", "后")
+    .replace("后刷新", "后")
+    .replace("后到期", "后");
+}
 
 /** 面板与主窗口同源、共享 localStorage；直接从存储读取最新聚合结果。 */
 function refresh(): void {
@@ -122,7 +139,7 @@ function quit(): void {
 onMounted(async () => {
   refresh();
   const win = getCurrentWindow();
-  // 主窗口每次同步前后广播 usage-updated，面板据此重新读取存储。
+  // 主窗口每次同步前后广播 usage-updated，面板据此更新摘要。
   unlisteners.push(await listen("usage-updated", () => refresh()));
   // 失焦即收起，并留下时间戳供托盘点击去抖（避免点击图标时“隐藏又立即弹出”）。
   unlisteners.push(
@@ -150,7 +167,10 @@ onUnmounted(() => {
     <header class="pop-head">
       <div class="pop-title">
         <div class="pop-logo">/_</div>
-        <h1>AI 用量</h1>
+        <div>
+          <h1>AI 用量</h1>
+          <p>{{ rows.length }} 个套餐的额度概览</p>
+        </div>
       </div>
       <button
         class="sync-pill"
@@ -168,22 +188,27 @@ onUnmounted(() => {
     <div v-if="hasData" class="quota-list">
       <div v-for="r in rows" :key="r.key" class="qrow">
         <div class="qrow-top">
-          <span class="qdot" :style="{ background: r.color }" />
-          <span class="qname">{{ r.name }}</span>
-          <span class="qtag">{{ r.planTag }}</span>
+          <span class="qicon"><ToolLogo :platform="r.platform" :size="19" /></span>
+          <div class="qcopy">
+            <div class="qidentity">
+              <span class="qname">{{ r.name }}</span>
+              <span class="qtag">{{ r.planTag }}</span>
+            </div>
+            <span class="qmeta">
+              {{ r.detail }}<template v-if="r.reset"> · {{ r.reset }}</template>
+            </span>
+          </div>
+          <span class="qvalue" :class="r.tone">
+            {{ r.pct == null ? "—" : r.exhausted ? "已耗尽" : `${r.pct}%` }}
+          </span>
         </div>
-        <div class="qbar-row">
-          <div class="qtrack">
-            <div
-              v-if="r.pct != null"
-              class="qfill"
-              :class="r.exhausted ? 'exhausted' : 'ok'"
-              :style="r.exhausted ? undefined : { width: `${Math.min(100, Math.max(2, r.pct))}%` }"
-            />
-          </div>
-          <div class="qpct" :class="{ exh: r.exhausted, muted: r.pct == null }">
-            {{ r.pct == null ? (r.note ?? "—") : r.exhausted ? "已耗尽" : `${r.pct}%` }}
-          </div>
+        <div class="qtrack">
+          <div
+            v-if="r.pct != null"
+            class="qfill"
+            :class="r.tone"
+            :style="{ width: `${Math.min(100, Math.max(2, r.pct))}%` }"
+          />
         </div>
       </div>
     </div>
@@ -239,8 +264,11 @@ onUnmounted(() => {
   --green: #30c55a;
   --green-deep: #209948;
   --red: #ff3b30;
-  --tint: rgba(246, 247, 250, 0.6);
-  --chip: rgba(0, 0, 0, 0.045);
+  --orange: #e88316;
+  --tint: rgba(248, 249, 252, 0.78);
+  --card: rgba(255, 255, 255, 0.58);
+  --card-border: rgba(0, 0, 0, 0.07);
+  --chip: rgba(90, 95, 239, 0.09);
   --track: rgba(0, 0, 0, 0.08);
   --hover: rgba(0, 0, 0, 0.035);
   --press: rgba(0, 0, 0, 0.06);
@@ -251,7 +279,7 @@ onUnmounted(() => {
   /* 高度随内容自然撑开；再由 JS 把窗口尺寸精确贴到此高度 */
   flex-direction: column;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--tint);
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
@@ -259,7 +287,7 @@ onUnmounted(() => {
   /* 仅内圈高光 + 发丝描边（外阴影由原生窗口投射） */
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.6);
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.72);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -279,24 +307,24 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 13px 14px 12px;
+  padding: 15px 16px 14px;
 }
 .pop-title {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
 }
 .pop-logo {
   display: flex;
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: 9px;
   background: linear-gradient(155deg, #6f79f5, #4c51e0);
   color: #fff;
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: -1px;
   box-shadow:
@@ -305,23 +333,33 @@ onUnmounted(() => {
 }
 .pop-title h1 {
   margin: 0;
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
   letter-spacing: -0.01em;
+}
+.pop-title p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 500;
 }
 
 .sync-pill {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px 4px 8px;
+  max-width: 128px;
+  padding: 4px 9px 4px 8px;
   border: 0;
   border-radius: 20px;
   background: rgba(48, 197, 90, 0.12);
   color: var(--green-deep);
   font: inherit;
-  font-size: 11px;
+  overflow: hidden;
+  font-size: 10px;
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
   transition: filter 0.12s ease;
 }
@@ -375,6 +413,9 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: grid;
+  gap: 7px;
+  padding: 8px;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
 }
@@ -390,49 +431,89 @@ onUnmounted(() => {
 }
 
 .qrow {
-  padding: 11px 14px 12px;
-  transition: background 0.1s ease;
+  padding: 10px 11px 11px;
+  border: 0.5px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.025);
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 .qrow:hover {
-  background: var(--hover);
-}
-.qrow + .qrow {
-  border-top: 0.5px solid var(--hairline);
+  border-color: rgba(90, 95, 239, 0.16);
+  background: rgba(255, 255, 255, 0.76);
 }
 .qrow-top {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-bottom: 8px;
+  gap: 9px;
 }
-.qdot {
-  width: 7px;
-  height: 7px;
-  flex-shrink: 0;
-  border-radius: 50%;
+.qicon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  place-items: center;
+  border: 0.5px solid var(--card-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.68);
+}
+.qcopy {
+  min-width: 0;
+  flex: 1;
+}
+.qidentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
 }
 .qname {
-  font-size: 13px;
-  font-weight: 600;
   color: var(--ink);
+  font-size: 12px;
+  font-weight: 630;
 }
 .qtag {
-  padding: 2px 7px;
-  border-radius: 6px;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 5px;
   background: var(--chip);
-  color: var(--muted);
-  font-size: 9.5px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  color: var(--accent);
+  font-size: 8.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.qbar-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.qmeta {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qvalue {
+  flex: 0 0 auto;
+  color: var(--ink-soft);
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.qvalue.warn {
+  color: var(--orange);
+}
+.qvalue.critical {
+  color: var(--red);
+  font-family: inherit;
+  font-size: 10px;
+}
+.qvalue.muted {
+  color: var(--muted);
 }
 .qtrack {
-  flex: 1;
-  height: 5px;
+  height: 4px;
+  margin: 9px 0 0 39px;
   overflow: hidden;
   border-radius: 20px;
   background: var(--track);
@@ -444,33 +525,13 @@ onUnmounted(() => {
   transition: width 0.4s ease;
 }
 .qfill.ok {
-  background: linear-gradient(90deg, #3dd16a, var(--green-deep));
+  background: linear-gradient(90deg, #6e78f4, var(--accent));
 }
-.qfill.exhausted {
-  width: 100%;
+.qfill.warn {
+  background: linear-gradient(90deg, #ffb24d, var(--orange));
+}
+.qfill.critical {
   background: linear-gradient(90deg, #ff5a50, #e0231b);
-}
-.qpct {
-  width: 38px;
-  flex-shrink: 0;
-  text-align: right;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.qpct.exh {
-  width: auto;
-  color: var(--red);
-  font-size: 11px;
-  white-space: nowrap;
-}
-.qpct.muted {
-  width: auto;
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 500;
-  white-space: nowrap;
 }
 
 .empty {
@@ -499,11 +560,13 @@ onUnmounted(() => {
   position: relative;
   z-index: 1;
   display: flex;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.22);
 }
 .act-btn {
   position: relative;
   display: flex;
-  height: 42px;
+  height: 36px;
   flex: 1;
   align-items: center;
   justify-content: center;
@@ -512,7 +575,8 @@ onUnmounted(() => {
   background: transparent;
   color: var(--ink-soft);
   font: inherit;
-  font-size: 12px;
+  border-radius: 8px;
+  font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.1s ease;
@@ -523,13 +587,7 @@ onUnmounted(() => {
   opacity: 0.75;
 }
 .act-btn + .act-btn::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 9px;
-  bottom: 9px;
-  width: 0.5px;
-  background: var(--hairline);
+  content: none;
 }
 .act-btn:hover {
   background: var(--hover);
@@ -537,13 +595,8 @@ onUnmounted(() => {
 .act-btn:active {
   background: var(--press);
 }
-.act-btn:first-child {
-  border-bottom-left-radius: 14px;
-}
-.act-btn:last-child {
-  border-bottom-right-radius: 14px;
-}
 .act-btn.primary {
+  background: rgba(90, 95, 239, 0.08);
   color: var(--accent);
   font-weight: 600;
 }
@@ -573,6 +626,8 @@ onUnmounted(() => {
     --muted: #8e8e93;
     --hairline: rgba(255, 255, 255, 0.1);
     --tint: rgba(28, 30, 38, 0.45);
+    --card: rgba(255, 255, 255, 0.055);
+    --card-border: rgba(255, 255, 255, 0.085);
     --chip: rgba(255, 255, 255, 0.1);
     --track: rgba(255, 255, 255, 0.14);
     --hover: rgba(255, 255, 255, 0.06);
@@ -583,6 +638,13 @@ onUnmounted(() => {
   }
   .qtrack {
     box-shadow: inset 0 0.5px 1.5px rgba(0, 0, 0, 0.3);
+  }
+  .qicon {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .qrow:hover {
+    border-color: rgba(125, 130, 255, 0.24);
+    background: rgba(255, 255, 255, 0.085);
   }
   .quota-list {
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;

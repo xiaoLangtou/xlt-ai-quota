@@ -1,6 +1,7 @@
 import type {
   AiSubscription,
   BillEntry,
+  QuotaDisplayTarget,
   QuotaSnapshot,
   SubscriptionPreferences,
   SyncInfo,
@@ -8,8 +9,7 @@ import type {
 } from "@/types/usage";
 
 /**
- * 本地存储抽象。当前实现为 WebStorage（localStorage），用于 Vite dev / 浏览器。
- * 待 Tauri 桌面壳就绪后，提供基于 tauri-plugin-sql 的 SQLite 实现。
+ * 本地业务存储抽象，当前由 Web Storage（localStorage）持久化。
  */
 export interface UsageStorage {
   // 订阅额度快照
@@ -53,6 +53,19 @@ export interface UsageStorage {
   saveConnectorConfig(config: ConnectorConfigPersist): void;
 }
 
+export interface UsagePreferences {
+  /** IANA 时区名（如 Asia/Shanghai）；空表示跟随系统。用于日/小时分桶。 */
+  timezone?: string;
+  /** 统计起始日 YYYY-MM-DD；早于此日期的数据不纳入分析与同步。 */
+  statsSince?: string;
+}
+
 export interface ConnectorConfigPersist {
+  /** 用量统计偏好（时区 / 起始日）。 */
+  preferences?: UsagePreferences;
   ark?: { baseUrl?: string };
+  /** 国内油价监控；API Key 可选，省份为空时不启动采集。 */
+  oil?: { province?: string; apiKey?: string };
+  /** 套餐额度区域中由用户隐藏的平台或方舟套餐。 */
+  quotaDisplay?: { hiddenPlatforms?: QuotaDisplayTarget[] };
 }

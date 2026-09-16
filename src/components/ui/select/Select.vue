@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Check, ChevronDown } from "lucide-vue-next";
+import { Check, ChevronDown, ChevronUp } from "lucide-vue-next";
 import ToolLogo from "@/components/ToolLogo.vue";
 import {
   SelectContent,
@@ -9,6 +9,8 @@ import {
   SelectItemText,
   SelectPortal,
   SelectRoot,
+  SelectScrollDownButton,
+  SelectScrollUpButton,
   SelectTrigger,
   SelectValue,
   SelectViewport,
@@ -30,12 +32,22 @@ const selected = computed(() => props.options.find((option) => option.value === 
       <SelectValue v-else :placeholder="placeholder" />
       <ChevronDown :size="15" />
     </SelectTrigger>
-    <SelectPortal><SelectContent class="cn-select-content" position="popper" side="bottom" align="start" :side-offset="6" :collision-padding="12"><SelectViewport>
-      <SelectItem v-for="option in options" :key="option.value" :value="option.value" class="cn-select-item">
-        <SelectItemText><span class="cn-select-option"><ToolLogo v-if="option.logo" :platform="option.logo" :size="17" /><span>{{ option.label }}</span></span></SelectItemText>
-        <SelectItemIndicator><Check :size="14" /></SelectItemIndicator>
-      </SelectItem>
-    </SelectViewport></SelectContent></SelectPortal>
+    <SelectPortal>
+      <SelectContent class="cn-select-content" position="popper" side="bottom" align="start" :side-offset="6" :collision-padding="12">
+        <SelectScrollUpButton class="cn-select-scroll-button">
+          <ChevronUp :size="15" />
+        </SelectScrollUpButton>
+        <SelectViewport class="cn-select-viewport">
+          <SelectItem v-for="option in options" :key="option.value" :value="option.value" class="cn-select-item">
+            <SelectItemText><span class="cn-select-option"><ToolLogo v-if="option.logo" :platform="option.logo" :size="17" /><span>{{ option.label }}</span></span></SelectItemText>
+            <SelectItemIndicator><Check :size="14" /></SelectItemIndicator>
+          </SelectItem>
+        </SelectViewport>
+        <SelectScrollDownButton class="cn-select-scroll-button">
+          <ChevronDown :size="15" />
+        </SelectScrollDownButton>
+      </SelectContent>
+    </SelectPortal>
   </SelectRoot>
 </template>
 

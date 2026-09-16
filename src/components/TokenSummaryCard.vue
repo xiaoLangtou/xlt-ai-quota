@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { formatTokens } from "@/utils/format";
+import { formatTokens, formatUsd } from "@/utils/format";
 import Sparkline from "@/components/Sparkline.vue";
 
 const props = defineProps<{
@@ -12,9 +12,15 @@ const props = defineProps<{
   deltaPct?: number;
   /** 迷你趋势数据 */
   spark?: number[];
+  /** 数值格式：tokens（默认）/ usd（美元）/ count（千分位整数） */
+  format?: "tokens" | "usd" | "count";
 }>();
 
-const formatted = computed(() => formatTokens(props.value));
+const formatted = computed(() => {
+  if (props.format === "usd") return formatUsd(props.value);
+  if (props.format === "count") return props.value.toLocaleString();
+  return formatTokens(props.value);
+});
 const deltaText = computed(() => {
   if (props.deltaPct == null) return null;
   const arrow = props.deltaPct >= 0 ? "↑" : "↓";
@@ -45,9 +51,11 @@ const deltaUp = computed(() => (props.deltaPct ?? 0) >= 0);
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 16px 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
   background: var(--surface);
-  border: 0;
+  box-shadow: var(--shadow-card);
 }
 .stat-head {
   display: flex;
@@ -57,8 +65,7 @@ const deltaUp = computed(() => (props.deltaPct ?? 0) >= 0);
 }
 .stat label {
   color: var(--text-subtle);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.8px;
 }
@@ -71,12 +78,12 @@ const deltaUp = computed(() => (props.deltaPct ?? 0) >= 0);
   white-space: nowrap;
 }
 .delta-pill.up {
-  background: color-mix(in srgb, var(--u-ok) 16%, transparent);
-  color: var(--u-ok);
+  background: color-mix(in srgb, var(--u-warn) 13%, transparent);
+  color: var(--u-warn);
 }
 .delta-pill.down {
-  background: var(--surface-2);
-  color: var(--text-muted);
+  background: color-mix(in srgb, var(--u-ok) 13%, transparent);
+  color: var(--u-ok);
 }
 .stat-main {
   display: flex;
@@ -87,8 +94,8 @@ const deltaUp = computed(() => (props.deltaPct ?? 0) >= 0);
 .stat strong {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 22px;
-  font-weight: 650;
+  font-size: 24px;
+  font-weight: 700;
   line-height: 1;
   letter-spacing: -0.6px;
   font-variant-numeric: tabular-nums;
@@ -103,22 +110,4 @@ const deltaUp = computed(() => (props.deltaPct ?? 0) >= 0);
   font-size: 12px;
 }
 
-/* Glass prototype */
-.stat {
-  gap: 9px;
-  padding: 21px 24px;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-.stat label { color: var(--text-subtle); font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; letter-spacing: 0; }
-.delta-pill { padding: 3px 9px; border-radius: 20px; font-size: 11px; }
-.delta-pill.up { background: rgba(233, 85, 107, 0.14); color: #d8405c; }
-.delta-pill.down { background: rgba(47, 190, 143, 0.14); color: #1e9a76; }
-.stat strong { color: var(--text); font-size: 27px; font-weight: 800; line-height: normal; letter-spacing: -0.02em; }
-.stat-spark { display: none; }
-.stat-hint { color: var(--text-subtle); font-size: 12px; }
 </style>

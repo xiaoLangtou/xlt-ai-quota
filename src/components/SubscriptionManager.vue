@@ -42,7 +42,7 @@ const COMMON_PROVIDERS = [
 const CUSTOM_PROVIDER = "__custom__";
 const PROVIDER_OPTIONS = [
   ...COMMON_PROVIDERS.map((provider) => ({ value: provider, label: provider, logo: provider })),
-  { value: CUSTOM_PROVIDER, label: "自定义服务商" },
+  { value: CUSTOM_PROVIDER, label: "自定义服务商", logo: CUSTOM_PROVIDER },
 ];
 // reka-ui 的 SelectItem 不允许空字符串值，用哨兵值表示「不关联订阅」。
 const NO_SUBSCRIPTION = "__none__";
@@ -75,7 +75,9 @@ type BillFormState = {
 
 const {
   subscriptions,
+  monthlyCny,
   usdToCnyRate,
+  upcomingCount,
   billsForMonth,
   monthTotalCny,
   addBill,
@@ -103,6 +105,11 @@ const sourceOptions = [
 ];
 const monthBills = computed(() => billsForMonth(selectedMonth.value, selectedCategory.value));
 const monthTotal = computed(() => monthTotalCny(selectedMonth.value, selectedCategory.value));
+const currentMonth = new Date().toISOString().slice(0, 7);
+const currentMonthTotal = computed(() => monthTotalCny(currentMonth));
+const activeSubscriptionCount = computed(
+  () => subscriptions.value.filter((item) => item.status === "active").length,
+);
 const isCurrentMonth = computed(() => selectedMonth.value === new Date().toISOString().slice(0, 7));
 const monthFooterLabel = computed(() => {
   const [year, m] = selectedMonth.value.split("-").map(Number);
@@ -396,12 +403,30 @@ watch(usdToCnyRate, (value) => {
             <div>
               <span class="eyebrow">SUBSCRIPTIONS &amp; BILLING</span>
               <h2>订阅与账单</h2>
-              <p>管理 AI 服务订阅，并按月查看自动生成 + 手动记账的账单流水。</p>
+              <p>分开跟踪订阅计划与实际账单，让每笔 AI 支出都可对账。</p>
             </div>
             <Button v-if="!embedded" variant="ghost" size="icon" aria-label="关闭" @click="close">×</Button>
           </header>
 
           <div class="manager-workspace">
+            <section class="billing-overview" aria-label="订阅账单摘要">
+              <div>
+                <span>计划月支出</span>
+                <strong>{{ formatMoney(monthlyCny, "CNY") }}</strong>
+                <small>{{ activeSubscriptionCount }} 项生效中</small>
+              </div>
+              <div>
+                <span>本月实际已记</span>
+                <strong>{{ formatMoney(currentMonthTotal, "CNY") }}</strong>
+                <small>仅统计账单流水</small>
+              </div>
+              <div>
+                <span>7 天内续费</span>
+                <strong>{{ upcomingCount }}</strong>
+                <small>{{ upcomingCount ? "请核对付款账户" : "近期无待续费" }}</small>
+              </div>
+            </section>
+
             <Tabs v-model="activeView" class="workspace-tabs">
               <div class="ws-bar">
                 <TabsList aria-label="订阅工作区">
@@ -422,30 +447,146 @@ watch(usdToCnyRate, (value) => {
               </div>
 
               <TabsContent value="subscriptions" class="directory" aria-label="我的订阅">
-              <div v-if="subscriptions.length" class="table-wrap"><Table class="workspace-table"><colgroup><col class="col-service"><col class="col-account"><col class="col-amount"><col class="col-cycle"><col class="col-renewal"><col class="col-status"><col class="col-actions"></colgroup><TableHeader><TableRow><TableHead>服务</TableHead><TableHead>账号</TableHead><TableHead class="num">金额</TableHead><TableHead>周期</TableHead><TableHead>下次续费</TableHead><TableHead>状态</TableHead><TableHead class="action-head">操作</TableHead></TableRow></TableHeader><TableBody><TableRow v-for="item in subscriptions" :key="item.id"><TableCell><div class="service-cell"><span class="provider-mark"><ToolLogo :platform="item.provider" :size="21" /></span><div><strong>{{ item.provider }}</strong><small>{{ item.planName }}</small></div></div></TableCell><TableCell class="muted-cell" :title="item.account">{{ item.account }}</TableCell><TableCell class="num money-cell">{{ formatMoney(item.price, item.currency) }}</TableCell><TableCell>{{ billingLabel(item) }}</TableCell><TableCell><span>{{ item.nextBillingDate }}</span><small class="due-copy">{{ dueLabel(item.nextBillingDate) }}</small></TableCell><TableCell><span class="status-pill" :class="subscriptionStatus(item)">{{ subscriptionStatusLabel(item) }}</span></TableCell><TableCell><div class="row-actions"><Button variant="ghost" size="sm" @click="openEdit(item)">编辑</Button><Menu :items="[{ label: item.status === 'active' ? '暂停订阅' : '恢复订阅', value: 'toggle' }, { label: '删除订阅', value: 'remove', danger: true }]" aria-label="更多订阅操作" @select="(v) => onSubAction(item, v)" /></div></TableCell></TableRow></TableBody></Table></div>
-              <div v-else class="empty-state"><div>＋</div><strong>还没有订阅记录</strong><p>从常用服务商开始，记录你的套餐和续费日期。</p><Button @click="openCreate">新增第一条订阅</Button></div>
+                <div v-if="subscriptions.length" class="table-wrap">
+                  <Table class="workspace-table">
+                    <colgroup>
+                      <col class="col-service" />
+                      <col class="col-account" />
+                      <col class="col-amount" />
+                      <col class="col-cycle" />
+                      <col class="col-renewal" />
+                      <col class="col-status" />
+                      <col class="col-actions" />
+                    </colgroup>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>服务</TableHead>
+                        <TableHead>账号</TableHead>
+                        <TableHead class="num">金额</TableHead>
+                        <TableHead>周期</TableHead>
+                        <TableHead>下次续费</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead>操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow v-for="item in subscriptions" :key="item.id">
+                        <TableCell>
+                          <div class="service-cell">
+                            <span class="provider-mark">
+                              <ToolLogo :platform="item.provider" :size="21" />
+                            </span>
+                            <div>
+                              <strong>{{ item.provider }}</strong>
+                              <small>{{ item.planName }}</small>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell class="muted-cell" :title="item.account">{{ item.account }}</TableCell>
+                        <TableCell class="num money-cell">{{ formatMoney(item.price, item.currency) }}</TableCell>
+                        <TableCell>{{ billingLabel(item) }}</TableCell>
+                        <TableCell>
+                          <span>{{ item.nextBillingDate }}</span>
+                          <small class="due-copy">{{ dueLabel(item.nextBillingDate) }}</small>
+                        </TableCell>
+                        <TableCell>
+                          <span class="status-pill" :class="subscriptionStatus(item)">
+                            {{ subscriptionStatusLabel(item) }}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <div class="row-actions">
+                            <Button variant="ghost" size="sm" @click="openEdit(item)">编辑</Button>
+                            <Menu
+                              :items="[
+                                { label: item.status === 'active' ? '暂停订阅' : '恢复订阅', value: 'toggle' },
+                                { label: '删除订阅', value: 'remove', danger: true },
+                              ]"
+                              aria-label="更多订阅操作"
+                              @select="(value) => onSubAction(item, value)"
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+                <div v-else class="empty-state">
+                  <div>＋</div>
+                  <strong>还没有订阅记录</strong>
+                  <p>从常用服务商开始，记录你的套餐和续费日期。</p>
+                  <Button @click="openCreate">新增第一条订阅</Button>
+                </div>
               </TabsContent>
 
               <TabsContent value="bills" class="bill-workspace" aria-label="账单流水">
                 <div v-if="monthBills.length" class="table-wrap">
                   <Table class="workspace-table ledger-table">
-                    <colgroup><col class="col-l-date"><col class="col-l-service"><col class="col-l-cat"><col class="col-l-pay"><col class="col-l-src"><col class="col-l-amount"><col class="col-l-actions"></colgroup>
-                    <TableHeader><TableRow><TableHead>日期</TableHead><TableHead>服务</TableHead><TableHead>分类</TableHead><TableHead>支付方式</TableHead><TableHead>来源</TableHead><TableHead class="num">金额</TableHead><TableHead class="action-head">操作</TableHead></TableRow></TableHeader>
+                    <colgroup>
+                      <col class="col-l-date" />
+                      <col class="col-l-service" />
+                      <col class="col-l-cat" />
+                      <col class="col-l-pay" />
+                      <col class="col-l-src" />
+                      <col class="col-l-amount" />
+                      <col class="col-l-actions" />
+                    </colgroup>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>日期</TableHead>
+                        <TableHead>服务</TableHead>
+                        <TableHead>分类</TableHead>
+                        <TableHead>支付方式</TableHead>
+                        <TableHead>来源</TableHead>
+                        <TableHead class="num">金额</TableHead>
+                        <TableHead>操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
                     <TableBody>
                       <TableRow v-for="bill in monthBills" :key="bill.id">
                         <TableCell class="date-cell">{{ bill.date.slice(5) }}</TableCell>
-                        <TableCell><div class="service-cell"><span class="provider-mark"><ToolLogo :platform="bill.service" :size="21" /></span><div><strong>{{ bill.service }}</strong><small v-if="bill.note">{{ bill.note }}</small></div></div></TableCell>
+                        <TableCell>
+                          <div class="service-cell">
+                            <span class="provider-mark"><ToolLogo :platform="bill.service" :size="21" /></span>
+                            <div>
+                              <strong>{{ bill.service }}</strong>
+                              <small v-if="bill.note">{{ bill.note }}</small>
+                            </div>
+                          </div>
+                        </TableCell>
                         <TableCell><span class="cat-tag">{{ BILL_CATEGORY_LABEL[bill.category] }}</span></TableCell>
                         <TableCell class="muted-cell">{{ BILL_PAYMENT_LABEL[bill.paymentMethod] }}</TableCell>
-                        <TableCell><span class="src-text" :class="bill.source">{{ BILL_SOURCE_LABEL[bill.source] }}</span></TableCell>
-                        <TableCell class="num money-cell">{{ formatMoney(bill.amount, bill.currency) }}<small v-if="bill.currency === 'USD'">≈ {{ formatMoney(bill.amount * usdToCnyRate, 'CNY') }}</small></TableCell>
-                        <TableCell><div class="row-actions"><Button variant="ghost" size="sm" @click="openBillEdit(bill)">编辑</Button><Menu :items="[{ label: '删除账单', value: 'remove', danger: true }]" aria-label="更多账单操作" @select="() => confirmRemoveBill(bill)" /></div></TableCell>
+                        <TableCell>
+                          <span class="src-text" :class="bill.source">{{ BILL_SOURCE_LABEL[bill.source] }}</span>
+                        </TableCell>
+                        <TableCell class="num money-cell">
+                          {{ formatMoney(bill.amount, bill.currency) }}
+                          <small v-if="bill.currency === 'USD'">
+                            ≈ {{ formatMoney(bill.amount * usdToCnyRate, "CNY") }}
+                          </small>
+                        </TableCell>
+                        <TableCell>
+                          <div class="row-actions">
+                            <Button variant="ghost" size="sm" @click="openBillEdit(bill)">编辑</Button>
+                            <Menu
+                              :items="[{ label: '删除账单', value: 'remove', danger: true }]"
+                              aria-label="更多账单操作"
+                              @select="() => confirmRemoveBill(bill)"
+                            />
+                          </div>
+                        </TableCell>
                       </TableRow>
                     </TableBody>
-                    <TableFooter><TableRow><TableCell colspan="5">{{ monthFooterLabel }}</TableCell><TableCell class="num money-cell">{{ formatMoney(monthTotal, "CNY") }}</TableCell><TableCell /></TableRow></TableFooter>
+                    <TableFooter>
+                      <TableRow>
+                        <TableCell colspan="5">{{ monthFooterLabel }}</TableCell>
+                        <TableCell class="num money-cell">{{ formatMoney(monthTotal, "CNY") }}</TableCell>
+                        <TableCell />
+                      </TableRow>
+                    </TableFooter>
                   </Table>
                 </div>
-                <div v-else class="bill-empty">该月暂无账单 · 点「手动记账」新增，或等待订阅到期自动生成。</div>
+                <div v-else class="bill-empty">该月暂无账单 · 点「手动记账」录入实际支出。</div>
               </TabsContent>
             </Tabs>
           </div>
@@ -566,143 +707,249 @@ watch(usdToCnyRate, (value) => {
 </template>
 
 <style scoped>
-/* 订阅与账单工作台：一套 token 化视觉系统，随主题自适应。 */
 .panel {
   position: relative;
   width: min(1120px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
   overflow: auto;
-  padding: 28px;
+  padding: 26px;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
 }
+
 .panel.embedded {
   width: 100%;
-  max-width: 1320px;
+  max-width: none;
   max-height: none;
-  margin: 0 auto;
   padding: 0;
   overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
 }
+
 .panel-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
+
+.panel.embedded .panel-head {
+  margin: 0;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
 .eyebrow {
+  display: block;
+  margin-bottom: 5px;
   color: var(--text-subtle);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
+
 .panel-head h2 {
-  margin: 5px 0 0;
-  font-size: 22px;
-  font-weight: 650;
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
+
 .panel-head p {
-  margin: 6px 0 0;
+  margin: 5px 0 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.panel.embedded .eyebrow {
+  color: var(--accent);
 }
 
 .manager-workspace {
   width: 100%;
 }
+
+.panel.embedded .manager-workspace {
+  padding: 18px 22px 22px;
+}
+
+.billing-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.billing-overview > div {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 96px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 15px 17px;
+  border-left: 1px solid var(--border);
+}
+
+.billing-overview > div:first-child {
+  border-left: 0;
+}
+
+.billing-overview > div:nth-child(-n + 2)::before {
+  position: absolute;
+  top: 0;
+  right: 17px;
+  left: 17px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--accent);
+  content: "";
+}
+
+.billing-overview span {
+  color: var(--text-subtle);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.billing-overview strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.billing-overview small {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 .workspace-tabs {
   gap: 0;
 }
+
 .ws-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin: 2px 0 18px;
-  padding-bottom: 16px;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
 }
+
 .ws-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 9px;
 }
-.bill-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  margin: -4px 0 18px;
+
+.panel.embedded .ws-actions {
+  display: none;
 }
-.bill-toolbar :deep(.cn-month-picker-trigger) {
-  width: 150px;
-  height: 34px;
-}
-.bill-toolbar :deep(.cn-select-trigger) {
-  width: 128px;
-  height: 34px;
-}
+
 .toolbar-rate {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   color: var(--text-muted);
   font-size: 12px;
 }
+
 .toolbar-rate > span {
   display: none;
 }
+
 .toolbar-rate b {
   font-size: 11px;
   white-space: nowrap;
 }
+
 .toolbar-rate :deep(.cn-input) {
-  width: 76px;
+  width: 72px;
   height: 30px;
   text-align: center;
   font-family: var(--font-mono);
 }
 
-.directory,
-.bill-workspace {
-  width: 100%;
+.bill-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  margin: 0 0 12px;
 }
+
+.bill-toolbar :deep(.cn-month-picker-trigger) {
+  width: 150px;
+  height: 34px;
+}
+
+.bill-toolbar :deep(.cn-select-trigger) {
+  width: 128px;
+  height: 34px;
+}
+
+.directory,
+.bill-workspace,
 .table-wrap {
   width: 100%;
-  overflow-x: auto;
 }
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
 .empty-state,
 .bill-empty {
   display: grid;
-  min-height: 220px;
+  min-height: 210px;
   place-content: center;
+  padding: 24px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-md);
+  background: var(--surface-2);
   color: var(--text-muted);
   text-align: center;
 }
+
 .empty-state > div {
-  margin-bottom: 8px;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: var(--accent-weak);
   color: var(--accent);
-  font-size: 28px;
+  font-size: 22px;
 }
+
 .empty-state strong {
   color: var(--text);
   font-size: 14px;
 }
+
 .empty-state p {
-  margin: 6px 0 16px;
-  font-size: 13px;
+  margin: 6px 0 15px;
+  font-size: 12px;
 }
 
 :deep(.workspace-table) {
@@ -711,155 +958,223 @@ watch(usdToCnyRate, (value) => {
   table-layout: fixed;
   border-collapse: collapse;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12.5px;
 }
-:deep(.workspace-table .col-service) { width: 23%; }
-:deep(.workspace-table .col-account) { width: 15%; }
-:deep(.workspace-table .col-amount) { width: 210px; }
-:deep(.workspace-table .col-cycle) { width: 78px; }
-:deep(.workspace-table .col-renewal) { width: 158px; }
-:deep(.workspace-table .col-status) { width: 112px; }
-:deep(.workspace-table .col-actions) { width: 150px; }
+
+:deep(.workspace-table .col-service) {
+  width: 23%;
+}
+
+:deep(.workspace-table .col-account) {
+  width: 15%;
+}
+
+:deep(.workspace-table .col-amount) {
+  width: 190px;
+}
+
+:deep(.workspace-table .col-cycle) {
+  width: 72px;
+}
+
+:deep(.workspace-table .col-renewal) {
+  width: 150px;
+}
+
+:deep(.workspace-table .col-status) {
+  width: 104px;
+}
+
+:deep(.workspace-table .col-actions) {
+  width: 112px;
+}
+
 :deep(.workspace-table th) {
-  padding: 0 14px 11px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 11.5px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 650;
   text-align: left;
   white-space: nowrap;
 }
+
 :deep(.workspace-table td) {
-  padding: 14px 14px 14px 0;
+  padding: 12px;
   overflow: hidden;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
-:deep(.workspace-table tbody tr:hover) {
-  background: var(--surface-2);
+
+:deep(.workspace-table tbody tr:last-child td) {
+  border-bottom: 0;
 }
+
+:deep(.workspace-table tbody tr:hover) {
+  background: color-mix(in srgb, var(--accent) 3%, var(--surface));
+}
+
 :deep(.workspace-table th.num),
 :deep(.workspace-table td.num) {
   text-align: right;
 }
-:deep(.workspace-table .action-head) {
-  padding-left: 8px;
-}
+
 :deep(.workspace-table tfoot td) {
-  padding: 13px 14px 13px 0;
   border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
+  background: var(--surface-2);
   color: var(--text);
-  font-weight: 650;
+  font-weight: 680;
 }
 
-/* 账单台账列宽 */
 :deep(.ledger-table) {
   min-width: 860px;
 }
-:deep(.ledger-table .col-l-date) { width: 78px; }
-:deep(.ledger-table .col-l-service) { width: auto; }
-:deep(.ledger-table .col-l-cat) { width: 118px; }
-:deep(.ledger-table .col-l-pay) { width: 104px; }
-:deep(.ledger-table .col-l-src) { width: 110px; }
-:deep(.ledger-table .col-l-amount) { width: 168px; }
-:deep(.ledger-table .col-l-actions) { width: 116px; }
+
+:deep(.ledger-table .col-l-date) {
+  width: 78px;
+}
+
+:deep(.ledger-table .col-l-service) {
+  width: auto;
+}
+
+:deep(.ledger-table .col-l-cat) {
+  width: 118px;
+}
+
+:deep(.ledger-table .col-l-pay) {
+  width: 104px;
+}
+
+:deep(.ledger-table .col-l-src) {
+  width: 104px;
+}
+
+:deep(.ledger-table .col-l-amount) {
+  width: 168px;
+}
+
+:deep(.ledger-table .col-l-actions) {
+  width: 104px;
+}
 
 .service-cell {
   display: flex;
-  align-items: center;
-  gap: 10px;
   min-width: 0;
+  align-items: center;
+  gap: 9px;
 }
+
 .provider-mark {
   display: grid;
   width: 30px;
   height: 30px;
   flex: 0 0 30px;
   place-items: center;
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--accent-weak);
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
+  background: var(--surface-2);
 }
+
+.service-cell > div {
+  min-width: 0;
+}
+
 .service-cell strong,
 .service-cell small,
 .money-cell small,
 .due-copy {
   display: block;
 }
+
 .service-cell strong {
+  overflow: hidden;
   color: var(--text);
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
 .service-cell small,
 .muted-cell,
 .money-cell small,
 .due-copy {
   margin-top: 3px;
   overflow: hidden;
-  color: var(--text-muted);
-  font-size: 11.5px;
+  color: var(--text-subtle);
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .money-cell,
 .date-cell {
   font-family: var(--font-mono);
   white-space: nowrap;
-}
-.money-cell {
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
+
+.money-cell {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 620;
+  text-overflow: ellipsis;
+}
+
 .date-cell {
   color: var(--text-muted);
 }
 
 .cat-tag {
   display: inline-block;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 5px;
   background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10.5px;
   white-space: nowrap;
 }
+
 .src-text {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11.5px;
 }
+
 .src-text.manual {
   color: var(--accent);
 }
+
 .src-text.usage_settlement {
   color: var(--u-warn);
 }
 
 .status-pill {
   display: inline-block;
-  padding: 3px 8px;
+  padding: 3px 7px;
   border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 550;
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
 }
+
 .status-pill.active {
-  background: color-mix(in srgb, var(--u-ok) 16%, transparent);
+  background: color-mix(in srgb, var(--u-ok) 13%, transparent);
   color: var(--u-ok);
 }
+
 .status-pill.soon {
-  background: color-mix(in srgb, var(--u-warn) 16%, transparent);
+  background: color-mix(in srgb, var(--u-warn) 13%, transparent);
   color: var(--u-warn);
 }
+
 .status-pill.overdue {
-  background: color-mix(in srgb, var(--u-crit) 16%, transparent);
+  background: color-mix(in srgb, var(--u-crit) 13%, transparent);
   color: var(--u-crit);
 }
+
 .status-pill.paused {
   background: var(--surface-2);
   color: var(--text-muted);
@@ -867,27 +1182,26 @@ watch(usdToCnyRate, (value) => {
 
 .row-actions {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 1px;
   white-space: nowrap;
 }
+
 .row-actions :deep(.cn-button) {
   height: 1.7rem;
   padding: 0 0.35rem;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11.5px;
 }
+
 .row-actions :deep(.cn-button:hover) {
-  color: var(--text);
-  background: transparent;
-}
-.row-actions :deep(.delete-action) {
-  color: var(--u-crit);
+  color: var(--accent);
 }
 
 .editor {
   padding: 24px;
-  background: transparent;
 }
+
 .editor-head,
 .editor-foot {
   display: flex;
@@ -895,20 +1209,25 @@ watch(usdToCnyRate, (value) => {
   justify-content: space-between;
   gap: 12px;
 }
+
 .editor h3 {
   margin: 0;
+  color: var(--text);
   font-size: 18px;
-  font-weight: 650;
+  font-weight: 680;
 }
+
 .fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
   margin-top: 18px;
 }
+
 .fields label {
   min-width: 0;
 }
+
 .fields label > span {
   display: block;
   margin-bottom: 6px;
@@ -916,13 +1235,17 @@ watch(usdToCnyRate, (value) => {
   font-size: 12px;
   font-weight: 600;
 }
+
 .wide {
   grid-column: 1 / -1;
 }
+
 .form-error {
+  margin: 12px 0 0;
   color: var(--u-crit);
   font-size: 12px;
 }
+
 .editor-foot {
   justify-content: flex-end;
   margin-top: 20px;
@@ -932,66 +1255,58 @@ watch(usdToCnyRate, (value) => {
   .panel {
     padding: 20px;
   }
+
   .panel.embedded {
     padding: 0;
   }
+
+  .panel.embedded .panel-head,
+  .panel.embedded .manager-workspace {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .billing-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-overview > div {
+    min-height: 82px;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .billing-overview > div:first-child {
+    border-top: 0;
+  }
+
   .ws-bar {
     align-items: stretch;
     flex-direction: column;
   }
+
   .ws-actions {
-    width: 100%;
+    flex-wrap: wrap;
   }
+
   .bill-toolbar {
     align-items: stretch;
     flex-wrap: wrap;
   }
+
   .bill-toolbar :deep(.cn-month-picker-trigger),
-  .bill-toolbar :deep(.cn-select-trigger) {
-    flex: 1;
-    width: auto;
-  }
+  .bill-toolbar :deep(.cn-select-trigger),
   .bill-toolbar > :deep(.cn-button) {
+    width: auto;
     flex: 1;
   }
+
   .fields {
     grid-template-columns: 1fr;
   }
+
   .wide {
     grid-column: auto;
   }
 }
-
-/* Glass prototype */
-.panel.embedded {
-  position: relative;
-  width: 100%;
-  max-width: none;
-  padding: 0;
-  border: 1px solid var(--glass-border);
-  border-radius: 20px;
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(18px) saturate(180%);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-}
-.panel.embedded .panel-head { margin: 0; padding: 19px 26px 0; }
-.panel.embedded .eyebrow { display: none; }
-.panel.embedded .panel-head h2 { margin: 0 0 3px; font-size: 17px; font-weight: 700; }
-.panel.embedded .panel-head p { margin: 0; color: var(--text-subtle); font-size: 12.5px; }
-.panel.embedded .ws-bar { position: absolute; top: 19px; right: 26px; z-index: 2; margin: 0; padding: 0; border: 0; }
-.panel.embedded .ws-bar .ws-actions { display: none; }
-.panel.embedded .bill-toolbar { margin: 0; padding: 14px 26px 12px; }
-.panel.embedded :deep(.cn-tabs-list) { gap: 3px; padding: 4px; border-radius: 12px; background: var(--segment-bg); }
-.panel.embedded :deep(.cn-tabs-trigger) { padding: 7px 16px; border-radius: 9px; color: var(--text-muted); font-size: 12.5px; font-weight: 600; }
-.panel.embedded :deep(.cn-tabs-trigger[data-state="active"]) { background: var(--segment-active); box-shadow: var(--shadow-sm); color: var(--text); }
-.panel.embedded .directory,
-.panel.embedded .bill-workspace { padding: 0 26px 22px; }
-.panel.embedded .empty-state,
-.panel.embedded .bill-empty { min-height: 194px; border: 0; border-radius: 0; color: var(--text-subtle); }
-.panel.embedded .empty-state > div { display: grid; width: 46px; height: 46px; place-items: center; margin: 0 auto 14px; border-radius: 15px; background: rgba(91, 95, 239, 0.1); color: #5b5fef; font-size: 24px; }
-.panel.embedded .empty-state strong { color: var(--text); font-size: 15px; font-weight: 700; }
-.panel.embedded .empty-state p { margin: 6px 0 18px; color: var(--text-subtle); font-size: 12.5px; }
-.panel.embedded :deep(.workspace-table th),
-.panel.embedded :deep(.workspace-table td) { border-color: var(--border); }
 </style>

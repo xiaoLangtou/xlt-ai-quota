@@ -21,6 +21,7 @@ import {
 } from "@/types/usage";
 import { ArkConnector } from "@/connectors/ark";
 import { CodexConnector } from "@/connectors/codex";
+import { KimiConnector } from "@/connectors/kimi";
 import { KiroConnector } from "@/connectors/kiro";
 import { QoderConnector } from "@/connectors/qoder";
 import { OpenCodeConnector } from "@/connectors/opencode";
@@ -56,6 +57,11 @@ const WINDOW_SPEC: Record<
   codex: [], // 动态：five_hour + weekly（来自 /wham/usage）
   kiro: [{ metric: "credits", label: "本周期已消耗", tone: "purple" }],
   qoder: [{ metric: "credits", label: "套餐已消耗", tone: "purple" }],
+  kimi: [
+    { metric: "five_hour", label: "5 小时额度", tone: "blue" },
+    { metric: "monthly_code", label: "月 Code 额度", tone: "blue" },
+    { metric: "monthly", label: "月总额度", tone: "blue" },
+  ],
   "opencode-go": [
     { metric: "five_hour", label: "5 小时额度", tone: "green" },
     { metric: "weekly", label: "周额度", tone: "green" },
@@ -71,6 +77,7 @@ const METRIC_META: Record<
   five_hour: { label: "5 小时额度", tone: "blue", order: 1 },
   weekly: { label: "周额度", tone: "blue", order: 2 },
   monthly: { label: "月额度", tone: "blue", order: 3 },
+  monthly_code: { label: "月 Code 额度", tone: "blue", order: 3 },
   credits: { label: "本周期已消耗", tone: "purple", order: 4 },
   addon_credits: { label: "加购已消耗", tone: "purple", order: 5 },
   account: { label: "账户", tone: "blue", order: 6 },
@@ -99,6 +106,7 @@ export class UsageService {
     this.storage = storage;
     const ark = new ArkConnector();
     const codex = new CodexConnector();
+    const kimi = new KimiConnector();
     const kiro = new KiroConnector();
     const qoder = new QoderConnector();
     const opencode = new OpenCodeConnector();
@@ -106,10 +114,10 @@ export class UsageService {
     const gemini = new GeminiConnector();
     const copilot = new CopilotConnector();
     // Kiro 仅 Credits；Codex、OpenCode 与 Claude Code 的 Token 来自本机会话记录。
-    this.quotaConnectors = [ark, codex, kiro, qoder];
+    this.quotaConnectors = [ark, codex, kiro, qoder, kimi];
     // Kiro CLI 本地会话经 estimateTokens 估算；Qoder 读本地 SQLite 的真实 token。
-    // Gemini CLI / GitHub Copilot CLI 读本机会话文件的真实 token。
-    this.tokenConnectors = [ark, codex, opencode, claude, kiro, qoder, gemini, copilot];
+    // Gemini CLI / GitHub Copilot CLI 读本机会话文件的真实 token；Kimi 读 wire.jsonl 的 usage.record。
+    this.tokenConnectors = [ark, codex, opencode, claude, kiro, qoder, gemini, copilot, kimi];
   }
 
   /** 数据版本变更时清空旧数据（含历史种子）；不再注入任何默认值 */
@@ -164,7 +172,7 @@ export class UsageService {
       view.planTag = arkPlanTag(accountName ?? latest[0]?.accountName);
     }
 
-    if (platform === "codex") {
+    if (platform === "codex" || platform === "kimi") {
       const snap = latest[0];
       if (snap?.accountName) view.planTag = snap.accountName;
     }
@@ -194,7 +202,7 @@ export class UsageService {
       platform === "ark" || platform === "codex"
         ? latest
             .map((s) => s.metric)
-            .filter((m) => m !== "account" && m !== "credits" && m !== "addon_credits")
+            .filter((m) => m !== "account" && m !== "credits" && m !== "addon_credits" && m !== "monthly_code")
             .sort((a, b) => METRIC_META[a].order - METRIC_META[b].order)
             .slice(0, platform === "ark" ? 3 : 2)
             .map((metric) => ({
@@ -727,6 +735,7 @@ const PLAN_TAG: Record<Platform, string> = {
   ark: "企业版",
   kiro: "Pro",
   qoder: "Pro",
+  kimi: "会员",
   "opencode-go": "个人版",
 };
 

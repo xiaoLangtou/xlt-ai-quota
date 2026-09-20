@@ -89,7 +89,9 @@ pub fn daily_report_collect_commits(input: GitLogInput) -> Result<Vec<GitProject
     input
         .projects
         .iter()
-        .map(|project| collect_project_commits(project, &input.authors, &input.start_date, &input.end_date))
+        .map(|project| {
+            collect_project_commits(project, &input.authors, &input.start_date, &input.end_date)
+        })
         .collect()
 }
 
@@ -221,7 +223,9 @@ fn build_report_prompt(
     } else {
         format!("{start_date} 至 {end_date}")
     };
-    let mut lines = vec![format!("请根据以下 {date_label} 的 Git 提交记录生成{report_type}。")];
+    let mut lines = vec![format!(
+        "请根据以下 {date_label} 的 Git 提交记录生成{report_type}。"
+    )];
     let mut commit_count = 0usize;
     for group in projects {
         if group.commits.is_empty() {
@@ -245,7 +249,8 @@ fn build_report_prompt(
         lines.push("- 合并相近提交，每条不超过 30 字".to_owned());
     } else {
         lines.push("- 使用“本周完成”和“下周计划”两个小标题".to_owned());
-        lines.push("- 本周完成按编号列表归纳 Git 提交；下周计划根据未完成的工作合理延续".to_owned());
+        lines
+            .push("- 本周完成按编号列表归纳 Git 提交；下周计划根据未完成的工作合理延续".to_owned());
         lines.push("- 语言简洁，避免罗列 commit hash 或技术前缀".to_owned());
     }
     Ok(lines.join("\n"))
@@ -299,7 +304,11 @@ fn collect_project_commits(
             if hash.is_empty() || message.is_empty() || date.is_empty() {
                 return Err(format!("{} 返回了无法解析的 Git 提交记录", project.name));
             }
-            Ok(GitCommit { hash, message, date })
+            Ok(GitCommit {
+                hash,
+                message,
+                date,
+            })
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(GitProjectCommits {

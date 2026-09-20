@@ -17,10 +17,11 @@ export default defineConfig({
   server: { port: 1420 },
   build: {
     rollupOptions: {
-      // 多页入口：主看板 index.html + 托盘面板 tray-panel.html（独立轻量 bundle）
+      // 多页入口：主看板、托盘面板与剪贴板快捷面板。
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         "tray-panel": fileURLToPath(new URL("./tray-panel.html", import.meta.url)),
+        "clipboard-panel": fileURLToPath(new URL("./clipboard-panel.html", import.meta.url)),
       },
       output: {
         manualChunks: {

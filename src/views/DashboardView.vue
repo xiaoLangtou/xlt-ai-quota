@@ -17,6 +17,8 @@ import SubscriptionManager from "@/components/SubscriptionManager.vue";
 import AboutDialog from "@/components/AboutDialog.vue";
 import SkeletonBlock from "@/components/SkeletonBlock.vue";
 import DailyReportView from "@/views/DailyReportView.vue";
+import SnippetLibraryView from "@/views/SnippetLibraryView.vue";
+import ClipboardHistoryView from "@/views/ClipboardHistoryView.vue";
 import VaultView from "@/views/VaultView.vue";
 import TodayWorkCard from "@/components/TodayWorkCard.vue";
 import OilPriceCard from "@/components/OilPriceCard.vue";
@@ -58,7 +60,7 @@ const PlatformDailyChart = defineAsyncComponent(
   () => import("@/components/PlatformDailyChart.vue"),
 );
 
-type WorkspaceSection = "overview" | "daily-report" | "vault" | "analytics" | "subscriptions" | "settings";
+type WorkspaceSection = "overview" | "daily-report" | "snippets" | "clipboard" | "vault" | "analytics" | "subscriptions" | "settings";
 const activeWorkspace = ref<WorkspaceSection>("overview");
 const subscriptionCreateSignal = ref(0);
 const settingsSyncSignal = ref(0);
@@ -167,6 +169,8 @@ const pageMeta = computed(() => {
   const pages: Record<WorkspaceSection, { crumb: string; title: string }> = {
     overview: { crumb: "Overview", title: "用量概览" },
     "daily-report": { crumb: "Git Reports", title: "Git 报告" },
+    snippets: { crumb: "Snippets", title: "片段库" },
+    clipboard: { crumb: "Clipboard", title: "剪贴板历史" },
     vault: { crumb: "Vault", title: "密钥库" },
     analytics: { crumb: "Analytics", title: "用量分析" },
     subscriptions: { crumb: "Billing", title: "订阅与账单" },
@@ -217,6 +221,25 @@ function formatCny(value: number): string {
               stroke-linejoin="round">
               <rect x="4" y="3" width="16" height="18" rx="3" />
               <path d="M8 8h8M8 12h8M8 16h5" />
+            </svg>
+          </button>
+          <button class="rail-btn" :class="{ active: activeWorkspace === 'snippets' }" type="button"
+            @click="activeWorkspace = 'snippets'">
+            <span class="tip">片段库</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M8 4.5H5.8A1.8 1.8 0 0 0 4 6.3v11.9A1.8 1.8 0 0 0 5.8 20H16.2A1.8 1.8 0 0 0 18 18.2V14" />
+              <path d="M14 4h6v6M12 12l8-8" />
+              <path d="M8 10h4M8 14h6" />
+            </svg>
+          </button>
+          <button class="rail-btn" :class="{ active: activeWorkspace === 'clipboard' }" type="button"
+            @click="activeWorkspace = 'clipboard'">
+            <span class="tip">剪贴板历史</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="5" y="4" width="14" height="17" rx="3" />
+              <path d="M9 4.5V3h6v1.5M9 9h6M9 13h6M9 17h4" />
             </svg>
           </button>
           <button class="rail-btn" :class="{ active: activeWorkspace === 'vault' }" type="button"
@@ -299,8 +322,8 @@ function formatCny(value: number): string {
       </div>
     </aside>
 
-    <section class="workspace-main content">
-      <header class="topbar">
+    <section class="workspace-main content" :class="{ 'snippet-workspace': activeWorkspace === 'snippets', 'clipboard-workspace-shell': activeWorkspace === 'clipboard' }">
+      <header v-if="activeWorkspace !== 'snippets' && activeWorkspace !== 'clipboard'" class="topbar">
         <div>
           <div class="crumb">用量看板 <span>/</span> {{ pageMeta.crumb }}</div>
           <h1>{{ pageMeta.title }}</h1>
@@ -379,6 +402,10 @@ function formatCny(value: number): string {
         </template>
 
         <DailyReportView v-else-if="activeWorkspace === 'daily-report'" />
+
+        <SnippetLibraryView v-else-if="activeWorkspace === 'snippets'" />
+
+        <ClipboardHistoryView v-else-if="activeWorkspace === 'clipboard'" />
 
         <VaultView v-else-if="activeWorkspace === 'vault'" />
 
@@ -808,6 +835,14 @@ function formatCny(value: number): string {
 
 .page-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.snippet-workspace .page-scroll {
+  padding: 0;
+}
+
+.clipboard-workspace-shell .page-scroll {
+  overflow: hidden;
 }
 
 .overview-stack {

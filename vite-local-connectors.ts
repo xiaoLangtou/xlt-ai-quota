@@ -6,8 +6,10 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -718,6 +720,95 @@ function collectKiroTokenStats(start: string, end: string, byHour = false): Loca
   return statsRows(stats);
 }
 
+// ---- Kimi Code 本地会话 Token（~/.kimi-code/sessions/**/wire.jsonl，真实计数）----
+// usage.record 事件按次记录 {inputOther, output, inputCacheRead, inputCacheCreation}（model 前缀
+// 如 kimi-code/k3）。旧版 kimi-cli（~/.kimi/sessions/<wd>/<sess>/wire.jsonl）用 StatusUpdate 事件，
+// token_usage 为 snake_case、时间戳为秒。迁移后两套目录可能并存：kimi-code 有数据时跳过 legacy，
+// 避免迁移重复计入（与 juejin-usage 的 kimi parser 口径一致）。
+
+/** 递归收集 dir 下所有 wire.jsonl。 */
+function listWireFiles(dir: string): string[] {
+  return listJsonlFiles(dir).filter((f) => f.endsWith("/wire.jsonl"));
+}
+
+/** "kimi-code/k3" → "k3"。 */
+function kimiModelName(raw: unknown, fallback: string): string {
+  if (typeof raw !== "string" || !raw.trim()) return fallback;
+  const name = raw.trim();
+  return name.includes("/") ? name.split("/").pop() || fallback : name;
+}
+
+function collectKimiCodeStats(
+  sessionsRoot: string,
+  start: string,
+  end: string,
+  stats: Map<string, LocalTokenStats>,
+  byHour: boolean,
+): void {
+  for (const filePath of listWireFiles(sessionsRoot)) {
+    const mtimeDate = fileMtimeDate(filePath);
+    if (mtimeDate && mtimeDate < start) continue;
+    readJsonLines(filePath, (rec) => {
+      if (rec.type !== "usage.record") return;
+      const usage = isRecord(rec.usage) ? rec.usage : undefined;
+      if (!usage) return;
+      const input = numeric(usage.inputOther);
+      const output = numeric(usage.output);
+      const cached = numeric(usage.inputCacheRead) + numeric(usage.inputCacheCreation);
+      if (input === 0 && output === 0 && cached === 0) return;
+      const dateOnly = localDate(rec.time);
+      if (!dateOnly || dateOnly < start || dateOnly > end) return;
+      const key = byHour ? (localDateHour(rec.time) ?? dateOnly) : dateOnly;
+      addStats(stats, key, kimiModelName(rec.model, "kimi-for-coding"), input + cached, output, cached);
+    });
+  }
+}
+
+function collectKimiLegacyStats(
+  sessionsRoot: string,
+  start: string,
+  end: string,
+  stats: Map<string, LocalTokenStats>,
+  byHour: boolean,
+): void {
+  for (const filePath of listWireFiles(sessionsRoot)) {
+    const mtimeDate = fileMtimeDate(filePath);
+    if (mtimeDate && mtimeDate < start) continue;
+    let currentModel = "kimi-for-coding";
+    readJsonLines(filePath, (rec) => {
+      const message = isRecord(rec.message) ? rec.message : undefined;
+      if (message?.type !== "StatusUpdate") return;
+      const payload = isRecord(message.payload) ? message.payload : undefined;
+      if (!payload) return;
+      if (typeof payload.model === "string" && payload.model) currentModel = payload.model;
+      const usage = isRecord(payload.token_usage) ? payload.token_usage : undefined;
+      if (!usage) return;
+      const input = numeric(usage.input_other);
+      const output = numeric(usage.output);
+      const cached = numeric(usage.input_cache_read) + numeric(usage.input_cache_creation);
+      if (input === 0 && output === 0 && cached === 0) return;
+      // legacy 时间戳为 epoch 秒
+      const ts = numeric(rec.timestamp ?? payload.timestamp) * 1000;
+      if (!ts) return;
+      const dateOnly = localDate(ts);
+      if (!dateOnly || dateOnly < start || dateOnly > end) return;
+      const key = byHour ? (localDateHour(ts) ?? dateOnly) : dateOnly;
+      addStats(stats, key, currentModel, input + cached, output, cached);
+    });
+  }
+}
+
+function collectKimiTokenStats(start: string, end: string, byHour = false): LocalTokenStats[] {
+  const stats = new Map<string, LocalTokenStats>();
+  const codeRoot = join(homedir(), ".kimi-code", "sessions");
+  if (listWireFiles(codeRoot).length > 0) {
+    collectKimiCodeStats(codeRoot, start, end, stats, byHour);
+  } else {
+    collectKimiLegacyStats(join(homedir(), ".kimi", "sessions"), start, end, stats, byHour);
+  }
+  return statsRows(stats);
+}
+
 // ---- Qoder IDE 本地 SQLite Token（chat_message.token_info，真实计数）----
 // Qoder 桌面端把每条 assistant 消息的真实 token 存在 SharedClientCache 的 local.db，
 // token_info = {prompt_tokens, completion_tokens, cached_tokens}，gmt_create 为毫秒。
@@ -919,6 +1010,7 @@ async function collectTodayHourly(): Promise<
   tag("opencode-go", await collectOpenCodeHourly(today));
   tag("gemini", collectGeminiTokenStats(today, today, true));
   tag("copilot", collectCopilotTokenStats(today, today, true));
+  tag("kimi", collectKimiTokenStats(today, today, true));
   return out;
 }
 
@@ -1280,6 +1372,20 @@ export function localConnectorsDevPlugin(): Plugin {
           }
         }
 
+        // ---- Kimi Code 本地会话 Token（~/.kimi-code/sessions 的 wire.jsonl，真实计数）----
+        if (p === "/api/kimi/stats") {
+          const start = url.searchParams.get("start") ?? todayStr();
+          const end = url.searchParams.get("end") ?? todayStr();
+          if (!DATE_RE.test(start) || !DATE_RE.test(end) || start > end) {
+            return sendJson(res, 400, { error: "start/end must be ordered YYYY-MM-DD dates" });
+          }
+          try {
+            return sendJson(res, 200, collectKimiTokenStats(start, end));
+          } catch (e) {
+            return sendJson(res, 502, { error: "Kimi 本地 Token 聚合失败: " + summarizeErr(e) });
+          }
+        }
+
         // ---- 今日按小时 × 平台（分析页「今天」时间轴）----
         if (p === "/api/oil/price" || p === "/api/oil/forecast") {
           const province = url.searchParams.get("province")?.trim() ?? "";
@@ -1322,6 +1428,19 @@ export function localConnectorsDevPlugin(): Plugin {
             return sendJson(res, 502, {
               error: "codex 额度查询失败: " + summarizeErr(e),
               hint: "若未登录，请在终端运行 `codex login`",
+            });
+          }
+        }
+
+        // ---- Kimi Code 会员额度（/coding/v1/usages，token 在 ~/.kimi-code/credentials）----
+        if (p === "/api/kimi/usage") {
+          try {
+            const data = await fetchKimiUsage();
+            return sendJson(res, 200, data);
+          } catch (e) {
+            return sendJson(res, 502, {
+              error: "kimi 额度查询失败: " + summarizeErr(e),
+              hint: "若未登录，请在终端运行 `kimi login`",
             });
           }
         }
@@ -1527,4 +1646,170 @@ async function fetchCodexUsage(): Promise<{
     primary: win(data?.rate_limit?.primary_window),
     secondary: win(data?.rate_limit?.secondary_window),
   };
+}
+
+// ---- Kimi Code 会员额度 ----
+// token 取自 ~/.kimi-code/credentials/kimi-code.json（旧版 kimi-cli 迁移目录 ~/.kimi 作回退）。
+// access_token 900 秒过期；过期时用 refresh_token 走设备流同款刷新端点换新，
+// 并把轮换后的新凭据原子写回原文件（服务端会轮换 refresh_token，不写回会导致 CLI 掉登录）。
+// 区域由 ~/.kimi-code/region 决定：mainland-cn → *.kimi.com，global → *.kimi.ai。
+
+const KIMI_CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098";
+
+interface KimiCredentials {
+  access_token: string;
+  refresh_token: string;
+  expires_at: number;
+  expires_in?: number;
+  token_type?: string;
+  scope?: string;
+}
+
+function kimiCredentialsPath(): string {
+  for (const dir of [".kimi-code", ".kimi"]) {
+    const path = join(homedir(), dir, "credentials", "kimi-code.json");
+    if (existsSync(path)) return path;
+  }
+  return join(homedir(), ".kimi-code", "credentials", "kimi-code.json");
+}
+
+function kimiHosts(): { api: string; auth: string } {
+  let region = "mainland-cn";
+  for (const dir of [".kimi-code", ".kimi"]) {
+    try {
+      const value = readFileSync(join(homedir(), dir, "region"), "utf8").trim();
+      if (value) {
+        region = value;
+        break;
+      }
+    } catch {
+      // region 文件缺失时按 mainland-cn 处理
+    }
+  }
+  return region === "global"
+    ? { api: "https://api.kimi.ai/coding/v1", auth: "https://auth.kimi.ai" }
+    : { api: "https://api.kimi.com/coding/v1", auth: "https://auth.kimi.com" };
+}
+
+async function kimiCurl(args: string[]): Promise<string> {
+  const { stdout } = await run("curl", ["-sk", "--max-time", "20", ...args]);
+  return stdout;
+}
+
+/** 刷新过期 token 并原子写回凭据文件（保留 0600 权限）。 */
+async function refreshKimiToken(
+  path: string,
+  credentials: KimiCredentials,
+  authHost: string,
+): Promise<KimiCredentials> {
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: credentials.refresh_token,
+    client_id: KIMI_CLIENT_ID,
+  });
+  const stdout = await kimiCurl([
+    "-X", "POST",
+    "-H", "Content-Type: application/x-www-form-urlencoded",
+    "-d", body.toString(),
+    `${authHost}/api/oauth/token`,
+  ]);
+  let data: JsonRecord;
+  try {
+    data = JSON.parse(stdout) as JsonRecord;
+  } catch {
+    throw new Error("Kimi token 刷新响应不是 JSON: " + stdout.slice(0, 200));
+  }
+  if (typeof data.access_token !== "string" || !data.access_token) {
+    throw new Error("Kimi token 刷新失败（可能已登出，请重新运行 `kimi login`）");
+  }
+  const expiresIn = numeric(data.expires_in) || 900;
+  const next: KimiCredentials = {
+    ...credentials,
+    access_token: data.access_token,
+    refresh_token:
+      typeof data.refresh_token === "string" && data.refresh_token
+        ? data.refresh_token
+        : credentials.refresh_token,
+    expires_in: expiresIn,
+    expires_at: Date.now() / 1000 + expiresIn,
+  };
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(next, null, 2), { mode: 0o600 });
+  renameSync(tmp, path);
+  return next;
+}
+
+async function kimiAccessToken(): Promise<{ token: string; api: string }> {
+  const path = kimiCredentialsPath();
+  let credentials: KimiCredentials;
+  try {
+    credentials = JSON.parse(readFileSync(path, "utf8")) as KimiCredentials;
+  } catch {
+    throw new Error("未找到 Kimi 凭据（未登录？）");
+  }
+  if (!credentials.access_token) throw new Error("Kimi 凭据缺少 access_token（未登录？）");
+  const { api, auth } = kimiHosts();
+  // 预留 30 秒余量，避免请求途中过期
+  if (numeric(credentials.expires_at) < Date.now() / 1000 + 30) {
+    if (!credentials.refresh_token) throw new Error("Kimi token 已过期且无 refresh_token");
+    credentials = await refreshKimiToken(path, credentials, auth);
+  }
+  return { token: credentials.access_token, api };
+}
+
+async function kimiGetJson(api: string, path: string, token: string): Promise<JsonRecord> {
+  const stdout = await kimiCurl([
+    "-H", `Authorization: Bearer ${token}`,
+    `${api}${path}`,
+  ]);
+  try {
+    return JSON.parse(stdout) as JsonRecord;
+  } catch {
+    throw new Error(`Kimi ${path} 响应不是 JSON: ` + stdout.slice(0, 200));
+  }
+}
+
+/**
+ * 拉取 Kimi Code 会员额度：5h 滚动窗口 + 月 Code 额度 + 月总额度（used_ratio 0-1）。
+ * /me 仅用于取会员等级标签，失败时不阻断额度返回。
+ */
+async function fetchKimiUsage(): Promise<{
+  planTag?: string;
+  fiveHour?: { usedPercent: number; resetsAt: string };
+  monthlyCode?: { usedPercent: number; resetsAt: string };
+  monthlyTotal?: { usedPercent: number; resetsAt: string };
+}> {
+  const { token, api } = await kimiAccessToken();
+  const usagesPayload = await kimiGetJson(api, "/usages", token);
+  const usages = isRecord(usagesPayload.usages) ? usagesPayload.usages : {};
+
+  const win = (key: string) => {
+    const w = usages[key];
+    if (!isRecord(w)) return undefined;
+    const ratio = numeric(w.used_ratio);
+    const resetTime = typeof w.reset_time === "string" ? w.reset_time : undefined;
+    if (!resetTime) return undefined;
+    return {
+      usedPercent: Math.round(ratio * 1000) / 10,
+      resetsAt: new Date(resetTime).toISOString(),
+    };
+  };
+
+  let planTag: string | undefined;
+  try {
+    const me = await kimiGetJson(api, "/me", token);
+    if (typeof me.user_level_name === "string" && me.user_level_name.trim()) {
+      planTag = me.user_level_name.trim();
+    }
+  } catch {
+    // 会员等级获取失败不影响额度展示
+  }
+
+  const fiveHour = win("limit_5h");
+  const monthlyCode = win("limit_month_code");
+  const monthlyTotal = win("limit_month_total");
+  if (!fiveHour && !monthlyCode && !monthlyTotal) {
+    throw new Error("Kimi /usages 响应缺少额度数据");
+  }
+  return { planTag, fiveHour, monthlyCode, monthlyTotal };
 }

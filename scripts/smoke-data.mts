@@ -74,7 +74,7 @@ function assert(name: string, cond: boolean) {
   if (!cond) ok = false;
 }
 
-assert("4 个平台额度卡片", quotas.length === 4);
+assert("5 个平台额度卡片", quotas.length === 5);
 assert("Codex 5h 72%", quotas[0].windows[0]?.usedPct === 72);
 assert("Ark weekly 83% warn", quotas[1].windows[1]?.usedPct === 83 && quotas[1].windows[1]?.tone === "orange");
 assert("Kiro remaining 1240", quotas[2].credits?.remaining === 1240);
@@ -120,7 +120,7 @@ storage.saveConnectorConfig({ quotaDisplay: { hiddenPlatforms: ["ark-coding", "a
 const visibleQuotas = svc.getPlatformQuotaViews();
 assert(
   "隐藏未订阅的额度平台",
-  visibleQuotas.map((item) => item.platform).join(",") === "codex,qoder",
+  visibleQuotas.map((item) => item.platform).join(",") === "codex,qoder,kimi",
 );
 
 console.log("\n总Token:", fmt(summary.total), "delta:", summary.deltaPct + "%");

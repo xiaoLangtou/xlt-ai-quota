@@ -1,19 +1,20 @@
 // 数据模型 - 与产品方案一致
 
-export type Platform = "ark" | "codex" | "kiro" | "qoder" | "opencode-go";
+export type Platform = "ark" | "codex" | "kimi" | "kiro" | "qoder" | "opencode-go";
 
 /** 会在「套餐额度」区域展示的平台。 */
-export const QUOTA_PLATFORMS = ["codex", "ark", "kiro", "qoder"] as const;
+export const QUOTA_PLATFORMS = ["codex", "ark", "kiro", "qoder", "kimi"] as const;
 export type QuotaPlatform = (typeof QUOTA_PLATFORMS)[number];
 
 /** 套餐额度视图的显示开关；方舟的两种套餐可独立控制。 */
-export const QUOTA_DISPLAY_TARGETS = ["codex", "ark-coding", "ark-agent", "kiro", "qoder"] as const;
+export const QUOTA_DISPLAY_TARGETS = ["codex", "ark-coding", "ark-agent", "kiro", "qoder", "kimi"] as const;
 export type QuotaDisplayTarget = (typeof QUOTA_DISPLAY_TARGETS)[number];
 
 export type QuotaMetric =
   | "five_hour"
   | "weekly"
   | "monthly"
+  | "monthly_code"
   | "session"
   | "credits"
   | "addon_credits"
@@ -285,6 +286,7 @@ export const PLATFORM_META: Record<
   ark: { name: "火山方舟", logoChar: "V", logoClass: "ark" },
   kiro: { name: "Kiro", logoChar: "K", logoClass: "kiro" },
   qoder: { name: "Qoder", logoChar: "Q", logoClass: "qoder" },
+  kimi: { name: "Kimi", logoChar: "K", logoClass: "kimi" },
   "opencode-go": { name: "OpenCode Go", logoChar: "O", logoClass: "open" },
 };
 

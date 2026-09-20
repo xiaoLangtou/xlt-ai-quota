@@ -9,7 +9,9 @@ import copilotLogo from "@lobehub/icons-static-svg/icons/copilot-color.svg";
 import cursorLogo from "@lobehub/icons-static-svg/icons/cursor.svg";
 import geminiLogo from "@lobehub/icons-static-svg/icons/gemini-color.svg";
 import kiroLogo from "@lobehub/icons-static-svg/icons/kiro-color.svg";
+import kimiLogo from "@lobehub/icons-static-svg/icons/kimi.svg";
 import midjourneyLogo from "@lobehub/icons-static-svg/icons/midjourney.svg";
+import moonshotLogo from "@lobehub/icons-static-svg/icons/moonshot.svg";
 import openCodeLogo from "@lobehub/icons-static-svg/icons/opencode.svg";
 import openAiLogo from "@lobehub/icons-static-svg/icons/openai.svg";
 import qoderLogo from "@lobehub/icons-static-svg/icons/qoder-color.svg";
@@ -38,6 +40,8 @@ const LOGOS: Record<string, { src: string; monochrome: boolean }> = {
   gemini: { src: geminiLogo, monochrome: false },
   "github-copilot": { src: copilotLogo, monochrome: false },
   kiro: { src: kiroLogo, monochrome: false },
+  kimi: { src: kimiLogo, monochrome: true },
+  moonshot: { src: moonshotLogo, monochrome: true },
   midjourney: { src: midjourneyLogo, monochrome: true },
   openai: { src: openAiLogo, monochrome: true },
   opencode: { src: openCodeLogo, monochrome: true },

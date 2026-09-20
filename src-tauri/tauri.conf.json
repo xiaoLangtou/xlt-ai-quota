@@ -44,6 +44,24 @@
           "state": "active",
           "radius": 14
         }
+      },
+      {
+        "label": "clipboard-panel",
+        "url": "clipboard-panel.html",
+        "title": "剪贴板历史",
+        "width": 868,
+        "height": 608,
+        "center": true,
+        "minWidth": 668,
+        "minHeight": 508,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": true,
+        "shadow": false,
+        "focus": true
       }
     ],
     "security": {

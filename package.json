@@ -9,7 +9,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "test:unit": "pnpm exec tsx scripts/smoke-data.mts && pnpm exec tsx scripts/smoke-ark-mapping.mts && pnpm exec tsx scripts/smoke-subscriptions.mts && pnpm exec tsx scripts/smoke-token-estimate.mts && pnpm exec tsx scripts/smoke-pricing.mts && pnpm exec tsx scripts/smoke-vault-crypto.mts && pnpm exec tsx scripts/smoke-oil.mts",
+    "test:unit": "pnpm exec tsx scripts/smoke-data.mts && pnpm exec tsx scripts/smoke-ark-mapping.mts && pnpm exec tsx scripts/smoke-subscriptions.mts && pnpm exec tsx scripts/smoke-token-estimate.mts && pnpm exec tsx scripts/smoke-pricing.mts && pnpm exec tsx scripts/smoke-vault-crypto.mts && pnpm exec tsx scripts/smoke-oil.mts && pnpm exec tsx scripts/smoke-clipboard-content.mts",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test": "pnpm typecheck && pnpm test:unit && pnpm test:e2e",
     "tauri": "tauri"
@@ -26,6 +26,7 @@
     "js-tiktoken": "^1.0.21",
     "lucide-vue-next": "^1.0.0",
     "reka-ui": "^2.10.4",
+    "shiki": "^4.4.3",
     "tailwind-merge": "^3.6.0",
     "vue": "^3.5.13",
     "vue-echarts": "^7.0.3"

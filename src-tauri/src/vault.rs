@@ -46,6 +46,5 @@ pub fn vault_write(app: AppHandle, content: String) -> Result<(), String> {
             .map_err(|error| format!("无法设置密钥库文件权限: {error}"))?;
     }
 
-    fs::rename(&temporary_path, &path)
-        .map_err(|error| format!("密钥库文件替换失败: {error}"))
+    fs::rename(&temporary_path, &path).map_err(|error| format!("密钥库文件替换失败: {error}"))
 }

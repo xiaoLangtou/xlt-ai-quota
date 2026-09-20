@@ -77,6 +77,7 @@ const QUOTA_DISPLAY_OPTIONS: { value: QuotaDisplayTarget; label: string; platfor
   { value: "ark-agent", label: "火山方舟 · Agent Plan", platform: "ark" },
   { value: "kiro", label: "Kiro", platform: "kiro" },
   { value: "qoder", label: "Qoder", platform: "qoder" },
+  { value: "kimi", label: "Kimi", platform: "kimi" },
 ];
 
 /** 除火山方舟外的本机 CLI 连接器：登录态由各自 CLI 维护，同步时自动汇总。 */
@@ -86,6 +87,7 @@ const CONNECTORS = [
   { key: "opencode", name: "OpenCode", desc: "读取本机 OpenCode 数据库的逐请求 Token", badge: "自动采集", tone: "ok" },
   { key: "kiro", name: "Kiro CLI", desc: "官方 Credits + 本地会话 Token（estimateTokens 估算）", badge: "额度+估算", tone: "ok" },
   { key: "qoder", name: "Qoder", desc: "套餐 Credits + 本地 SQLite 会话 Token（真实计数）", badge: "额度+Token", tone: "ok" },
+  { key: "kimi", name: "Kimi", desc: "会员额度：5h 滚动窗口 / 月 Code 额度 / 月总额度（本机 kimi CLI 登录态）", badge: "额度", tone: "ok" },
   { key: "gemini", name: "Gemini CLI", desc: "读取 ~/.gemini/tmp 会话的真实 Token", badge: "自动采集", tone: "ok" },
   { key: "copilot", name: "GitHub Copilot", desc: "读取 ~/.copilot 会话的真实 Token", badge: "自动采集", tone: "ok" },
 ] as const;

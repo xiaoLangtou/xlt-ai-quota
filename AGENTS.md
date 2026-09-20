@@ -42,6 +42,7 @@ pnpm tauri build              # 打包 macOS / Windows 应用
   - `kiro.ts`：Kiro Credits，经 `kiro-cli chat /usage --no-interactive`（`/api/kiro/usage`）。需 `kiro-cli login`
   - `qoder.ts`：Qoder 套餐与加购 Credits，经官方 Agent SDK 复用本机 qodercli 登录态（`/api/qoder/usage`）；需 `qodercli login`。
   - `codex.ts`：Codex 账户信息，经 `codex login status` + `~/.codex/auth.json` JWT（`/api/codex/status`）。5h/weekly 额度仅在 TUI /status 可见，需浏览器连接器
+  - `kimi.ts`：Kimi Code 会员额度（5h 滚动窗口 / 月 Code 额度 / 月总额度），经 `~/.kimi-code/credentials` OAuth token 调 `api.kimi.com/coding/v1/usages`（`/api/kimi/usage`）；access_token 900 秒过期，中间件会自动刷新并把轮换后的凭据写回。需 `kimi login`。Token 用量读 `~/.kimi-code/sessions` 的 wire.jsonl `usage.record` 事件（真实计数，旧版 `~/.kimi` 仅在其为空时回退）
   - `opencode.ts`：OpenCode Go Token 用量，查本机 `opencode db` SQLite（`/api/opencode/stats`）。订阅额度无 CLI/API，仍待浏览器连接器
 
 > 注：`ark-` Bearer Key 只能用于数据面推理，无法查询用量；Ark 用量需 Volc 签名（SSO），由 arkcli 承担。

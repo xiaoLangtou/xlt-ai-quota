@@ -190,6 +190,8 @@ function dateText(value: string): string {
   gap: 9px;
   margin-top: 12px;
 }
+
+
 .price-item {
   padding: 11px 12px;
   border-radius: var(--r-sm);

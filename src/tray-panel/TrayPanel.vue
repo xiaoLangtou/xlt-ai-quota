@@ -5,7 +5,9 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ToolLogo from "@/components/ToolLogo.vue";
+import { clipboardService } from "@/services/clipboard-service";
 import { usageService } from "@/services/usage-service";
+import type { ClipboardStatus } from "@/types/clipboard";
 import type { PlatformQuotaView, SyncInfo } from "@/types/usage";
 
 const PANEL_WIDTH = 336;
@@ -13,6 +15,8 @@ const popoverEl = ref<HTMLElement | null>(null);
 const quotas = ref<PlatformQuotaView[]>([]);
 const sync = ref<SyncInfo>({ lastSyncAt: null, syncing: false });
 const requesting = ref(false);
+const clipboardStatus = ref<ClipboardStatus | null>(null);
+const clipboardError = ref("");
 const unlisteners: UnlistenFn[] = [];
 
 /**
@@ -92,6 +96,13 @@ function refresh(): void {
   sync.value = usageService.getSyncInfo();
   if (!sync.value.syncing) requesting.value = false;
   void fitWindowHeight();
+  void clipboardService.status()
+    .then((value) => {
+      clipboardStatus.value = value;
+      clipboardError.value = "";
+      void fitWindowHeight();
+    })
+    .catch((reason) => { clipboardError.value = reason instanceof Error ? reason.message : String(reason); void fitWindowHeight(); });
 }
 
 const syncing = computed(() => requesting.value || sync.value.syncing);
@@ -121,6 +132,35 @@ const hasData = computed(() => rows.value.length > 0);
 async function openDashboard(): Promise<void> {
   await invoke("show_dashboard").catch(() => undefined);
   await getCurrentWindow().hide().catch(() => undefined);
+}
+
+async function openClipboard(): Promise<void> {
+  try {
+    await clipboardService.showPanel();
+    await getCurrentWindow().hide();
+  } catch (reason) { clipboardError.value = reason instanceof Error ? reason.message : String(reason); }
+}
+
+async function toggleClipboardCapture(): Promise<void> {
+  if (!clipboardStatus.value) return;
+  try {
+    clipboardStatus.value = await clipboardService.updateSettings({
+      ...clipboardStatus.value.settings,
+      enabled: !clipboardStatus.value.settings.enabled,
+    });
+    clipboardError.value = "";
+  } catch (reason) { clipboardError.value = reason instanceof Error ? reason.message : String(reason); }
+}
+
+async function toggleLaunchAtLogin(): Promise<void> {
+  if (!clipboardStatus.value) return;
+  try {
+    clipboardStatus.value = await clipboardService.updateSettings({
+      ...clipboardStatus.value.settings,
+      launchAtLogin: !clipboardStatus.value.settings.launchAtLogin,
+    });
+    clipboardError.value = "";
+  } catch (reason) { clipboardError.value = reason instanceof Error ? reason.message : String(reason); }
 }
 
 async function requestSync(): Promise<void> {
@@ -219,7 +259,19 @@ onUnmounted(() => {
 
     <div class="pop-divider" />
 
+    <p v-if="clipboardError" class="clipboard-error">{{ clipboardError }}</p>
+
     <div class="pop-actions">
+      <button class="act-btn" type="button" @click="openClipboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9 4.5V3h6v1.5" /></svg>
+        剪贴板
+      </button>
+      <button class="act-btn" type="button" @click="toggleClipboardCapture">
+        {{ clipboardStatus?.settings.enabled ? "暂停记录" : "继续记录" }}
+      </button>
+      <button class="act-btn" type="button" @click="toggleLaunchAtLogin">
+        {{ clipboardStatus?.settings.launchAtLogin ? "取消自启" : "开机自启" }}
+      </button>
       <button class="act-btn" type="button" @click="openDashboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="7" height="9" rx="1.5" />
@@ -559,10 +611,12 @@ onUnmounted(() => {
 .pop-actions {
   position: relative;
   z-index: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 6px;
   background: rgba(255, 255, 255, 0.22);
 }
+.clipboard-error { position:relative; z-index:1; margin:0; padding:7px 12px; background:rgba(255,59,48,.07); color:var(--red); font-size:9.5px; line-height:1.4; }
 .act-btn {
   position: relative;
   display: flex;

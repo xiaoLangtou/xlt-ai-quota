@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "默认能力集，授予主窗口与托盘面板核心权限，及托盘面板的定位/显示控制",
-  "windows": ["main", "tray-panel"],
+  "windows": ["main", "tray-panel", "clipboard-panel"],
   "permissions": [
     "core:default",
     "dialog:allow-open",
@@ -11,6 +11,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-position",
     "core:window:allow-set-size",
+    "core:window:allow-start-dragging",
     "core:window:allow-outer-size",
     "core:window:allow-is-visible",
     "core:window:allow-current-monitor",

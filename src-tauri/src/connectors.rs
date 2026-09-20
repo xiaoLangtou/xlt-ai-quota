@@ -2,8 +2,9 @@ use base64::{
     engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
     Engine as _,
 };
-use chrono::{Datelike, DateTime, Local, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, Utc};
 use regex::Regex;
+use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -35,11 +36,17 @@ fn connector_get_blocking(request: ConnectorRequest) -> Result<Value, String> {
         ("/api/ark", "/plan") => ark_plan(),
         ("/api/ark", "/stats") => ark_stats(&request.query),
         ("/api/kiro", "/usage") => kiro_usage(),
+        ("/api/kiro", "/stats") => kiro_stats(&request.query),
         ("/api/qoder", "/usage") => qoder_usage(),
+        ("/api/qoder", "/stats") => qoder_stats(&request.query),
+        ("/api/gemini", "/stats") => gemini_stats(&request.query),
+        ("/api/copilot", "/stats") => copilot_stats(&request.query),
         ("/api/opencode", "/stats") => opencode_stats(),
         ("/api/codex", "/status") => codex_status(),
         ("/api/codex", "/usage") => codex_usage(),
         ("/api/codex", "/stats") => codex_stats(&request.query),
+        ("/api/kimi", "/usage") => kimi_usage(),
+        ("/api/kimi", "/stats") => kimi_stats(&request.query),
         ("/api/claude", "/stats") => claude_stats(&request.query),
         ("/api/oil", "/price") => current_oil_prices(&request.query),
         ("/api/oil", "/forecast") => oil_forecast(&request.query),
@@ -58,16 +65,36 @@ fn oil_province(query: &BTreeMap<String, String>) -> Result<&str, String> {
 
 fn oil_province_slug(province: &str) -> Option<&'static str> {
     match province {
-        "北京" => Some("beijing"), "天津" => Some("tianjin"), "河北" => Some("hebei"),
-        "山西" => Some("shanxi"), "内蒙古" => Some("neimenggu"), "辽宁" => Some("liaoning"),
-        "吉林" => Some("jilin"), "黑龙江" => Some("heilongjiang"), "上海" => Some("shanghai"),
-        "江苏" => Some("jiangsu"), "浙江" => Some("zhejiang"), "安徽" => Some("anhui"),
-        "福建" => Some("fujian"), "江西" => Some("jiangxi"), "山东" => Some("shandong"),
-        "河南" => Some("henan"), "湖北" => Some("hubei"), "湖南" => Some("hunan"),
-        "广东" => Some("guangdong"), "广西" => Some("guangxi"), "海南" => Some("hainan"),
-        "重庆" => Some("chongqing"), "四川" => Some("sichuan"), "贵州" => Some("guizhou"),
-        "云南" => Some("yunnan"), "西藏" => Some("xizang"), "陕西" => Some("shannxi"),
-        "甘肃" => Some("gansu"), "青海" => Some("qinghai"), "宁夏" => Some("ningxia"),
+        "北京" => Some("beijing"),
+        "天津" => Some("tianjin"),
+        "河北" => Some("hebei"),
+        "山西" => Some("shanxi"),
+        "内蒙古" => Some("neimenggu"),
+        "辽宁" => Some("liaoning"),
+        "吉林" => Some("jilin"),
+        "黑龙江" => Some("heilongjiang"),
+        "上海" => Some("shanghai"),
+        "江苏" => Some("jiangsu"),
+        "浙江" => Some("zhejiang"),
+        "安徽" => Some("anhui"),
+        "福建" => Some("fujian"),
+        "江西" => Some("jiangxi"),
+        "山东" => Some("shandong"),
+        "河南" => Some("henan"),
+        "湖北" => Some("hubei"),
+        "湖南" => Some("hunan"),
+        "广东" => Some("guangdong"),
+        "广西" => Some("guangxi"),
+        "海南" => Some("hainan"),
+        "重庆" => Some("chongqing"),
+        "四川" => Some("sichuan"),
+        "贵州" => Some("guizhou"),
+        "云南" => Some("yunnan"),
+        "西藏" => Some("xizang"),
+        "陕西" => Some("shannxi"),
+        "甘肃" => Some("gansu"),
+        "青海" => Some("qinghai"),
+        "宁夏" => Some("ningxia"),
         "新疆" => Some("xinjiang"),
         _ => None,
     }
@@ -87,11 +114,17 @@ fn current_oil_prices(query: &BTreeMap<String, String>) -> Result<Value, String>
         .send()
         .and_then(|response| response.error_for_status())
         .map_err(|error| format!("今日油价数据源请求失败: {error}"))?;
-    let html = response.text().map_err(|error| format!("读取今日油价页面失败: {error}"))?;
+    let html = response
+        .text()
+        .map_err(|error| format!("读取今日油价页面失败: {error}"))?;
     parse_current_oil_prices_page(province, &source_url, &html)
 }
 
-fn parse_current_oil_prices_page(province: &str, source_url: &str, html: &str) -> Result<Value, String> {
+fn parse_current_oil_prices_page(
+    province: &str,
+    source_url: &str,
+    html: &str,
+) -> Result<Value, String> {
     let blocks_re = Regex::new(r"(?is)<script.*?</script>|<style.*?</style>")
         .map_err(|error| error.to_string())?;
     let tags_re = Regex::new(r"<[^>]+>").map_err(|error| error.to_string())?;
@@ -100,7 +133,10 @@ fn parse_current_oil_prices_page(province: &str, source_url: &str, html: &str) -
     let without_tags = tags_re.replace_all(&without_blocks, " ");
     let plain = spaces_re
         .replace_all(
-            &without_tags.replace("&nbsp;", " ").replace("&#160;", " ").replace("&yen;", " "),
+            &without_tags
+                .replace("&nbsp;", " ")
+                .replace("&#160;", " ")
+                .replace("&yen;", " "),
             " ",
         )
         .into_owned();
@@ -121,9 +157,18 @@ fn parse_current_oil_prices_page(province: &str, source_url: &str, html: &str) -
     };
     let price_date = format!(
         "{}-{}-{}",
-        prices.get(1).map(|value| value.as_str()).unwrap_or_default(),
-        prices.get(2).map(|value| value.as_str()).unwrap_or_default(),
-        prices.get(3).map(|value| value.as_str()).unwrap_or_default(),
+        prices
+            .get(1)
+            .map(|value| value.as_str())
+            .unwrap_or_default(),
+        prices
+            .get(2)
+            .map(|value| value.as_str())
+            .unwrap_or_default(),
+        prices
+            .get(3)
+            .map(|value| value.as_str())
+            .unwrap_or_default(),
     );
     Ok(json!({
         "code": 0,
@@ -152,13 +197,25 @@ fn oil_forecast(query: &BTreeMap<String, String>) -> Result<Value, String> {
     let year = Local::now().year().to_string();
     let mut request = client
         .get("https://v1.apizero.cn/api/oil-price-forecast")
-        .query(&[("action", "forecast"), ("province", province), ("year", year.as_str())]);
-    if let Some(api_key) = query.get("apiKey").map(|value| value.trim()).filter(|value| !value.is_empty()) {
+        .query(&[
+            ("action", "forecast"),
+            ("province", province),
+            ("year", year.as_str()),
+        ]);
+    if let Some(api_key) = query
+        .get("apiKey")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
         request = request.bearer_auth(api_key);
     }
-    let response = request.send().map_err(|error| format!("油价数据源请求失败: {error}"))?;
+    let response = request
+        .send()
+        .map_err(|error| format!("油价数据源请求失败: {error}"))?;
     let status = response.status();
-    let body = response.text().map_err(|error| format!("读取油价响应失败: {error}"))?;
+    let body = response
+        .text()
+        .map_err(|error| format!("读取油价响应失败: {error}"))?;
     if !status.is_success() {
         return Err(format!("油价数据源 HTTP {status}: {}", snippet(&body)));
     }
@@ -180,15 +237,17 @@ fn official_oil_adjustment() -> Result<Value, String> {
         .map_err(|error| format!("国家发改委新闻列表请求失败: {error}"))?
         .text()
         .map_err(|error| format!("读取国家发改委新闻列表失败: {error}"))?;
-    let entry_re = Regex::new(
-        r#"<li><a href="([^"]+)"[^>]*>([^<]*成品油价格[^<]*)</a><span>([^<]+)</span>"#,
-    )
-    .map_err(|error| error.to_string())?;
+    let entry_re =
+        Regex::new(r#"<li><a href="([^"]+)"[^>]*>([^<]*成品油价格[^<]*)</a><span>([^<]+)</span>"#)
+            .map_err(|error| error.to_string())?;
     let entry = entry_re
         .captures(&list_html)
         .ok_or_else(|| "国家发改委新闻列表中未找到成品油调价公告".to_owned())?;
     let href = entry.get(1).map(|value| value.as_str()).unwrap_or_default();
-    let title = entry.get(2).map(|value| value.as_str().trim()).unwrap_or_default();
+    let title = entry
+        .get(2)
+        .map(|value| value.as_str().trim())
+        .unwrap_or_default();
     let published_at = entry
         .get(3)
         .map(|value| value.as_str().trim().replace('/', "-"))
@@ -208,21 +267,30 @@ fn official_oil_adjustment() -> Result<Value, String> {
     let without_blocks = blocks_re.replace_all(&article_html, " ");
     let without_tags = tags_re.replace_all(&without_blocks, " ");
     let plain = spaces_re
-        .replace_all(&without_tags.replace("&nbsp;", " ").replace("&#160;", " "), " ")
+        .replace_all(
+            &without_tags.replace("&nbsp;", " ").replace("&#160;", " "),
+            " ",
+        )
         .into_owned();
     let actual_re = Regex::new(r"调控后实际(上调|下调)\s*(\d+)元[、，]\s*(\d+)元")
         .map_err(|error| error.to_string())?;
-    let normal_re = Regex::new(
-        r"汽、柴油[^。]{0,80}?价格每吨分别(?:应)?(上调|下调)\s*(\d+)元[、，]\s*(\d+)元",
-    )
-    .map_err(|error| error.to_string())?;
+    let normal_re =
+        Regex::new(r"汽、柴油[^。]{0,80}?价格每吨分别(?:应)?(上调|下调)\s*(\d+)元[、，]\s*(\d+)元")
+            .map_err(|error| error.to_string())?;
     let amounts = actual_re
         .captures(&plain)
         .or_else(|| normal_re.captures(&plain))
         .map(|captures| {
-            let action = captures.get(1).map(|value| value.as_str()).unwrap_or_default();
-            let gasoline = captures.get(2).and_then(|value| value.as_str().parse::<i64>().ok());
-            let diesel = captures.get(3).and_then(|value| value.as_str().parse::<i64>().ok());
+            let action = captures
+                .get(1)
+                .map(|value| value.as_str())
+                .unwrap_or_default();
+            let gasoline = captures
+                .get(2)
+                .and_then(|value| value.as_str().parse::<i64>().ok());
+            let diesel = captures
+                .get(3)
+                .and_then(|value| value.as_str().parse::<i64>().ok());
             (action.to_owned(), gasoline, diesel)
         });
     let direction = if title.contains("不作调整") || plain.contains("不作调整") {
@@ -388,6 +456,706 @@ fn find_qoder_sdk_project_root(mut current: PathBuf) -> Option<PathBuf> {
     }
 }
 
+fn stats_date_range(query: &BTreeMap<String, String>) -> Result<(NaiveDate, NaiveDate), String> {
+    let start = requested_date(query, "start")?;
+    let end = requested_date(query, "end")?;
+    if start > end {
+        return Err("start 必须早于或等于 end".to_owned());
+    }
+    Ok((start, end))
+}
+
+fn value_timestamp_millis(value: &Value) -> Option<i64> {
+    if let Some(number) = value.as_i64() {
+        return Some(if number.abs() < 1_000_000_000_000 {
+            number.saturating_mul(1_000)
+        } else {
+            number
+        });
+    }
+    if let Some(number) = value.as_f64() {
+        let millis = if number.abs() < 1_000_000_000_000.0 {
+            number * 1_000.0
+        } else {
+            number
+        };
+        return millis.is_finite().then_some(millis as i64);
+    }
+    let raw = value.as_str()?.trim();
+    if let Ok(number) = raw.parse::<i64>() {
+        return Some(if number.abs() < 1_000_000_000_000 {
+            number.saturating_mul(1_000)
+        } else {
+            number
+        });
+    }
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|timestamp| timestamp.timestamp_millis())
+}
+
+fn local_date_from_value(value: &Value) -> Option<NaiveDate> {
+    DateTime::<Utc>::from_timestamp_millis(value_timestamp_millis(value)?)
+        .map(|timestamp| timestamp.with_timezone(&Local).date_naive())
+}
+
+fn in_date_range(day: NaiveDate, start: NaiveDate, end: NaiveDate) -> bool {
+    day >= start && day <= end
+}
+
+fn model_name(value: Option<&Value>, default: &str) -> String {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_owned()
+}
+
+fn estimate_text_tokens(text: &str) -> f64 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    let mut cjk = 0_u64;
+    let mut other = 0_u64;
+    for character in text.chars() {
+        let code = character as u32;
+        if matches!(
+            code,
+            0x3000..=0x303f
+                | 0x3040..=0x30ff
+                | 0x3400..=0x4dbf
+                | 0x4e00..=0x9fff
+                | 0xac00..=0xd7af
+                | 0xf900..=0xfaff
+                | 0xff00..=0xffef
+                | 0x20000..=0x2fa1f
+        ) {
+            cjk += 1;
+        } else {
+            other += 1;
+        }
+    }
+    ((cjk as f64) / 1.7).ceil() + ((other as f64) / 4.0).ceil()
+}
+
+fn estimate_json_tokens(value: &Value) -> f64 {
+    match value {
+        Value::String(text) => estimate_text_tokens(text),
+        Value::Array(values) => values.iter().map(estimate_json_tokens).sum(),
+        Value::Object(values) => values
+            .iter()
+            .filter(|(key, _)| {
+                !matches!(
+                    key.as_str(),
+                    "signature"
+                        | "redactedContent"
+                        | "toolUseId"
+                        | "modelId"
+                        | "message_id"
+                        | "format"
+                        | "id"
+                )
+            })
+            .map(|(_, value)| estimate_json_tokens(value))
+            .sum(),
+        _ => 0.0,
+    }
+}
+
+fn add_tokens_with_requests(
+    totals: &mut BTreeMap<(String, String), TokenStats>,
+    day: NaiveDate,
+    model: &str,
+    input: f64,
+    output: f64,
+    cached: f64,
+    requests: u64,
+) {
+    if input == 0.0 && output == 0.0 && cached == 0.0 && requests == 0 {
+        return;
+    }
+    let current = totals
+        .entry((day.format("%F").to_string(), model.trim().to_owned()))
+        .or_default();
+    current.input += input;
+    current.output += output;
+    current.cached += cached;
+    current.requests += requests;
+}
+
+fn canonicalize_kiro_model(value: Option<&Value>) -> String {
+    let Some(raw) = value.and_then(Value::as_str).map(str::trim) else {
+        return "kiro-cli-agent".to_owned();
+    };
+    if raw.is_empty() || raw.eq_ignore_ascii_case("auto") {
+        return "kiro-cli-agent".to_owned();
+    }
+    let mut model = raw.to_lowercase();
+    if let Some(index) = model.rfind("foundation-model/") {
+        model = model[index + "foundation-model/".len()..].to_owned();
+    } else {
+        for prefix in ["anthropic.", "openai.", "aws."] {
+            if let Some(stripped) = model.strip_prefix(prefix) {
+                model = stripped.to_owned();
+                break;
+            }
+        }
+    }
+    let suffix = Regex::new(r"(?i)(:\d+|-\d{8}-v\d+|-v\d+|-\d{8}|\.v\d+)$")
+        .expect("固定的 Kiro 模型后缀正则应有效");
+    while suffix.is_match(&model) {
+        model = suffix.replace(&model, "").into_owned();
+    }
+    if model.is_empty() {
+        "kiro-cli-agent".to_owned()
+    } else {
+        model
+    }
+}
+
+fn kiro_session_model(cli_dir: &Path, session_id: &str) -> String {
+    let path = cli_dir.join(format!("{session_id}.json"));
+    let Ok(content) = fs::read_to_string(path) else {
+        return "kiro-cli-agent".to_owned();
+    };
+    let Ok(session) = serde_json::from_str::<Value>(&content) else {
+        return "kiro-cli-agent".to_owned();
+    };
+    canonicalize_kiro_model(session.pointer("/session_state/rts_model_state/model_info/model_id"))
+}
+
+fn collect_kiro_cli_stats(
+    cli_dir: &Path,
+    start: NaiveDate,
+    end: NaiveDate,
+    totals: &mut BTreeMap<(String, String), TokenStats>,
+) {
+    let Ok(entries) = fs::read_dir(cli_dir) else {
+        return;
+    };
+    for path in entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("jsonl"))
+    {
+        let Some(session_id) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let model = kiro_session_model(cli_dir, session_id);
+        let mut current_timestamp: Option<Value> = None;
+        let mut pending_input = 0.0;
+        for_each_json_line(&path, |event| {
+            let Some(data) = event.get("data") else {
+                return;
+            };
+            let content = data
+                .get("content")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            match event.get("kind").and_then(Value::as_str) {
+                Some("Prompt") => {
+                    if let Some(timestamp) = data.pointer("/meta/timestamp") {
+                        current_timestamp = Some(timestamp.clone());
+                    }
+                    for item in content {
+                        pending_input +=
+                            if item.get("kind").and_then(Value::as_str) == Some("image") {
+                                1_600.0
+                            } else {
+                                item.get("data")
+                                    .map(estimate_json_tokens)
+                                    .unwrap_or_default()
+                            };
+                    }
+                }
+                Some("ToolResults") => {
+                    pending_input += content
+                        .iter()
+                        .filter_map(|item| item.get("data"))
+                        .map(estimate_json_tokens)
+                        .sum::<f64>();
+                }
+                Some("AssistantMessage") => {
+                    let output = content
+                        .iter()
+                        .map(|item| {
+                            let data = item.get("data").unwrap_or(&Value::Null);
+                            if item.get("kind").and_then(Value::as_str) == Some("thinking") {
+                                data.get("text")
+                                    .map(estimate_json_tokens)
+                                    .unwrap_or_default()
+                            } else {
+                                estimate_json_tokens(data)
+                            }
+                        })
+                        .sum::<f64>();
+                    if let Some(day) = current_timestamp.as_ref().and_then(local_date_from_value) {
+                        if in_date_range(day, start, end) {
+                            add_tokens_with_requests(
+                                totals,
+                                day,
+                                &model,
+                                pending_input,
+                                output,
+                                0.0,
+                                1,
+                            );
+                        }
+                    }
+                    pending_input = 0.0;
+                }
+                Some("Compaction") => pending_input = 0.0,
+                _ => {}
+            }
+        });
+    }
+}
+
+fn collect_kiro_ide_stats(
+    sessions_root: &Path,
+    start: NaiveDate,
+    end: NaiveDate,
+    totals: &mut BTreeMap<(String, String), TokenStats>,
+) {
+    for path in jsonl_files(sessions_root) {
+        if path.file_name().and_then(|value| value.to_str()) != Some("messages.jsonl")
+            || path.components().any(|part| part.as_os_str() == "cli")
+        {
+            continue;
+        }
+        for_each_json_line(&path, |event| {
+            let Some(day) = event.get("timestamp").and_then(local_date_from_value) else {
+                return;
+            };
+            if !in_date_range(day, start, end) {
+                return;
+            }
+            let Some(payload) = event.get("payload") else {
+                return;
+            };
+            match payload.get("type").and_then(Value::as_str) {
+                Some("user") | Some("tool_result") => add_tokens_with_requests(
+                    totals,
+                    day,
+                    "kiro-ide",
+                    payload
+                        .get("content")
+                        .map(estimate_json_tokens)
+                        .unwrap_or_default(),
+                    0.0,
+                    0.0,
+                    0,
+                ),
+                Some("tool_call") => add_tokens_with_requests(
+                    totals,
+                    day,
+                    "kiro-ide",
+                    payload
+                        .get("args")
+                        .map(estimate_json_tokens)
+                        .unwrap_or_default(),
+                    0.0,
+                    0.0,
+                    0,
+                ),
+                Some("assistant") => add_tokens_with_requests(
+                    totals,
+                    day,
+                    "kiro-ide",
+                    0.0,
+                    payload
+                        .get("content")
+                        .map(estimate_json_tokens)
+                        .unwrap_or_default(),
+                    0.0,
+                    1,
+                ),
+                _ => {}
+            }
+        });
+    }
+}
+
+fn kiro_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let (start, end) = stats_date_range(query)?;
+    let sessions_root = home_dir().join(".kiro").join("sessions");
+    let mut totals = BTreeMap::new();
+    collect_kiro_cli_stats(&sessions_root.join("cli"), start, end, &mut totals);
+    collect_kiro_ide_stats(&sessions_root, start, end, &mut totals);
+    Ok(token_stats_json(totals))
+}
+
+fn qoder_database_paths() -> Vec<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let base = home_dir().join("Library").join("Application Support");
+    #[cfg(target_os = "windows")]
+    let base = env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join("AppData").join("Roaming"));
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let base = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join(".config"));
+
+    ["Qoder", "QoderCN"]
+        .into_iter()
+        .map(|name| {
+            base.join(name)
+                .join("SharedClientCache")
+                .join("cache")
+                .join("db")
+                .join("local.db")
+        })
+        .collect()
+}
+
+fn qoder_model(raw: &str) -> String {
+    let Ok(value) = serde_json::from_str::<Value>(raw) else {
+        return "qoder-ide".to_owned();
+    };
+    model_name(
+        value
+            .get("model_key")
+            .or_else(|| value.get("model_id"))
+            .or_else(|| value.get("model")),
+        "qoder-ide",
+    )
+}
+
+fn collect_qoder_database_stats(
+    path: &Path,
+    start: NaiveDate,
+    end: NaiveDate,
+    totals: &mut BTreeMap<(String, String), TokenStats>,
+) -> Result<(), String> {
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("无法读取 {}: {error}", path.display()))?;
+    connection
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(|error| format!("设置 Qoder 数据库超时失败: {error}"))?;
+    let mut statement = connection
+        .prepare(
+            "SELECT token_info, COALESCE(model_info, ''), CAST(gmt_create AS INTEGER) \
+             FROM chat_message WHERE role='assistant' AND token_info IS NOT NULL \
+             AND length(token_info) > 2",
+        )
+        .map_err(|error| format!("Qoder 数据库结构无法读取: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
+        .map_err(|error| format!("查询 Qoder Token 失败: {error}"))?;
+    for row in rows.flatten() {
+        let (token_info, model_info, timestamp) = row;
+        let timestamp = Value::from(timestamp);
+        let Some(day) = local_date_from_value(&timestamp) else {
+            continue;
+        };
+        if !in_date_range(day, start, end) {
+            continue;
+        }
+        let Ok(info) = serde_json::from_str::<Value>(&token_info) else {
+            continue;
+        };
+        let prompt = value_number(info.get("prompt_tokens")).max(0.0);
+        let completion = value_number(info.get("completion_tokens")).max(0.0);
+        let cached = value_number(info.get("cached_tokens")).max(0.0);
+        add_tokens_with_requests(
+            totals,
+            day,
+            &qoder_model(&model_info),
+            (prompt - cached).max(0.0),
+            completion,
+            cached,
+            1,
+        );
+    }
+    Ok(())
+}
+
+fn collect_qoder_cli_stats(
+    start: NaiveDate,
+    end: NaiveDate,
+    totals: &mut BTreeMap<(String, String), TokenStats>,
+) {
+    for path in jsonl_files(&home_dir().join(".qoder").join("projects")) {
+        for_each_json_line(&path, |event| {
+            let Some(message) = event.get("message") else {
+                return;
+            };
+            let Some(role) = message.get("role").and_then(Value::as_str) else {
+                return;
+            };
+            if role != "user" && role != "assistant" {
+                return;
+            }
+            let Some(day) = event.get("timestamp").and_then(local_date_from_value) else {
+                return;
+            };
+            if !in_date_range(day, start, end) {
+                return;
+            }
+            let tokens = message
+                .get("content")
+                .map(estimate_json_tokens)
+                .unwrap_or_default();
+            let model = model_name(message.get("model"), "qoder-cli");
+            add_tokens_with_requests(
+                totals,
+                day,
+                &model,
+                if role == "user" { tokens } else { 0.0 },
+                if role == "assistant" { tokens } else { 0.0 },
+                0.0,
+                u64::from(role == "assistant"),
+            );
+        });
+    }
+}
+
+fn qoder_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let (start, end) = stats_date_range(query)?;
+    let mut totals = BTreeMap::new();
+    for path in qoder_database_paths()
+        .into_iter()
+        .filter(|path| path.is_file())
+    {
+        collect_qoder_database_stats(&path, start, end, &mut totals)?;
+    }
+    collect_qoder_cli_stats(start, end, &mut totals);
+    Ok(token_stats_json(totals))
+}
+
+#[derive(Clone, Copy)]
+struct GeminiTotals {
+    input: f64,
+    cached: f64,
+    output: f64,
+    total: f64,
+}
+
+fn gemini_totals(message: &Value) -> Option<GeminiTotals> {
+    if let Some(tokens) = message.get("tokens").filter(|value| value.is_object()) {
+        let input = value_number(tokens.get("input")).max(0.0);
+        let cached = value_number(tokens.get("cached")).max(0.0);
+        let output = value_number(tokens.get("output")).max(0.0)
+            + value_number(tokens.get("tool")).max(0.0)
+            + value_number(tokens.get("thoughts")).max(0.0);
+        let total = value_number(tokens.get("total")).max(input + cached + output);
+        return (total > 0.0).then_some(GeminiTotals {
+            input,
+            cached,
+            output,
+            total,
+        });
+    }
+    let usage = message
+        .get("usageMetadata")
+        .or_else(|| message.get("usage"))
+        .filter(|value| value.is_object())?;
+    let cached = value_number(usage.get("cachedContentTokenCount")).max(0.0);
+    let prompt = value_number(
+        usage
+            .get("promptTokenCount")
+            .or_else(|| usage.get("input_tokens")),
+    )
+    .max(0.0);
+    let output = value_number(
+        usage
+            .get("candidatesTokenCount")
+            .or_else(|| usage.get("output_tokens")),
+    )
+    .max(0.0);
+    let input = (prompt - cached).max(0.0);
+    let total = input + cached + output;
+    (total > 0.0).then_some(GeminiTotals {
+        input,
+        cached,
+        output,
+        total,
+    })
+}
+
+fn diff_gemini_totals(
+    current: GeminiTotals,
+    previous: Option<GeminiTotals>,
+) -> Option<GeminiTotals> {
+    let Some(previous) = previous else {
+        return Some(current);
+    };
+    if current.total < previous.total {
+        return Some(current);
+    }
+    let delta = GeminiTotals {
+        input: (current.input - previous.input).max(0.0),
+        cached: (current.cached - previous.cached).max(0.0),
+        output: (current.output - previous.output).max(0.0),
+        total: (current.total - previous.total).max(0.0),
+    };
+    (delta.total > 0.0).then_some(delta)
+}
+
+fn visit_gemini_chat_files(path: &Path, depth: usize, files: &mut Vec<PathBuf>) {
+    if depth > 2 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            visit_gemini_chat_files(&path, depth + 1, files);
+        } else if matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("json" | "jsonl")
+        ) {
+            files.push(path);
+        }
+    }
+}
+
+fn gemini_messages(path: &Path) -> Vec<Value> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    if path.extension().and_then(|value| value.to_str()) == Some("jsonl") {
+        return content
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|value| value.get("type").is_some() || value.get("role").is_some())
+            .collect();
+    }
+    let Ok(document) = serde_json::from_str::<Value>(&content) else {
+        return Vec::new();
+    };
+    document
+        .get("messages")
+        .or_else(|| document.get("history"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn gemini_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let (start, end) = stats_date_range(query)?;
+    let root = home_dir().join(".gemini").join("tmp");
+    let mut files = Vec::new();
+    if let Ok(hashes) = fs::read_dir(root) {
+        for hash in hashes.flatten().filter(|entry| entry.path().is_dir()) {
+            visit_gemini_chat_files(&hash.path().join("chats"), 0, &mut files);
+        }
+    }
+    let mut totals = BTreeMap::new();
+    for path in files {
+        let mut previous = None;
+        let mut model = "gemini".to_owned();
+        for message in gemini_messages(&path) {
+            if let Some(value) = message
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                model = value.to_owned();
+            }
+            if !matches!(
+                message
+                    .get("type")
+                    .or_else(|| message.get("role"))
+                    .and_then(Value::as_str),
+                Some("gemini" | "model" | "assistant")
+            ) {
+                continue;
+            }
+            let Some(current) = gemini_totals(&message) else {
+                continue;
+            };
+            let delta = diff_gemini_totals(current, previous);
+            previous = Some(current);
+            let Some(delta) = delta else {
+                continue;
+            };
+            let Some(day) = message
+                .get("timestamp")
+                .or_else(|| message.get("createTime"))
+                .and_then(local_date_from_value)
+            else {
+                continue;
+            };
+            if in_date_range(day, start, end) {
+                add_tokens_with_requests(
+                    &mut totals,
+                    day,
+                    &model,
+                    delta.input + delta.cached,
+                    delta.output,
+                    delta.cached,
+                    1,
+                );
+            }
+        }
+    }
+    Ok(token_stats_json(totals))
+}
+
+fn copilot_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let (start, end) = stats_date_range(query)?;
+    let root = home_dir().join(".copilot").join("session-state");
+    let mut totals = BTreeMap::new();
+    let Ok(sessions) = fs::read_dir(root) else {
+        return Ok(token_stats_json(totals));
+    };
+    for path in sessions
+        .flatten()
+        .map(|entry| entry.path().join("events.jsonl"))
+        .filter(|path| path.is_file())
+    {
+        for_each_json_line(&path, |event| {
+            if event.get("type").and_then(Value::as_str) != Some("session.shutdown") {
+                return;
+            }
+            let Some(day) = event.get("timestamp").and_then(local_date_from_value) else {
+                return;
+            };
+            if !in_date_range(day, start, end) {
+                return;
+            }
+            let Some(metrics) = event
+                .pointer("/data/modelMetrics")
+                .and_then(Value::as_object)
+            else {
+                return;
+            };
+            for (model, metric) in metrics {
+                let Some(usage) = metric.get("usage") else {
+                    continue;
+                };
+                add_tokens_with_requests(
+                    &mut totals,
+                    day,
+                    if model.trim().is_empty() {
+                        "copilot"
+                    } else {
+                        model
+                    },
+                    value_number(usage.get("inputTokens")).max(0.0),
+                    value_number(usage.get("outputTokens")).max(0.0),
+                    value_number(usage.get("cacheReadTokens")).max(0.0),
+                    1,
+                );
+            }
+        });
+    }
+    Ok(token_stats_json(totals))
+}
+
 fn opencode_stats() -> Result<Value, String> {
     let sql = "SELECT date(time_created/1000,'unixepoch','localtime') AS d, \
         COALESCE(json_extract(data,'$.modelID'),json_extract(data,'$.model'),json_extract(data,'$.modelId'),'opencode') AS model, \
@@ -458,6 +1226,143 @@ fn codex_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
                 );
             });
         }
+    }
+    Ok(token_stats_json(totals))
+}
+// ---- Kimi Code 本地会话 Token（~/.kimi-code/sessions 的 wire.jsonl，真实计数）----
+// usage.record 事件按次记录 {inputOther, output, inputCacheRead, inputCacheCreation}。
+// 旧版 kimi-cli（~/.kimi/sessions）用 StatusUpdate 事件（snake_case，时间戳为秒）。
+// 迁移后两套目录可能并存：kimi-code 有数据时跳过 legacy，避免迁移重复计入。
+
+fn wire_files(root: &Path) -> Vec<PathBuf> {
+    jsonl_files(root)
+        .into_iter()
+        .filter(|path| path.file_name().and_then(|value| value.to_str()) == Some("wire.jsonl"))
+        .collect()
+}
+
+/// "kimi-code/k3" → "k3"。
+fn kimi_model_name(value: Option<&Value>, fallback: &str) -> String {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| name.rsplit('/').next().unwrap_or(name).to_owned())
+        .unwrap_or_else(|| fallback.to_owned())
+}
+
+fn collect_kimi_code_stats(
+    root: &Path,
+    start: NaiveDate,
+    end: NaiveDate,
+    totals: &mut BTreeMap<(String, String), TokenStats>,
+) {
+    for path in wire_files(root) {
+        for_each_json_line(&path, |rec| {
+            if rec.get("type").and_then(Value::as_str) != Some("usage.record") {
+                return;
+            }
+            let Some(usage) = rec.get("usage").filter(|value| value.is_object()) else {
+                return;
+            };
+            let input = value_number(usage.get("inputOther"));
+            let output = value_number(usage.get("output"));
+            let cached = value_number(usage.get("inputCacheRead"))
+                + value_number(usage.get("inputCacheCreation"));
+            if input == 0.0 && output == 0.0 && cached == 0.0 {
+                return;
+            }
+            let Some(time) = rec.get("time") else { return };
+            let Some(day) = local_date_from_value(time) else {
+                return;
+            };
+            if !in_date_range(day, start, end) {
+                return;
+            }
+            add_tokens_with_requests(
+                totals,
+                day,
+                &kimi_model_name(rec.get("model"), "kimi-for-coding"),
+                input + cached,
+                output,
+                cached,
+                1,
+            );
+        });
+    }
+}
+
+fn collect_kimi_legacy_stats(
+    root: &Path,
+    start: NaiveDate,
+    end: NaiveDate,
+    totals: &mut BTreeMap<(String, String), TokenStats>,
+) {
+    for path in wire_files(root) {
+        let mut current_model = "kimi-for-coding".to_owned();
+        for_each_json_line(&path, |rec| {
+            let Some(message) = rec.get("message") else {
+                return;
+            };
+            if message.get("type").and_then(Value::as_str) != Some("StatusUpdate") {
+                return;
+            }
+            let Some(payload) = message.get("payload").filter(|value| value.is_object()) else {
+                return;
+            };
+            if let Some(model) = payload
+                .get("model")
+                .and_then(Value::as_str)
+                .filter(|model| !model.trim().is_empty())
+            {
+                current_model = model.to_owned();
+            }
+            let Some(usage) = payload.get("token_usage").filter(|value| value.is_object()) else {
+                return;
+            };
+            let input = value_number(usage.get("input_other"));
+            let output = value_number(usage.get("output"));
+            let cached = value_number(usage.get("input_cache_read"))
+                + value_number(usage.get("input_cache_creation"));
+            if input == 0.0 && output == 0.0 && cached == 0.0 {
+                return;
+            }
+            // legacy 时间戳为 epoch 秒；value_timestamp_millis 自动换算
+            let Some(timestamp) = rec.get("timestamp").or_else(|| payload.get("timestamp")) else {
+                return;
+            };
+            let Some(day) = local_date_from_value(timestamp) else {
+                return;
+            };
+            if !in_date_range(day, start, end) {
+                return;
+            }
+            add_tokens_with_requests(
+                totals,
+                day,
+                &current_model,
+                input + cached,
+                output,
+                cached,
+                1,
+            );
+        });
+    }
+}
+
+fn kimi_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let (start, end) = stats_date_range(query)?;
+    let mut totals = BTreeMap::new();
+    let code_root = home_dir().join(".kimi-code").join("sessions");
+    if wire_files(&code_root).is_empty() {
+        collect_kimi_legacy_stats(
+            &home_dir().join(".kimi").join("sessions"),
+            start,
+            end,
+            &mut totals,
+        );
+    } else {
+        collect_kimi_code_stats(&code_root, start, end, &mut totals);
     }
     Ok(token_stats_json(totals))
 }
@@ -588,6 +1493,200 @@ fn codex_usage() -> Result<Value, String> {
     }))
 }
 
+// ---- Kimi Code 会员额度 ----
+// token 取自 ~/.kimi-code/credentials/kimi-code.json（旧版 kimi-cli 目录 ~/.kimi 作回退）。
+// access_token 900 秒过期；过期时用 refresh_token 换新并原子写回
+// （服务端会轮换 refresh_token，不写回会导致 CLI 掉登录）。
+
+const KIMI_CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
+
+fn kimi_credentials_path() -> PathBuf {
+    for dir in [".kimi-code", ".kimi"] {
+        let path = home_dir()
+            .join(dir)
+            .join("credentials")
+            .join("kimi-code.json");
+        if path.is_file() {
+            return path;
+        }
+    }
+    home_dir()
+        .join(".kimi-code")
+        .join("credentials")
+        .join("kimi-code.json")
+}
+
+fn kimi_hosts() -> (&'static str, &'static str) {
+    let mut region = String::new();
+    for dir in [".kimi-code", ".kimi"] {
+        if let Ok(value) = fs::read_to_string(home_dir().join(dir).join("region")) {
+            let value = value.trim();
+            if !value.is_empty() {
+                region = value.to_owned();
+                break;
+            }
+        }
+    }
+    if region == "global" {
+        ("https://api.kimi.ai/coding/v1", "https://auth.kimi.ai")
+    } else {
+        ("https://api.kimi.com/coding/v1", "https://auth.kimi.com")
+    }
+}
+
+fn kimi_http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("xlt-workbench/0.1")
+        .build()
+        .map_err(|error| format!("创建 Kimi 请求失败: {error}"))
+}
+
+fn refresh_kimi_token(path: &Path, credentials: &Value, auth_host: &str) -> Result<Value, String> {
+    let refresh_token = credentials
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Kimi token 已过期且无 refresh_token".to_owned())?;
+    let response = kimi_http_client()?
+        .post(format!("{auth_host}/api/oauth/token"))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", KIMI_CLIENT_ID),
+        ])
+        .send()
+        .map_err(|error| format!("Kimi token 刷新请求失败: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|error| format!("读取 Kimi 刷新响应失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("Kimi token 刷新 HTTP {status}: {}", snippet(&body)));
+    }
+    let data: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("Kimi token 刷新响应不是 JSON: {error}"))?;
+    let access_token = data
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Kimi token 刷新失败（可能已登出，请重新运行 kimi login）".to_owned())?;
+    let expires_in = data
+        .get("expires_in")
+        .and_then(Value::as_f64)
+        .unwrap_or(900.0);
+    let mut next = credentials.clone();
+    next["access_token"] = Value::from(access_token);
+    if let Some(rotated) = data
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+    {
+        next["refresh_token"] = Value::from(rotated);
+    }
+    next["expires_in"] = json!(expires_in);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or_default();
+    next["expires_at"] = json!(now + expires_in);
+    let tmp = PathBuf::from(format!("{}.tmp-{}", path.display(), std::process::id()));
+    let serialized = serde_json::to_string_pretty(&next)
+        .map_err(|error| format!("序列化 Kimi 凭据失败: {error}"))?;
+    fs::write(&tmp, serialized).map_err(|error| format!("写入 Kimi 凭据失败: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+    }
+    fs::rename(&tmp, path).map_err(|error| format!("替换 Kimi 凭据失败: {error}"))?;
+    Ok(next)
+}
+
+fn kimi_window(window: Option<&Value>) -> Option<Value> {
+    let window = window?;
+    let ratio = window.get("used_ratio").and_then(Value::as_f64)?;
+    let reset_time = window.get("reset_time").and_then(Value::as_str)?;
+    let resets_at = DateTime::parse_from_rfc3339(reset_time).ok()?;
+    Some(json!({
+        "usedPercent": (ratio * 1000.0).round() / 10.0,
+        "resetsAt": resets_at.to_rfc3339(),
+    }))
+}
+
+/// 拉取 Kimi Code 会员额度：5h 滚动窗口 + 月 Code 额度 + 月总额度。
+/// /me 仅用于取会员等级标签，失败时不阻断额度返回。
+fn kimi_usage() -> Result<Value, String> {
+    let path = kimi_credentials_path();
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("无法读取 {}: {error}", path.display()))?;
+    let mut credentials: Value =
+        serde_json::from_str(&content).map_err(|error| format!("Kimi 凭据格式错误: {error}"))?;
+    let (api, auth) = kimi_hosts();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or_default();
+    let expires_at = credentials
+        .get("expires_at")
+        .and_then(Value::as_f64)
+        .unwrap_or_default();
+    // 预留 30 秒余量，避免请求途中过期
+    if expires_at < now + 30.0 {
+        credentials = refresh_kimi_token(&path, &credentials, auth)?;
+    }
+    let access_token = credentials
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Kimi 凭据缺少 access_token（未登录？）".to_owned())?;
+
+    let client = kimi_http_client()?;
+    let response = client
+        .get(format!("{api}/usages"))
+        .bearer_auth(access_token)
+        .send()
+        .map_err(|error| format!("Kimi 额度请求失败: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .map_err(|error| format!("读取 Kimi 额度响应失败: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("Kimi 额度 HTTP {status}: {}", snippet(&body)));
+    }
+    let usages_payload: Value =
+        serde_json::from_str(&body).map_err(|error| format!("Kimi 额度响应不是 JSON: {error}"))?;
+
+    let plan_tag = client
+        .get(format!("{api}/me"))
+        .bearer_auth(access_token)
+        .send()
+        .ok()
+        .and_then(|response| response.text().ok())
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|me| {
+            me.get("user_level_name")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        });
+
+    let usages = usages_payload.get("usages").cloned().unwrap_or(Value::Null);
+    let five_hour = kimi_window(usages.get("limit_5h"));
+    let monthly_code = kimi_window(usages.get("limit_month_code"));
+    let monthly_total = kimi_window(usages.get("limit_month_total"));
+    if five_hour.is_none() && monthly_code.is_none() && monthly_total.is_none() {
+        return Err("Kimi /usages 响应缺少额度数据".to_owned());
+    }
+    Ok(json!({
+        "planTag": plan_tag,
+        "fiveHour": five_hour,
+        "monthlyCode": monthly_code,
+        "monthlyTotal": monthly_total,
+    }))
+}
+
 fn parse_kiro_usage(output: &str) -> Result<Value, String> {
     let ansi = Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]").map_err(|error| error.to_string())?;
     let text = ansi.replace_all(output, "");
@@ -627,6 +1726,89 @@ mod kiro_usage_tests {
         assert_eq!(parsed["used"], 9.09);
         assert_eq!(parsed["total"], 2000.0);
         assert_eq!(parsed["planTag"], "KIRO PRO+");
+    }
+}
+
+#[cfg(test)]
+mod kimi_usage_tests {
+    use super::kimi_window;
+    use serde_json::json;
+
+    #[test]
+    fn parses_usages_window_ratio_and_reset_time() {
+        let window = kimi_window(Some(&json!({
+            "used_ratio": 0.690254,
+            "reset_time": "2026-09-20T06:58:09Z"
+        })))
+        .expect("Kimi 额度窗口应可解析");
+        assert_eq!(window["usedPercent"], 69.0);
+        assert!(window["resetsAt"]
+            .as_str()
+            .unwrap()
+            .starts_with("2026-09-20T06:58:09"));
+
+        assert!(kimi_window(Some(&json!({"reset_time": "2026-09-20T06:58:09Z"}))).is_none());
+        assert!(kimi_window(None).is_none());
+    }
+}
+
+#[cfg(test)]
+mod kimi_stats_tests {
+    use super::{collect_kimi_code_stats, kimi_model_name, token_stats_json};
+    use serde_json::json;
+    use std::collections::BTreeMap;
+    use std::fs;
+
+    #[test]
+    fn strips_provider_prefix_from_model() {
+        assert_eq!(
+            kimi_model_name(Some(&json!("kimi-code/k3")), "fallback"),
+            "k3"
+        );
+        assert_eq!(kimi_model_name(Some(&json!("k2")), "fallback"), "k2");
+        assert_eq!(kimi_model_name(None, "fallback"), "fallback");
+    }
+
+    #[test]
+    fn aggregates_usage_record_events_by_day_and_model() {
+        let dir = std::env::temp_dir().join(format!("xlt-kimi-stats-{}", std::process::id()));
+        let session = dir
+            .join("wd_proj_abcd")
+            .join("session_x")
+            .join("agents")
+            .join("main");
+        fs::create_dir_all(&session).expect("创建临时 wire 目录");
+        // 2026-09-20T02:00:00Z 与 2026-09-19T23:00:00Z（本地时区可能跨年界，取固定 UTC 不便，
+        // 直接用本地时间构造两天内的两条记录）
+        let today = chrono::Local::now().date_naive();
+        let noon = today.and_hms_opt(12, 0, 0).expect("中午时刻有效");
+        let ts = noon
+            .and_local_timezone(chrono::Local)
+            .unwrap()
+            .timestamp_millis();
+        fs::write(
+            session.join("wire.jsonl"),
+            format!(
+                "{}\n{}\n{}\n",
+                json!({"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":100,"output":50,"inputCacheRead":900,"inputCacheCreation":0},"time":ts}),
+                json!({"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":0,"output":0,"inputCacheRead":0,"inputCacheCreation":0},"time":ts}),
+                json!({"type":"metadata","created_at":ts}),
+            ),
+        )
+        .expect("写入临时 wire 文件");
+
+        let mut totals = BTreeMap::new();
+        collect_kimi_code_stats(&dir, today, today, &mut totals);
+        let rows = token_stats_json(totals);
+        let rows = rows.as_array().expect("应为数组");
+        assert_eq!(rows.len(), 1, "零用量事件应被跳过: {rows:?}");
+        assert_eq!(rows[0]["model"], "k3");
+        assert_eq!(rows[0]["inp"], 1000.0, "input 应含缓存");
+        assert_eq!(rows[0]["outp"], 50.0);
+        assert_eq!(rows[0]["cache"], 900.0);
+        assert_eq!(rows[0]["requests"], 1);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 
@@ -955,12 +2137,69 @@ mod model_stats_tests {
         assert_eq!(model_from_event(&event).as_deref(), Some("gpt-5.6-terra"));
 
         let mut totals: BTreeMap<(String, String), TokenStats> = BTreeMap::new();
-        add_tokens(&mut totals, "2026-09-16", "gpt-5.6-terra", 120.0, 30.0, 10.0);
+        add_tokens(
+            &mut totals,
+            "2026-09-16",
+            "gpt-5.6-terra",
+            120.0,
+            30.0,
+            10.0,
+        );
         add_tokens(&mut totals, "2026-09-16", "gpt-5.6-sol", 80.0, 20.0, 0.0);
         let rows = token_stats_json(totals);
         assert_eq!(rows.as_array().map(Vec::len), Some(2));
         assert_eq!(rows[0]["model"], "gpt-5.6-sol");
         assert_eq!(rows[1]["model"], "gpt-5.6-terra");
+    }
+}
+
+#[cfg(test)]
+mod desktop_stats_route_tests {
+    use super::{connector_get_blocking, diff_gemini_totals, gemini_totals, ConnectorRequest};
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn dispatches_all_desktop_token_stats_routes() {
+        for base_url in ["/api/kiro", "/api/qoder", "/api/gemini", "/api/copilot"] {
+            let request = ConnectorRequest {
+                base_url: base_url.to_owned(),
+                path: "/stats".to_owned(),
+                query: BTreeMap::from([
+                    ("start".to_owned(), "2026-09-18".to_owned()),
+                    ("end".to_owned(), "2026-09-17".to_owned()),
+                ]),
+            };
+            assert_eq!(
+                connector_get_blocking(request),
+                Err("start 必须早于或等于 end".to_owned()),
+                "{base_url}/stats 应分发到桌面端聚合器"
+            );
+        }
+    }
+
+    #[test]
+    fn diffs_gemini_cumulative_snapshots() {
+        let first = gemini_totals(&json!({
+            "usageMetadata": {
+                "promptTokenCount": 100,
+                "cachedContentTokenCount": 20,
+                "candidatesTokenCount": 30
+            }
+        }))
+        .expect("首个 Gemini 快照应可解析");
+        let second = gemini_totals(&json!({
+            "usageMetadata": {
+                "promptTokenCount": 160,
+                "cachedContentTokenCount": 30,
+                "candidatesTokenCount": 50
+            }
+        }))
+        .expect("第二个 Gemini 快照应可解析");
+        let delta = diff_gemini_totals(second, Some(first)).expect("快照增量应非空");
+        assert_eq!(delta.input, 50.0);
+        assert_eq!(delta.cached, 10.0);
+        assert_eq!(delta.output, 20.0);
     }
 }
 

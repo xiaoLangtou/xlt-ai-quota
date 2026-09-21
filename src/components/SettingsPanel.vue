@@ -111,6 +111,14 @@ async function recheckAccessibility(): Promise<void> {
   }
 }
 
+async function requestAccessibility(): Promise<void> {
+  try {
+    await clipboardService.requestAccessibility();
+  } catch (reason) {
+    pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+  }
+}
+
 function shortcutLabel(value: string): string {
   const mac = /Mac|iPhone|iPad/.test(navigator.platform);
   return value.split("+").map((part) => ({
@@ -558,7 +566,10 @@ function updateStatsSince(value: string): void {
                     <strong>辅助功能权限未开启</strong>
                     <small>请允许当前运行程序：{{ clipStatus.accessibilityTarget }}</small>
                   </span>
-                  <Button type="button" variant="outline" size="sm" @click="recheckAccessibility">重新检查</Button>
+                  <span class="clip-permission-actions">
+                    <Button type="button" variant="outline" size="sm" @click="requestAccessibility">去授权</Button>
+                    <Button type="button" variant="outline" size="sm" @click="recheckAccessibility">重新检查</Button>
+                  </span>
                 </div>
                 <label class="clip-toggle">
                   <div><strong>自动记录剪贴板</strong><span>应用常驻时监听文本、图片和文件。</span></div>
@@ -1051,7 +1062,9 @@ function updateStatsSince(value: string): void {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.clip-permission :deep(.cn-button) {
+.clip-permission-actions {
+  display: flex;
+  gap: 8px;
   margin-left: auto;
   flex: 0 0 auto;
 }

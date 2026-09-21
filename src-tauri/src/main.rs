@@ -73,6 +73,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             clipboard_history::clipboard_list,
             clipboard_history::clipboard_status,
+            clipboard_history::clipboard_request_accessibility,
             clipboard_history::clipboard_set_pinned,
             clipboard_history::clipboard_copy,
             clipboard_history::clipboard_copy_plain,

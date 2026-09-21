@@ -753,17 +753,47 @@ fn merge_text_items(
 }
 
 #[cfg(target_os = "macos")]
-fn accessibility_granted() -> bool {
+fn accessibility_granted_with_prompt(prompt: bool) -> bool {
+    use core_foundation::base::TCFType;
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
+    use core_foundation::string::CFString;
+
     #[link(name = "ApplicationServices", kind = "framework")]
     extern "C" {
-        fn AXIsProcessTrustedWithOptions(options: *const std::ffi::c_void) -> u8;
+        fn AXIsProcessTrustedWithOptions(options: CFDictionaryRef) -> u8;
     }
-    unsafe { AXIsProcessTrustedWithOptions(std::ptr::null()) != 0 }
+
+    if !prompt {
+        return unsafe { AXIsProcessTrustedWithOptions(std::ptr::null_mut()) != 0 };
+    }
+    let key = CFString::from_static_string("AXTrustedCheckOptionPrompt");
+    let value = CFBoolean::true_value();
+    let options = CFDictionary::from_CFType_pairs(&[(key.as_CFType(), value.as_CFType())]);
+    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) != 0 }
+}
+
+#[cfg(target_os = "macos")]
+fn accessibility_granted() -> bool {
+    accessibility_granted_with_prompt(false)
 }
 
 #[cfg(not(target_os = "macos"))]
 fn accessibility_granted() -> bool {
     true
+}
+
+#[tauri::command]
+pub fn clipboard_request_accessibility() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // prompt=true 时 macOS 会弹出系统级授权对话框（未授权才会弹）。
+        Ok(accessibility_granted_with_prompt(true))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(true)
+    }
 }
 
 #[tauri::command]

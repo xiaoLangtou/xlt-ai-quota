@@ -329,6 +329,14 @@ async function refreshAccessibility(): Promise<void> {
     }
 }
 
+async function requestAccessibility(): Promise<void> {
+    try {
+        await clipboardService.requestAccessibility();
+    } catch ( reason ) {
+        pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+    }
+}
+
 async function toggleCapture(): Promise<void> {
     if ( !status.value ) return;
     try {
@@ -454,7 +462,10 @@ onUnmounted(() => {
                     <strong>需要辅助功能权限</strong><span>请在“系统设置 → 隐私与安全性 → 辅助功能”中允许当前运行程序，然后返回此窗口复检。</span><small>{{
                         status.accessibilityTarget
                     }}</small></div>
-                <Button size="sm" type="button" variant="outline" @click="refreshAccessibility">重新检查</Button>
+                <span class="permission-actions">
+                    <Button size="sm" type="button" variant="outline" @click="requestAccessibility">去授权</Button>
+                    <Button size="sm" type="button" variant="outline" @click="refreshAccessibility">重新检查</Button>
+                </span>
             </div>
 
             <nav aria-label="内容类型筛选" class="clipboard-sidebar">
@@ -801,7 +812,9 @@ onUnmounted(() => {
     font-family: var(--font-mono);
 }
 
-.permission-banner :deep(.cn-button) {
+.permission-actions {
+    display: flex;
+    gap: 8px;
     margin-left: auto;
     flex: 0 0 auto;
 }

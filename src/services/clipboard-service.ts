@@ -18,6 +18,10 @@ export const clipboardService = {
     return invoke<ClipboardStatus>("clipboard_status");
   },
 
+  requestAccessibility(): Promise<boolean> {
+    return invoke<boolean>("clipboard_request_accessibility");
+  },
+
   setPinned(id: string, pinned: boolean): Promise<ClipboardItem> {
     return invoke<ClipboardItem>("clipboard_set_pinned", { id, pinned });
   },

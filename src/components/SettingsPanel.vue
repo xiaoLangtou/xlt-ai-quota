@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Keyboard, ShieldAlert } from "lucide-vue-next";
+import {
+  ClipboardList,
+  Database,
+  Fuel,
+  Keyboard,
+  LayoutGrid,
+  Plug,
+  ShieldAlert,
+  Sun,
+} from "lucide-vue-next";
 import { httpGet, isTauriDesktop } from "@/connectors/types";
 import { clipboardService } from "@/services/clipboard-service";
 import { pushToast } from "@/composables/useToast";
@@ -216,6 +225,18 @@ const CONNECTORS = [
   { key: "copilot", name: "GitHub Copilot", desc: "读取 ~/.copilot 会话的真实 Token", badge: "自动采集", tone: "ok" },
 ] as const;
 
+// ---- 设置页布局：顶部 Tabs + 分区卡片（全部默认展开，不可折叠） ----
+type SettingsTab = "general" | "connectors" | "clipboard" | "advanced";
+
+const TABS: { key: SettingsTab; label: string }[] = [
+  { key: "general", label: "通用" },
+  { key: "connectors", label: "平台连接" },
+  { key: "clipboard", label: "剪贴板" },
+  { key: "advanced", label: "高级" },
+];
+
+const activeTab = ref<SettingsTab>("general");
+
 function fillForm() {
   const cfg = loadSettings();
   arkBase.value = cfg.ark.baseUrl;
@@ -350,227 +371,276 @@ function updateStatsSince(value: string): void {
 
 <template>
   <Dialog :open="Boolean(open)" :static="embedded" @update:open="close">
-    <div v-if="embedded || open" :class="{ 'embedded-root': embedded }">
-      <div class="panel" :class="{ embedded }">
-        <header class="panel-head">
-          <div v-if="embedded">
-            <h2>数据源</h2>
-            <p>本机 CLI 与公开数据接口统一汇总，配置只保存在本机</p>
-          </div>
-          <div v-else>
-            <span class="eyebrow">CONNECTORS</span>
-            <h2>连接与设置</h2>
-            <p>本机 CLI 与公开数据接口统一汇总，登录态和配置只保存在本机。</p>
-          </div>
-          <Button v-if="!embedded" variant="ghost" size="icon" aria-label="关闭" @click="close">×</Button>
-        </header>
+    <div v-if="embedded || open" class="settings-root" :class="{ embedded }">
+      <header v-if="!embedded" class="page-head">
+        <div>
+          <h2>设置</h2>
+          <p>本机 CLI 与公开数据接口统一汇总，登录态和配置只保存在本机。</p>
+        </div>
+        <Button v-if="!embedded" variant="ghost" size="icon" aria-label="关闭" @click="close">×</Button>
+      </header>
 
-        <div class="connector-list">
-          <div v-if="embedded" class="list-title">
-            <h3>平台连接</h3>
-            <p>经本机 CLI 登录态读取，无需配置 API Key</p>
-          </div>
-          <!-- 火山方舟：需登录，展示动态状态 -->
-          <div class="connector-row">
-            <span class="conn-mark"><ToolLogo platform="ark" :size="22" /></span>
-            <div class="conn-info">
-              <strong>火山方舟</strong>
-              <small>套餐额度 + Token 用量 · 需 Volc SSO 登录</small>
-            </div>
-            <div class="conn-side">
-              <span class="conn-badge" :class="arkStatus.ok ? 'ok' : arkStatus.checking ? 'neutral' : 'off'">
-                {{ arkStatus.checking ? "检测中" : arkStatus.ok ? "已登录" : "未登录" }}
+      <nav class="tab-bar" role="tablist" aria-label="设置分类">
+        <button
+          v-for="tab in TABS"
+          :key="tab.key"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === tab.key"
+          :class="{ active: activeTab === tab.key }"
+          @click="activeTab = tab.key"
+        >
+          {{ tab.label }}
+        </button>
+      </nav>
+
+      <div class="tab-body">
+        <!-- ===================== 通用 ===================== -->
+        <template v-if="activeTab === 'general'">
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-accent"><Sun :size="18" /></span>
+              <span class="sec-copy">
+                <strong>显示设置</strong>
+                <small>主题外观与用量统计口径</small>
               </span>
-              <Button variant="ghost" size="sm" :disabled="arkStatus.checking" @click="checkArkStatus">重新检测</Button>
             </div>
-          </div>
-          <div v-if="!arkStatus.ok && !arkStatus.checking" class="connector-note">
-            <p>
-              Ark 用量需 Volc 签名（AK/SK 或 SSO），<b>不能</b>用 <code>ark-*</code> Bearer Key。
-              请在终端登录后再同步：
-            </p>
-            <pre class="cmd">arkcli auth login volc-sso</pre>
-            <p v-if="arkStatus.message" class="conn-msg">{{ arkStatus.message }}</p>
-          </div>
-
-          <!-- 其他本机 CLI：自动采集，无需登录配置 -->
-          <div v-for="c in CONNECTORS" :key="c.key" class="connector-row">
-            <span class="conn-mark"><ToolLogo :platform="c.key" :size="22" /></span>
-            <div class="conn-info">
-              <strong>{{ c.name }}</strong>
-              <small>{{ c.desc }}</small>
+            <div class="sec-body">
+              <div class="setting-row">
+                <div class="setting-copy"><strong>外观主题</strong><span>跟随系统，或固定亮色 / 暗色</span></div>
+                <div class="mini-seg" role="group" aria-label="外观主题">
+                  <button type="button" :class="{ active: themePref === 'light' }" @click="setThemePref('light')">亮</button>
+                  <button type="button" :class="{ active: themePref === 'dark' }" @click="setThemePref('dark')">暗</button>
+                  <button type="button" :class="{ active: themePref === 'system' }" @click="setThemePref('system')">自动</button>
+                </div>
+              </div>
+              <div class="pref-grid">
+                <label class="pref-field">
+                  <span>统计时区</span>
+                  <Select :model-value="timezone" :options="timezoneOptions" @update:model-value="updateTimezone" />
+                </label>
+                <label class="pref-field">
+                  <span>统计起始日</span>
+                  <DatePicker :model-value="statsSince" placeholder="选择起始日期" @update:model-value="updateStatsSince" />
+                </label>
+                <Button
+                  v-if="statsSince"
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  @click="statsSince = ''; savePreferencesOnly()"
+                >
+                  清除起始日
+                </Button>
+              </div>
+              <p class="pref-note">时区 / 起始日调整后，点底部「保存」并重新同步，按新设置采集本机用量。</p>
             </div>
-            <div class="conn-side">
-              <span class="conn-badge" :class="c.tone">{{ c.badge }}</span>
-            </div>
-          </div>
-        </div>
+          </section>
 
-        <div class="settings-side">
-        <div class="pref-section">
-          <div class="pref-head">
-            <strong>显示设置</strong>
-            <small>主题外观与用量统计口径</small>
-          </div>
-          <div class="setting-row">
-            <div class="setting-copy"><strong>外观主题</strong><span>跟随系统，或固定亮色 / 暗色</span></div>
-            <div class="mini-seg" role="group" aria-label="外观主题">
-              <button type="button" :class="{ active: themePref === 'light' }" @click="setThemePref('light')">亮</button>
-              <button type="button" :class="{ active: themePref === 'dark' }" @click="setThemePref('dark')">暗</button>
-              <button type="button" :class="{ active: themePref === 'system' }" @click="setThemePref('system')">自动</button>
-            </div>
-          </div>
-          <div class="pref-grid">
-            <label class="pref-field">
-              <span>统计时区</span>
-              <Select :model-value="timezone" :options="timezoneOptions" @update:model-value="updateTimezone" />
-            </label>
-            <label class="pref-field">
-              <span>统计起始日</span>
-              <DatePicker :model-value="statsSince" placeholder="选择起始日期" @update:model-value="updateStatsSince" />
-            </label>
-            <Button
-              v-if="statsSince"
-              type="button"
-              variant="ghost"
-              size="sm"
-              @click="statsSince = ''; savePreferencesOnly()"
-            >
-              清除起始日
-            </Button>
-          </div>
-          <p class="pref-note">时区 / 起始日调整后，点击「立即同步」按新设置重新采集本机用量。</p>
-        </div>
-
-        <div class="pref-section">
-          <div class="pref-head">
-            <strong>油价监控</strong>
-            <small>省级指导价、下一调价窗口与国家发改委正式公告</small>
-          </div>
-          <div class="setting-row">
-            <div class="setting-copy"><strong>油品标号</strong><span>概览油价卡片重点展示的标号</span></div>
-            <div class="mini-seg" role="group" aria-label="油品标号">
-              <button v-for="grade in OIL_GRADE_OPTIONS" :key="grade" type="button"
-                :class="{ active: oilGrade === grade }" @click="setOilGrade(grade)">{{ grade }}#</button>
-            </div>
-          </div>
-          <div class="pref-grid">
-            <label class="pref-field">
-              <span>监控省份</span>
-              <Select v-model="oilProvince" :options="OIL_PROVINCE_OPTIONS" placeholder="请选择省份" />
-            </label>
-            <label class="pref-field oil-key-field">
-              <span>极数本源预测 API KEY（可选）</span>
-              <Input v-model="oilApiKey" type="password" autocomplete="off" placeholder="匿名额度不足时填写" />
-            </label>
-          </div>
-          <p class="pref-note">今日指导价与预测分开同步；加油站实际挂牌价可能浮动，正式调价以国家发改委公告为准。</p>
-        </div>
-
-        <div class="pref-section quota-display-section">
-          <div class="pref-head">
-            <strong>套餐额度展示</strong>
-            <small>只展示你正在订阅或需要关注的平台</small>
-          </div>
-          <div class="quota-display-grid">
-            <label v-for="option in QUOTA_DISPLAY_OPTIONS" :key="option.value" class="quota-display-option">
-              <Checkbox
-                :model-value="!hiddenQuotaTargets.includes(option.value)"
-                @update:model-value="updateQuotaDisplayTarget(option.value, $event === true)"
-              />
-              <ToolLogo :platform="option.platform" :size="18" />
-              <span>{{ option.label }}</span>
-            </label>
-          </div>
-          <p class="pref-note">隐藏后仅不在套餐额度区域显示，已采集的数据不会删除。</p>
-        </div>
-
-        <div class="pref-section">
-          <div class="pref-head">
-            <strong>数据与存储</strong>
-            <small>用量、片段与配置均只保存在本机</small>
-          </div>
-          <div class="setting-row">
-            <div class="setting-copy"><strong>存储引擎</strong><span>Tauri 桌面端为 SQLite，浏览器预览为 localStorage</span></div>
-            <span class="engine-badge">{{ isTauriDesktop() ? "SQLite" : "localStorage" }}</span>
-          </div>
-        </div>
-
-        <div class="pref-section">
-          <div class="pref-head">
-            <strong>剪贴板历史</strong>
-            <small>采集范围、保留策略与全局快捷键</small>
-          </div>
-          <template v-if="clipboardAvailable">
-            <div v-if="clipStatus && !clipStatus.accessibilityGranted" class="clip-permission">
-              <ShieldAlert :size="16" />
-              <span>
-                <strong>辅助功能权限未开启</strong>
-                <small>请允许当前运行程序：{{ clipStatus.accessibilityTarget }}</small>
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-warn"><Fuel :size="18" /></span>
+              <span class="sec-copy">
+                <strong>油价监控</strong>
+                <small>省级指导价、下一调价窗口与国家发改委正式公告</small>
               </span>
-              <Button type="button" variant="outline" size="sm" @click="recheckAccessibility">重新检查</Button>
             </div>
-            <label class="clip-toggle">
-              <div><strong>自动记录剪贴板</strong><span>应用常驻时监听文本、图片和文件。</span></div>
-              <Checkbox v-model="clipForm.enabled" />
-            </label>
-            <label class="clip-toggle">
-              <div><strong>登录时自动启动</strong><span>在后台启动并继续记录，不打开主窗口。</span></div>
-              <Checkbox v-model="clipForm.launchAtLogin" />
-            </label>
-            <div class="clip-grid">
-              <label><span>容量上限</span><Input v-model="clipForm.maxItems" type="number" min="20" max="5000" /><small>收藏记录不占用名额</small></label>
-              <label><span>保留时长（天）</span><Input v-model="clipForm.ttlDays" type="number" min="1" max="365" /><small>到期时自动删除</small></label>
+            <div class="sec-body">
+              <div class="setting-row">
+                <div class="setting-copy"><strong>油品标号</strong><span>概览油价卡片重点展示的标号</span></div>
+                <div class="mini-seg" role="group" aria-label="油品标号">
+                  <button v-for="grade in OIL_GRADE_OPTIONS" :key="grade" type="button"
+                    :class="{ active: oilGrade === grade }" @click="setOilGrade(grade)">{{ grade }}#</button>
+                </div>
+              </div>
+              <div class="pref-grid">
+                <label class="pref-field">
+                  <span>监控省份</span>
+                  <Select v-model="oilProvince" :options="OIL_PROVINCE_OPTIONS" placeholder="请选择省份" />
+                </label>
+                <label class="pref-field oil-key-field">
+                  <span>极数本源预测 API KEY（可选）</span>
+                  <Input v-model="oilApiKey" type="password" autocomplete="off" placeholder="匿名额度不足时填写" />
+                </label>
+              </div>
+              <p class="pref-note">今日指导价与预测分开同步；加油站实际挂牌价可能浮动，正式调价以国家发改委公告为准。</p>
             </div>
-            <label class="clip-field">
-              <span>全局快捷键</span>
-              <button ref="shortcutRecorder" class="shortcut-recorder" :class="{ recording: recordingShortcut }"
-                type="button" :aria-pressed="recordingShortcut" @click="beginShortcutRecording"
-                @keydown="recordShortcut" @blur="recordingShortcut = false">
-                <Keyboard :size="16" />
-                <span v-if="recordingShortcut">请按下快捷键…</span>
-                <kbd v-else>{{ shortcutLabel(clipForm.shortcut) }}</kbd>
-                <em>{{ recordingShortcut ? "Esc 取消" : "点击录制" }}</em>
-              </button>
-              <small :class="{ 'shortcut-error': shortcutRecordError }">{{ shortcutRecordError || "F1–F12 可单独使用，其他按键需要组合；保存时检查占用" }}</small>
-            </label>
-            <label class="clip-field">
-              <span>不记录这些应用</span>
-              <textarea v-model="clipExcludedText" class="cn-textarea" rows="4" placeholder="每行一个应用名称" />
-              <small>默认包含常见密码管理器</small>
-            </label>
-            <label v-if="clipStatus" class="clip-field">
-              <span>本机存储位置</span>
-              <Input :model-value="clipStatus.storagePath" readonly />
-              <small>历史数据库与图片只保存在应用数据目录。</small>
-            </label>
-            <div class="clip-actions">
-              <Button type="button" :disabled="clipSaving" @click="saveClipboardSettings">{{ clipSaving ? "保存中…" : "保存剪贴板设置" }}</Button>
-            </div>
-          </template>
-          <p v-else class="pref-note">剪贴板历史仅在 Tauri 桌面端可用，浏览器预览不支持系统剪贴板监听。</p>
-        </div>
+          </section>
 
-        <footer class="panel-foot">
-          <span class="foot-hint">
-            <template v-if="saved">已保存</template>
-            <template v-else>连接配置只保存在本机，不写入项目文件。</template>
-          </span>
-          <div class="actions">
-            <Button v-if="!embedded" variant="ghost" @click="close">关闭</Button>
-            <Button @click="persist(true)">立即同步</Button>
-          </div>
-        </footer>
-        </div>
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-info"><LayoutGrid :size="18" /></span>
+              <span class="sec-copy">
+                <strong>套餐额度展示</strong>
+                <small>只展示你正在订阅或需要关注的平台</small>
+              </span>
+            </div>
+            <div class="sec-body">
+              <div class="quota-display-grid">
+                <label v-for="option in QUOTA_DISPLAY_OPTIONS" :key="option.value" class="quota-display-option">
+                  <Checkbox
+                    :model-value="!hiddenQuotaTargets.includes(option.value)"
+                    @update:model-value="updateQuotaDisplayTarget(option.value, $event === true)"
+                  />
+                  <ToolLogo :platform="option.platform" :size="18" />
+                  <span>{{ option.label }}</span>
+                </label>
+              </div>
+              <p class="pref-note">隐藏后仅不在套餐额度区域显示，已采集的数据不会删除。</p>
+            </div>
+          </section>
+        </template>
 
+        <!-- ===================== 平台连接 ===================== -->
+        <template v-else-if="activeTab === 'connectors'">
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-accent"><Plug :size="18" /></span>
+              <span class="sec-copy">
+                <strong>平台连接</strong>
+                <small>经本机 CLI 登录态读取，无需配置 API Key</small>
+              </span>
+            </div>
+            <div class="sec-body sec-body-flat">
+              <!-- 火山方舟：需登录，展示动态状态 -->
+              <div class="connector-row">
+                <span class="conn-mark"><ToolLogo platform="ark" :size="22" /></span>
+                <div class="conn-info">
+                  <strong>火山方舟</strong>
+                  <small>套餐额度 + Token 用量 · 需 Volc SSO 登录</small>
+                </div>
+                <div class="conn-side">
+                  <span class="conn-badge" :class="arkStatus.ok ? 'ok' : arkStatus.checking ? 'neutral' : 'off'">
+                    {{ arkStatus.checking ? "检测中" : arkStatus.ok ? "已登录" : "未登录" }}
+                  </span>
+                  <Button variant="ghost" size="sm" :disabled="arkStatus.checking" @click="checkArkStatus">重新检测</Button>
+                </div>
+              </div>
+              <div v-if="!arkStatus.ok && !arkStatus.checking" class="connector-note">
+                <p>
+                  Ark 用量需 Volc 签名（AK/SK 或 SSO），<b>不能</b>用 <code>ark-*</code> Bearer Key。
+                  请在终端登录后再同步：
+                </p>
+                <pre class="cmd">arkcli auth login volc-sso</pre>
+                <p v-if="arkStatus.message" class="conn-msg">{{ arkStatus.message }}</p>
+              </div>
+
+              <!-- 其他本机 CLI：自动采集，无需登录配置 -->
+              <div v-for="c in CONNECTORS" :key="c.key" class="connector-row">
+                <span class="conn-mark"><ToolLogo :platform="c.key" :size="22" /></span>
+                <div class="conn-info">
+                  <strong>{{ c.name }}</strong>
+                  <small>{{ c.desc }}</small>
+                </div>
+                <div class="conn-side">
+                  <span class="conn-badge" :class="c.tone">{{ c.badge }}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+
+        <!-- ===================== 剪贴板 ===================== -->
+        <template v-else-if="activeTab === 'clipboard'">
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-ok"><ClipboardList :size="18" /></span>
+              <span class="sec-copy">
+                <strong>剪贴板历史</strong>
+                <small>采集范围、保留策略与全局快捷键</small>
+              </span>
+            </div>
+            <div class="sec-body">
+              <template v-if="clipboardAvailable">
+                <div v-if="clipStatus && !clipStatus.accessibilityGranted" class="clip-permission">
+                  <ShieldAlert :size="16" />
+                  <span>
+                    <strong>辅助功能权限未开启</strong>
+                    <small>请允许当前运行程序：{{ clipStatus.accessibilityTarget }}</small>
+                  </span>
+                  <Button type="button" variant="outline" size="sm" @click="recheckAccessibility">重新检查</Button>
+                </div>
+                <label class="clip-toggle">
+                  <div><strong>自动记录剪贴板</strong><span>应用常驻时监听文本、图片和文件。</span></div>
+                  <Checkbox v-model="clipForm.enabled" />
+                </label>
+                <label class="clip-toggle">
+                  <div><strong>登录时自动启动</strong><span>在后台启动并继续记录，不打开主窗口。</span></div>
+                  <Checkbox v-model="clipForm.launchAtLogin" />
+                </label>
+                <div class="clip-grid">
+                  <label><span>容量上限</span><Input v-model="clipForm.maxItems" type="number" min="20" max="5000" /><small>收藏记录不占用名额</small></label>
+                  <label><span>保留时长（天）</span><Input v-model="clipForm.ttlDays" type="number" min="1" max="365" /><small>到期时自动删除</small></label>
+                </div>
+                <label class="clip-field">
+                  <span>全局快捷键</span>
+                  <button ref="shortcutRecorder" class="shortcut-recorder" :class="{ recording: recordingShortcut }"
+                    type="button" :aria-pressed="recordingShortcut" @click="beginShortcutRecording"
+                    @keydown="recordShortcut" @blur="recordingShortcut = false">
+                    <Keyboard :size="16" />
+                    <span v-if="recordingShortcut">请按下快捷键…</span>
+                    <kbd v-else>{{ shortcutLabel(clipForm.shortcut) }}</kbd>
+                    <em>{{ recordingShortcut ? "Esc 取消" : "点击录制" }}</em>
+                  </button>
+                  <small :class="{ 'shortcut-error': shortcutRecordError }">{{ shortcutRecordError || "F1–F12 可单独使用，其他按键需要组合；保存时检查占用" }}</small>
+                </label>
+                <label class="clip-field">
+                  <span>不记录这些应用</span>
+                  <textarea v-model="clipExcludedText" class="cn-textarea" rows="4" placeholder="每行一个应用名称" />
+                  <small>默认包含常见密码管理器</small>
+                </label>
+                <label v-if="clipStatus" class="clip-field">
+                  <span>本机存储位置</span>
+                  <Input :model-value="clipStatus.storagePath" readonly />
+                  <small>历史数据库与图片只保存在应用数据目录。</small>
+                </label>
+                <div class="clip-actions">
+                  <Button type="button" :disabled="clipSaving" @click="saveClipboardSettings">{{ clipSaving ? "保存中…" : "保存剪贴板设置" }}</Button>
+                </div>
+              </template>
+              <p v-else class="pref-note">剪贴板历史仅在 Tauri 桌面端可用，浏览器预览不支持系统剪贴板监听。</p>
+            </div>
+          </section>
+        </template>
+
+        <!-- ===================== 高级 ===================== -->
+        <template v-else>
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-info"><Database :size="18" /></span>
+              <span class="sec-copy">
+                <strong>数据与存储</strong>
+                <small>用量、片段与配置均只保存在本机</small>
+              </span>
+            </div>
+            <div class="sec-body">
+              <div class="setting-row">
+                <div class="setting-copy"><strong>存储引擎</strong><span>Tauri 桌面端为 SQLite，浏览器预览为 localStorage</span></div>
+                <span class="engine-badge">{{ isTauriDesktop() ? "SQLite" : "localStorage" }}</span>
+              </div>
+            </div>
+          </section>
+        </template>
       </div>
+
+      <footer class="page-foot">
+        <span class="foot-hint">
+          <template v-if="saved">已保存</template>
+          <template v-else>连接配置只保存在本机，不写入项目文件。</template>
+        </span>
+        <div class="actions">
+          <Button v-if="!embedded" variant="ghost" @click="close">关闭</Button>
+          <Button variant="outline" @click="persist(true)">立即同步</Button>
+          <Button class="save-btn" @click="persist(false)">保存</Button>
+        </div>
+      </footer>
     </div>
   </Dialog>
 </template>
 
 <style scoped>
-.panel {
-  width: min(560px, 100%);
+.settings-root {
+  width: min(640px, 100%);
   max-height: 88vh;
   overflow: auto;
   background: var(--surface);
@@ -578,150 +648,185 @@ function updateStatsSince(value: string): void {
   box-shadow: var(--shadow-pop);
   padding: 22px 24px 18px;
 }
-.embedded-root {
-  width: 100%;
-}
-.panel.embedded {
+.settings-root.embedded {
+  display: flex;
   width: 100%;
   max-width: none;
-  max-height: none;
-  margin: 0 auto;
-  padding: 0;
-  border: 0;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 2px;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  /* 连接器卡与各设置分区一起流入多列瀑布，按高度就近填充，避免单列过高、另一列留白 */
-  column-width: 340px;
-  column-gap: 14px;
 }
-.settings-side {
+.page-head {
   display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
 }
-/* 弹窗模式下与上方连接器列表拉开间距（嵌入模式为 display:contents，此边距被忽略） */
-.panel:not(.embedded) .settings-side {
-  margin-top: 16px;
-}
-/* 嵌入模式下让 settings-side 透明化，其子分区直接参与父级多列布局 */
-.panel.embedded .settings-side {
-  display: contents;
-}
-.panel.embedded .connector-list,
-.panel.embedded .pref-section {
-  margin: 0 0 14px;
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
-}
-.panel.embedded .panel-head {
-  display: none;
-}
-.panel.embedded .list-title {
-  padding: 16px 18px 6px;
-  border-bottom: 1px solid var(--border);
-}
-.panel.embedded .list-title h3 {
+.page-head h2 {
   margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+}
+.page-head p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+/* 顶部分类 Tabs：胶囊分段，选中项实心高亮 */
+.tab-bar {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--segment-bg);
+}
+.settings-root.embedded .tab-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg);
+}
+.tab-bar button {
+  flex: 1;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.tab-bar button:hover {
   color: var(--text);
-  font-size: 13.5px;
-  font-weight: 700;
 }
-.panel.embedded .list-title p {
-  margin: 2px 0 8px;
-  color: var(--text-subtle);
-  font-size: 11.5px;
+.tab-bar button.active {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  font-weight: 650;
+  box-shadow: var(--shadow-sm);
 }
-.panel.embedded .connector-list {
-  display: block;
-  min-width: 0;
+
+.tab-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  overflow-y: auto;
+  padding-bottom: 8px;
+}
+.settings-root:not(.embedded) .tab-body {
+  min-height: 0;
+  flex: none;
+  overflow: visible;
+}
+
+/* 可折叠分区卡片：彩色图标 + 标题/描述 + 右侧箭头 */
+.sec {
+  flex: 0 0 auto;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: var(--shadow-card);
 }
-.panel.embedded .connector-row {
+.sec-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
   gap: 14px;
-  padding: 13px 18px;
+  padding: 15px 18px;
   border: 0;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.panel.embedded .connector-list > .connector-row:last-child {
-  border-bottom: 0;
+.sec-head:hover {
+  background: var(--surface-2);
 }
-.panel.embedded .conn-mark {
+.sec-head.solo {
+  cursor: default;
+}
+.sec-head.solo:hover {
+  background: transparent;
+}
+.sec-icon {
+  display: grid;
   width: 36px;
   height: 36px;
-  flex-basis: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border-radius: 10px;
 }
-.panel.embedded .connector-note {
-  margin: 12px 18px;
+.sec-icon.tone-accent {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
-.panel.embedded .panel-foot {
-  /* 底部提示条整行贯通所有列 */
-  column-span: all;
-  margin: 2px 0 0;
-  padding: 12px 2px 4px;
-  border: 0;
+.sec-icon.tone-warn {
+  background: color-mix(in srgb, var(--u-warn) 14%, transparent);
+  color: var(--u-warn);
 }
-.panel.embedded .actions {
-  display: none;
+.sec-icon.tone-info {
+  background: color-mix(in srgb, #4f8cff 14%, transparent);
+  color: #4f8cff;
 }
-
-@media (max-width: 720px) {
-  .panel.embedded {
-    column-width: auto;
-    columns: 1;
-  }
+.sec-icon.tone-ok {
+  background: color-mix(in srgb, var(--u-ok) 14%, transparent);
+  color: var(--u-ok);
 }
-.panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 20px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border);
+.sec-copy {
+  min-width: 0;
+  flex: 1;
 }
-.eyebrow {
-  color: var(--text-subtle);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
-}
-.panel-head h2 {
-  margin: 5px 0 0;
-  font-size: 22px;
+.sec-copy strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
   font-weight: 650;
 }
-.panel-head p {
-  margin: 6px 0 0;
+.sec-copy small {
+  display: block;
+  margin-top: 3px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sec-body {
+  padding: 4px 18px 18px;
+  border-top: 1px solid var(--border);
+}
+.sec-body-flat {
+  padding: 6px 0 0;
 }
 
-.connector-list {
-  display: grid;
-  gap: 10px;
-}
+/* 平台连接行（嵌在连接分区内，上下贯通） */
 .connector-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
+  padding: 13px 18px;
+  border-bottom: 1px solid var(--border);
 }
 .conn-mark {
   display: grid;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
   place-items: center;
   border-radius: var(--r-sm);
   background: var(--surface-2);
@@ -733,7 +838,7 @@ function updateStatsSince(value: string): void {
 .conn-info strong {
   display: block;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
 }
 .conn-info small {
@@ -768,7 +873,7 @@ function updateStatsSince(value: string): void {
   color: var(--u-warn);
 }
 .connector-note {
-  margin: -2px 0 2px;
+  margin: 12px 18px;
   padding: 14px 16px;
   border: 1px dashed var(--border-strong);
   border-radius: var(--r-md);
@@ -801,43 +906,8 @@ function updateStatsSince(value: string): void {
 .conn-msg {
   color: var(--u-warn);
 }
-.pref-section {
-  padding: 16px 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
-}
-.pref-head {
-  position: relative;
-  margin-bottom: 6px;
-  padding-left: 11px;
-}
-.pref-head::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  left: 0;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--accent);
-  opacity: 0.85;
-}
-.pref-head strong {
-  display: block;
-  color: var(--text);
-  font-size: 13.5px;
-  font-weight: 680;
-  letter-spacing: -0.01em;
-}
-.pref-head small {
-  display: block;
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
+
+/* 分区内表单元素 */
 .pref-grid {
   display: flex;
   flex-wrap: wrap;
@@ -871,9 +941,7 @@ function updateStatsSince(value: string): void {
   justify-content: space-between;
   gap: 12px;
   padding: 11px 0;
-  border-bottom: 1px dashed var(--border);
 }
-.pref-grid + .setting-row,
 .setting-row + .pref-grid {
   margin-top: 4px;
 }
@@ -919,6 +987,41 @@ function updateStatsSince(value: string): void {
   color: var(--accent);
   font-weight: 650;
 }
+.engine-badge {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.quota-display-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  margin-top: 12px;
+}
+.quota-display-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.quota-display-option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+/* 剪贴板设置 */
 .clip-permission {
   display: flex;
   align-items: flex-start;
@@ -1066,47 +1169,24 @@ function updateStatsSince(value: string): void {
   color: var(--u-crit);
 }
 
-.engine-badge {
-  flex: none;
-  padding: 3px 9px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
-}
-.quota-display-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-  margin-top: 12px;
-}
-.quota-display-option {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 9px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-.quota-display-option:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-2);
-}
-.panel-foot {
+.page-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 18px;
-  padding-top: 16px;
+  margin: 18px -2px 0;
+  padding: 14px 8px 10px;
   border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.settings-root.embedded .page-foot {
+  position: static;
+  flex: 0 0 auto;
+  margin: 12px -2px 0;
+  background: var(--bg);
 }
 .foot-hint {
   color: var(--text-subtle);
@@ -1116,6 +1196,10 @@ function updateStatsSince(value: string): void {
   display: flex;
   gap: 8px;
   flex: 0 0 auto;
+}
+.save-btn {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
 }
 
 @media (max-width: 640px) {
@@ -1128,8 +1212,10 @@ function updateStatsSince(value: string): void {
   .conn-side {
     width: 100%;
     justify-content: flex-start;
-    padding-left: 46px;
+    padding-left: 48px;
+  }
+  .page-foot {
+    flex-wrap: wrap;
   }
 }
-
 </style>

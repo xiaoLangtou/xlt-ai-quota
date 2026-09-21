@@ -144,8 +144,8 @@ textarea {
 }
 
 *::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
 }
 
 *::-webkit-scrollbar-track,
@@ -154,19 +154,35 @@ textarea {
 }
 
 *::-webkit-scrollbar-thumb {
-  min-height: 44px;
-  border: 3px solid transparent;
+  min-height: 40px;
+  border: 2.5px solid transparent;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--scroll-thumb) 72%, transparent);
+  background: color-mix(in srgb, var(--scroll-thumb) 48%, transparent);
   background-clip: padding-box;
+  transition: background-color 0.15s ease;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--scroll-thumb-hover) 82%, transparent);
+  background-color: color-mix(in srgb, var(--scroll-thumb-hover) 78%, transparent);
 }
 
 *::-webkit-scrollbar-thumb:active {
   background-color: var(--scroll-thumb-active);
+}
+
+/* 悬浮在滚动区域上时，滚动条渐显（Firefox 用 thin 恒显，保持简单一致） */
+@media (hover: hover) and (pointer: fine) {
+  *::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--scroll-thumb) 26%, transparent);
+  }
+
+  *:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--scroll-thumb) 55%, transparent);
+  }
+
+  *:hover::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--scroll-thumb-hover) 82%, transparent);
+  }
 }
 
 [data-theme="dark"] .tool-logo.monochrome {

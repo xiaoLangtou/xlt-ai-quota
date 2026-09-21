@@ -1,0 +1,209 @@
+{
+  "version": 2,
+  "locale": "en-US",
+  "index_path": "aoci.txt",
+  "exclude_dirs": [
+    "node_modules",
+    "vendor",
+    "dist",
+    "build",
+    "target",
+    ".next",
+    "coverage",
+    "tmp",
+    "uploads",
+    "backup",
+    "backups",
+    "artifacts",
+    ".output",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".tox",
+    ".nox",
+    "htmlcov"
+  ],
+  "exclude_files": [
+    "*.backup.*",
+    "*.bak",
+    ".coverage"
+  ],
+  "exclude_exts": [],
+  "curation_exclude": [
+    "public/agent-icons/adal.png",
+    "public/agent-icons/antigravity.png",
+    "public/agent-icons/bob.png",
+    "public/agent-icons/cline.png",
+    "public/agent-icons/continue.png",
+    "public/agent-icons/cortex.png",
+    "public/agent-icons/crush.png",
+    "public/agent-icons/cursor.png",
+    "public/agent-icons/deepagents.png",
+    "public/agent-icons/github_copilot.png",
+    "public/agent-icons/goose.png",
+    "public/agent-icons/hermes.png",
+    "public/agent-icons/iflow.png",
+    "public/agent-icons/junie.png",
+    "public/agent-icons/kode.png",
+    "public/agent-icons/mcpjam.png",
+    "public/agent-icons/mux.png",
+    "public/agent-icons/neovate.png",
+    "public/agent-icons/opencode.png",
+    "public/agent-icons/openhands.png",
+    "public/agent-icons/pochi.png",
+    "public/agent-icons/qwen_code.png",
+    "public/agent-icons/replit.png",
+    "public/agent-icons/zencoder.png",
+    "src-tauri/icons/128x128.png",
+    "src-tauri/icons/128x128@2x.png",
+    "src-tauri/icons/32x32.png",
+    "src-tauri/icons/64x64.png",
+    "src-tauri/icons/Square107x107Logo.png",
+    "src-tauri/icons/Square142x142Logo.png",
+    "src-tauri/icons/Square150x150Logo.png",
+    "src-tauri/icons/Square284x284Logo.png",
+    "src-tauri/icons/Square30x30Logo.png",
+    "src-tauri/icons/Square310x310Logo.png",
+    "src-tauri/icons/Square44x44Logo.png",
+    "src-tauri/icons/Square71x71Logo.png",
+    "src-tauri/icons/Square89x89Logo.png",
+    "src-tauri/icons/StoreLogo.png",
+    "src-tauri/icons/android/mipmap-hdpi/ic_launcher.png",
+    "src-tauri/icons/android/mipmap-hdpi/ic_launcher_foreground.png",
+    "src-tauri/icons/android/mipmap-hdpi/ic_launcher_round.png",
+    "src-tauri/icons/android/mipmap-mdpi/ic_launcher.png",
+    "src-tauri/icons/android/mipmap-mdpi/ic_launcher_foreground.png",
+    "src-tauri/icons/android/mipmap-mdpi/ic_launcher_round.png",
+    "src-tauri/icons/android/mipmap-xhdpi/ic_launcher.png",
+    "src-tauri/icons/android/mipmap-xhdpi/ic_launcher_foreground.png",
+    "src-tauri/icons/android/mipmap-xhdpi/ic_launcher_round.png",
+    "src-tauri/icons/android/mipmap-xxhdpi/ic_launcher.png",
+    "src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_foreground.png",
+    "src-tauri/icons/android/mipmap-xxhdpi/ic_launcher_round.png",
+    "src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher.png",
+    "src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_foreground.png",
+    "src-tauri/icons/android/mipmap-xxxhdpi/ic_launcher_round.png",
+    "src-tauri/icons/app-icon-source.png",
+    "src-tauri/icons/icon.icns",
+    "src-tauri/icons/icon.ico",
+    "src-tauri/icons/icon.png",
+    "src-tauri/icons/ios/AppIcon-20x20@1x.png",
+    "src-tauri/icons/ios/AppIcon-20x20@2x-1.png",
+    "src-tauri/icons/ios/AppIcon-20x20@2x.png",
+    "src-tauri/icons/ios/AppIcon-20x20@3x.png",
+    "src-tauri/icons/ios/AppIcon-29x29@1x.png",
+    "src-tauri/icons/ios/AppIcon-29x29@2x-1.png",
+    "src-tauri/icons/ios/AppIcon-29x29@2x.png",
+    "src-tauri/icons/ios/AppIcon-29x29@3x.png",
+    "src-tauri/icons/ios/AppIcon-40x40@1x.png",
+    "src-tauri/icons/ios/AppIcon-40x40@2x-1.png",
+    "src-tauri/icons/ios/AppIcon-40x40@2x.png",
+    "src-tauri/icons/ios/AppIcon-40x40@3x.png",
+    "src-tauri/icons/ios/AppIcon-512@2x.png",
+    "src-tauri/icons/ios/AppIcon-60x60@2x.png",
+    "src-tauri/icons/ios/AppIcon-60x60@3x.png",
+    "src-tauri/icons/ios/AppIcon-76x76@1x.png",
+    "src-tauri/icons/ios/AppIcon-76x76@2x.png",
+    "src-tauri/icons/ios/AppIcon-83.5x83.5@2x.png"
+  ],
+  "hook_strict": false,
+  "ledger_enabled": true,
+  "line_ending_tolerance": true,
+  "cognition_refresh_threshold": 30,
+  "overview_delivery": {
+    "chunk_tokens": 8000
+  },
+  "managed_scope": {
+    "version": "managed-scope-policy/v2",
+    "profile": "production",
+    "observe_change_policy": "review_required",
+    "approval_mode": "inherit",
+    "approval_thresholds": {
+      "entry_removal_count": 25,
+      "entry_removal_percent": 25
+    },
+    "rules": []
+  },
+  "cognition_budget": {
+    "version": "cognition-budget-policy/v1",
+    "mode": "enforce",
+    "whole_index": {
+      "target_tokens": 200000,
+      "warning_tokens": 300000,
+      "max_tokens": 400000
+    },
+    "r": [
+      {
+        "min_c": 1,
+        "max_c": 4,
+        "target_tokens": 25,
+        "max_tokens": 50
+      },
+      {
+        "min_c": 5,
+        "max_c": 7,
+        "target_tokens": 45,
+        "max_tokens": 90
+      },
+      {
+        "min_c": 8,
+        "max_c": 8,
+        "target_tokens": 70,
+        "max_tokens": 140
+      },
+      {
+        "min_c": 9,
+        "max_c": 9,
+        "target_tokens": 90,
+        "max_tokens": 180
+      }
+    ],
+    "s": [
+      {
+        "min_c": 1,
+        "max_c": 4,
+        "target_tokens": 20,
+        "max_tokens": 40
+      },
+      {
+        "min_c": 5,
+        "max_c": 7,
+        "target_tokens": 40,
+        "max_tokens": 80
+      },
+      {
+        "min_c": 8,
+        "max_c": 8,
+        "target_tokens": 70,
+        "max_tokens": 140
+      },
+      {
+        "min_c": 9,
+        "max_c": 9,
+        "target_tokens": 100,
+        "max_tokens": 200
+      }
+    ]
+  },
+  "installed_agents": [
+    "opencode"
+  ],
+  "automation": {
+    "mode": "auto"
+  },
+  "ai": {
+    "enabled": false,
+    "provider": "openai-compatible",
+    "base_url": "",
+    "model": "",
+    "api_key_env": "",
+    "timeout_seconds": 0,
+    "max_concurrency": 0,
+    "max_input_tokens": 0,
+    "token_accounting": "auto",
+    "prompt_snapshot": "redacted"
+  }
+}

@@ -45,6 +45,8 @@ function apply(resolved: ResolvedTheme): void {
   if (typeof document !== "undefined") {
     document.documentElement.dataset.theme = resolved;
     document.documentElement.style.colorScheme = resolved;
+    // 同步 Nuxt UI 的暗色类，让两侧主题（data-theme 与 .dark）保持一致。
+    document.documentElement.classList.toggle("dark", resolved === "dark");
   }
 }
 

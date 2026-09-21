@@ -5,6 +5,7 @@ mod clipboard_history;
 mod connectors;
 mod daily_report;
 mod database;
+mod skills;
 mod snippets;
 mod vault;
 
@@ -53,6 +54,7 @@ fn main() {
                 })
                 .build(),
         )
+        .manage(skills::SkillsState::new())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -106,6 +108,48 @@ fn main() {
             snippets::snippet_delete,
             snippets::snippet_touch,
             snippets::snippet_copy,
+            skills::commands::skills_list_roots,
+            skills::commands::skills_add_root,
+            skills::commands::skills_remove_root,
+            skills::commands::skills_update_root_label,
+            skills::commands::skills_init_root,
+            skills::commands::skills_list_projects,
+            skills::commands::skills_add_project,
+            skills::commands::skills_remove_project,
+            skills::commands::skills_list_project_agent_dirs,
+            skills::commands::skills_scan_dir,
+            skills::commands::skills_scan,
+            skills::commands::skills_list_issues,
+            skills::commands::skills_get_detail,
+            skills::commands::skills_read_file,
+            skills::commands::skills_save,
+            skills::commands::skills_create,
+            skills::commands::skills_rename,
+            skills::commands::skills_delete,
+            skills::commands::skills_list_trash,
+            skills::commands::skills_restore_trash,
+            skills::commands::skills_purge_trash,
+            skills::commands::skills_prepare_local_source,
+            skills::commands::skills_prepare_upload_source,
+            skills::commands::skills_prepare_remote_source,
+            skills::commands::skills_remove_staging,
+            skills::commands::skills_create_install_plan,
+            skills::commands::skills_get_install_plan,
+            skills::commands::skills_cancel_install_plan,
+            skills::commands::skills_commit_install_plan,
+            skills::commands::skills_get_catalog,
+            skills::commands::skills_list_sources,
+            skills::commands::skills_add_source,
+            skills::commands::skills_remove_source,
+            skills::commands::skills_sync_source,
+            skills::commands::skills_search_skillssh,
+            skills::commands::skills_remote_detail,
+            skills::commands::skills_remote_file,
+            skills::commands::skills_list_installs,
+            skills::commands::skills_check_install_update,
+            skills::commands::skills_preview_update,
+            skills::commands::skills_apply_update,
+            skills::commands::skills_rollback_install,
             vault::vault_read,
             vault::vault_write,
             quit_app,

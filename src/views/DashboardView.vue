@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useUsageDashboard } from "@/composables/useUsageDashboard";
 import { useSubscriptions } from "@/composables/useSubscriptions";
-import { useTheme } from "@/composables/useTheme";
 import QuotaCard from "@/components/QuotaCard.vue";
 import QuotaSummary from "@/components/QuotaSummary.vue";
 import ToolBreakdown from "@/components/ToolBreakdown.vue";
@@ -14,19 +14,14 @@ import CalendarHeatmap from "@/components/CalendarHeatmap.vue";
 import TokenSummaryCard from "@/components/TokenSummaryCard.vue";
 import SettingsPanel from "@/components/SettingsPanel.vue";
 import SubscriptionManager from "@/components/SubscriptionManager.vue";
-import AboutDialog from "@/components/AboutDialog.vue";
 import SkeletonBlock from "@/components/SkeletonBlock.vue";
-import DailyReportView from "@/views/DailyReportView.vue";
-import SnippetLibraryView from "@/views/SnippetLibraryView.vue";
-import ClipboardHistoryView from "@/views/ClipboardHistoryView.vue";
-import VaultView from "@/views/VaultView.vue";
 import TodayWorkCard from "@/components/TodayWorkCard.vue";
 import OilPriceCard from "@/components/OilPriceCard.vue";
 import { useOilMonitor } from "@/composables/useOilMonitor";
 import { isTauriDesktop } from "@/connectors/types";
 import { formatTokens } from "@/utils/format";
+import { USAGE_PAGE_META } from "@/config/navigation";
 import type { RangePreset } from "@/types/usage";
-import { Button } from "@/components/ui/button";
 
 const {
   state,
@@ -52,7 +47,6 @@ const {
 } = useSubscriptions();
 const currentMonthKey = new Date().toISOString().slice(0, 7);
 const actualSpend = computed(() => monthTotalCny(currentMonthKey));
-const { pref: themePref, cycle: cycleTheme } = useTheme();
 const { sync: syncOil } = useOilMonitor();
 
 const TokenTrendChart = defineAsyncComponent(() => import("@/components/TokenTrendChart.vue"));
@@ -60,11 +54,25 @@ const PlatformDailyChart = defineAsyncComponent(
   () => import("@/components/PlatformDailyChart.vue"),
 );
 
-type WorkspaceSection = "overview" | "daily-report" | "snippets" | "clipboard" | "vault" | "analytics" | "subscriptions" | "settings";
-const activeWorkspace = ref<WorkspaceSection>("overview");
+type WorkspaceSection = "overview" | "analytics" | "subscriptions" | "settings";
+
+/** 工作区 ↔ 路由名映射：用量与设置留在本组件，工具页已拆成独立 View。 */
+const SECTION_BY_ROUTE: Record<string, WorkspaceSection> = {
+  dashboard: "overview",
+  analytics: "analytics",
+  subscriptions: "subscriptions",
+  settings: "settings",
+};
+const route = useRoute();
+const router = useRouter();
+const activeWorkspace = computed<WorkspaceSection>(
+  () => SECTION_BY_ROUTE[String(route.name)] ?? "overview",
+);
+function go(name: "analytics" | "subscriptions" | "settings" | "daily-report"): void {
+  void router.push({ name });
+}
 const subscriptionCreateSignal = ref(0);
 const settingsSyncSignal = ref(0);
-const aboutOpen = ref(false);
 const exchangeRate = ref(usdToCnyRate.value);
 const chartsReady = ref(!isTauriDesktop());
 let unlistenFocus: UnlistenFn | undefined;
@@ -161,23 +169,7 @@ const peakTone = computed(() => {
   return "ok";
 });
 
-const themeLabel = computed(() =>
-  themePref.value === "system" ? "跟随系统" : themePref.value === "dark" ? "暗色" : "亮色",
-);
-
-const pageMeta = computed(() => {
-  const pages: Record<WorkspaceSection, { group: string; crumb: string; title: string }> = {
-    overview: { group: "用量看板", crumb: "Overview", title: "用量概览" },
-    "daily-report": { group: "效率工具", crumb: "Git Report", title: "Git 报告" },
-    snippets: { group: "效率工具", crumb: "Snippets", title: "代码片段" },
-    clipboard: { group: "效率工具", crumb: "Clipboard", title: "剪贴板历史" },
-    vault: { group: "效率工具", crumb: "Vault", title: "密钥库" },
-    analytics: { group: "用量看板", crumb: "Analytics", title: "用量分析" },
-    subscriptions: { group: "用量看板", crumb: "Subscriptions", title: "订阅与账单" },
-    settings: { group: "系统", crumb: "Settings", title: "设置" },
-  };
-  return pages[activeWorkspace.value];
-});
+const pageMeta = computed(() => USAGE_PAGE_META[String(route.name)] ?? USAGE_PAGE_META.dashboard);
 
 function saveExchangeRate(): void {
   setUsdToCnyRate(exchangeRate.value);
@@ -198,144 +190,29 @@ function formatCny(value: number): string {
 </script>
 
 <template>
-  <main class="workspace-shell">
-    <aside class="rail-wrap">
-      <div class="rail">
-        <div class="rail-logo">/_</div>
-        <nav class="rail-nav" aria-label="主导航">
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'overview' }" type="button"
-            @click="activeWorkspace = 'overview'">
-            <span class="tip">用量概览</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-              stroke-linejoin="round">
-              <rect x="3" y="3" width="7" height="9" rx="2" />
-              <rect x="14" y="3" width="7" height="5" rx="2" />
-              <rect x="14" y="12" width="7" height="9" rx="2" />
-              <rect x="3" y="16" width="7" height="5" rx="2" />
-            </svg>
-          </button>
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'daily-report' }" type="button"
-            @click="activeWorkspace = 'daily-report'">
-            <span class="tip">Git 报告</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <circle cx="6" cy="6" r="2.5" />
-              <circle cx="6" cy="18" r="2.5" />
-              <circle cx="18" cy="8" r="2.5" />
-              <path d="M6 8.5v7M18 10.5c0 4-4 4.5-8 5" />
-            </svg>
-          </button>
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'snippets' }" type="button"
-            @click="activeWorkspace = 'snippets'">
-            <span class="tip">片段库</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <path d="m8 6-6 6 6 6M16 6l6 6-6 6" />
-            </svg>
-          </button>
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'clipboard' }" type="button"
-            @click="activeWorkspace = 'clipboard'">
-            <span class="tip">剪贴板历史</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <rect x="5" y="4" width="14" height="17" rx="2" />
-              <path d="M9 4a2 2 0 0 1 6 0" />
-              <path d="M9 11h6M9 15h4" />
-            </svg>
-          </button>
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'vault' }" type="button"
-            @click="activeWorkspace = 'vault'">
-            <span class="tip">密钥库</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <rect x="4" y="10" width="16" height="11" rx="2" />
-              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-            </svg>
-          </button>
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'analytics' }" type="button"
-            @click="activeWorkspace = 'analytics'">
-            <span class="tip">用量分析</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <path d="M3 3v18h18" />
-              <path d="M7 15l4-5 3 3 5-7" />
-            </svg>
-          </button>
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'subscriptions' }" type="button"
-            @click="activeWorkspace = 'subscriptions'">
-            <span class="tip">订阅与账单</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <rect x="3" y="6" width="18" height="13" rx="2" />
-              <path d="M3 10h18M7 15h4" />
-            </svg>
-          </button>
-          <button class="rail-btn" :class="{ active: activeWorkspace === 'settings' }" type="button"
-            @click="activeWorkspace = 'settings'">
-            <span class="tip">连接与设置</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-              stroke-linejoin="round">
-              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          </button>
-        </nav>
-        <div class="rail-divider" />
-        <button class="rail-btn" type="button" :title="`主题：${themeLabel}（点击切换）`" @click="cycleTheme">
-          <span class="tip">{{ themeLabel }}</span>
-          <svg v-if="themePref === 'light'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-            stroke-linecap="round">
-            <circle cx="12" cy="12" r="4.2" />
-            <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
-          </svg>
-          <svg v-else-if="themePref === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 14.5A8 8 0 1 1 9.5 4a6.3 6.3 0 0 0 10.5 10.5Z" />
-          </svg>
-          <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-            stroke-linejoin="round">
-            <rect x="3" y="4" width="18" height="12" rx="2" />
-            <path d="M8 20h8" />
-            <path d="M12 16v4" />
-          </svg>
-        </button>
-        <button class="rail-btn" type="button" title="关于" @click="aboutOpen = true">
-          <span class="tip">关于</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-            stroke-linejoin="round">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 11v5" />
-            <circle cx="12" cy="7.5" r="0.6" fill="currentColor" />
-          </svg>
-        </button>
-        <button class="sync-chip" type="button"
-          :class="{ syncing: isSyncing, error: syncError && !isPartialSync, warn: isPartialSync }"
-          :title="syncError ? `${isPartialSync ? '部分数据未更新' : '同步出错'}：${syncError}` : '点击立即同步'" @click="syncEverything">
-          <i class="sync-dot" />
-          <span class="t1">{{ syncText }}</span>
-          <span class="t2">点击同步</span>
-        </button>
-      </div>
-    </aside>
-
-    <section class="workspace-main content" :class="{ 'snippet-workspace': activeWorkspace === 'snippets', 'clipboard-workspace-shell': activeWorkspace === 'clipboard' }">
-      <header v-if="activeWorkspace !== 'snippets'" class="topbar">
-        <div>
-          <div class="crumb">{{ pageMeta.group }} <span>/</span> {{ pageMeta.crumb }}</div>
-          <h1>{{ pageMeta.title }}</h1>
-        </div>
-        <div class="topbar-actions">
+  <UDashboardPanel id="usage">
+    <template #header>
+      <UDashboardNavbar :title="pageMeta.title" :description="pageMeta.group">
+        <template #leading>
+          <UDashboardSidebarCollapse />
+        </template>
+        <template #right>
           <template v-if="activeWorkspace === 'overview'">
-            <span class="conn-pill" :class="{ off: !quotaPlatformCount }">
-              <i class="dot" />{{ quotaPlatformCount || "0" }} 个平台已连接
+            <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-muted">
+              <i class="size-1.5 rounded-full" :class="quotaPlatformCount ? 'bg-primary' : 'bg-dimmed'" />
+              {{ quotaPlatformCount || "0" }} 个平台已连接
             </span>
-            <button class="btn-outline-sm" type="button" :disabled="isSyncing" @click="syncEverything">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                stroke-linejoin="round">
-                <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />
-              </svg>
+            <span class="hidden md:inline text-xs text-dimmed">{{ syncText }}</span>
+            <UButton
+              icon="i-lucide-refresh-cw"
+              color="neutral"
+              variant="outline"
+              size="sm"
+              :loading="isSyncing"
+              @click="syncEverything"
+            >
               {{ isSyncing ? "同步中…" : "同步全部" }}
-            </button>
+            </UButton>
           </template>
           <div v-else-if="activeWorkspace === 'analytics'" class="range-switch" role="group" aria-label="统计周期">
             <button v-for="r in RANGES" :key="r.preset" type="button" :class="{ on: state.range === r.preset }"
@@ -344,43 +221,61 @@ function formatCny(value: number): string {
           <template v-else-if="activeWorkspace === 'subscriptions'">
             <label class="rate-field">1 USD = ¥ <input v-model.number="exchangeRate" type="number" min="0.01"
                 step="0.01" @change="saveExchangeRate" /></label>
-            <button class="btn-primary" type="button" @click="subscriptionCreateSignal += 1">+ 新增订阅</button>
+            <UButton icon="i-lucide-plus" size="sm" @click="subscriptionCreateSignal += 1">新增订阅</UButton>
           </template>
-          <Button v-else-if="activeWorkspace === 'settings'" type="button"
-            @click="settingsSyncSignal += 1">立即同步</Button>
-        </div>
-      </header>
+          <UButton v-else-if="activeWorkspace === 'settings'" size="sm"
+            @click="settingsSyncSignal += 1">立即同步</UButton>
+        </template>
+      </UDashboardNavbar>
+    </template>
+    <template #body>
+      <div class="workspace-main">
       <div class="page-scroll">
         <template v-if="activeWorkspace === 'overview'">
-          <div v-if="syncError && !isPartialSync" class="banner banner-error" @click="syncEverything">
-            <span class="banner-dot" />
-            <span class="banner-text">同步出错：{{ syncError }}</span>
-            <span class="banner-hint">点击重试</span>
-          </div>
-          <div v-else-if="syncError" class="banner banner-warn" @click="syncEverything">
-            <span class="banner-dot" />
-            <span class="banner-text">部分数据未更新：{{ syncIssueText }}</span>
-            <span class="banner-hint">点击重试</span>
-          </div>
-          <div v-else-if="!state.sync.lastSyncAt && !hasData" class="banner banner-empty" @click="syncEverything">
-            <span class="banner-dot" />
-            <span class="banner-text">暂无数据 · 从本机 CLI 拉取真实用量</span>
-            <span class="banner-hint">立即同步</span>
-          </div>
+          <UAlert
+            v-if="syncError && !isPartialSync"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            title="同步出错"
+            :description="syncError"
+            class="cursor-pointer"
+            @click="syncEverything"
+          />
+          <UAlert
+            v-else-if="syncError"
+            color="warning"
+            variant="subtle"
+            icon="i-lucide-triangle-alert"
+            title="部分数据未更新"
+            :description="syncIssueText"
+            class="cursor-pointer"
+            @click="syncEverything"
+          />
+          <UAlert
+            v-else-if="!state.sync.lastSyncAt && !hasData"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-cloud-download"
+            title="暂无数据 · 从本机 CLI 拉取真实用量"
+            description="点击立即同步"
+            class="cursor-pointer"
+            @click="syncEverything"
+          />
 
           <!-- 账务指标优先，用量指标作为补充运营信号。 -->
           <section class="cockpit" aria-label="关键指标">
             <div class="cell">
               <span class="cell-label">订阅月支出 · 计划</span>
               <strong class="cell-value">{{ formatCny(monthlyCny) }}</strong>
-              <button class="cell-meta link" type="button" @click="activeWorkspace = 'subscriptions'">
+              <button class="cell-meta link" type="button" @click="go('subscriptions')">
                 {{ activeSubs.length }} 项活跃订阅 →
               </button>
             </div>
             <div class="cell">
               <span class="cell-label">本月实际支出 · 已记</span>
               <strong class="cell-value">{{ formatCny(actualSpend) }}</strong>
-              <button class="cell-meta link" type="button" @click="activeWorkspace = 'subscriptions'">
+              <button class="cell-meta link" type="button" @click="go('subscriptions')">
                 查看账单流水 →
               </button>
             </div>
@@ -403,19 +298,11 @@ function formatCny(value: number): string {
           </section>
 
           <div class="overview-stack">
-            <OilPriceCard @configure="activeWorkspace = 'settings'" />
-            <TodayWorkCard @open="activeWorkspace = 'daily-report'" />
-            <QuotaSummary :views="quotas" @navigate="activeWorkspace = 'subscriptions'" />
+            <OilPriceCard @configure="go('settings')" />
+            <TodayWorkCard @open="go('daily-report')" />
+            <QuotaSummary :views="quotas" @navigate="go('subscriptions')" />
           </div>
         </template>
-
-        <DailyReportView v-else-if="activeWorkspace === 'daily-report'" />
-
-        <SnippetLibraryView v-else-if="activeWorkspace === 'snippets'" />
-
-        <ClipboardHistoryView v-else-if="activeWorkspace === 'clipboard'" />
-
-        <VaultView v-else-if="activeWorkspace === 'vault'" />
 
         <template v-else-if="activeWorkspace === 'analytics'">
           <section v-if="firstLoading" class="stats stats-5" aria-label="加载中">
@@ -481,9 +368,9 @@ function formatCny(value: number): string {
                 <h2>套餐额度</h2>
                 <p>{{ quotaPlatformCount }} 个平台 · {{ quotas.length }} 个套餐的可用额度与重置时间</p>
               </div>
-              <Button type="button" variant="outline" size="sm" @click="activeWorkspace = 'settings'">
+              <UButton color="neutral" variant="outline" size="sm" @click="go('settings')">
                 显示设置
-              </Button>
+              </UButton>
             </div>
             <div class="quota-grid">
               <QuotaCard v-for="view in quotas" :key="view.id" :view="view" />
@@ -496,209 +383,17 @@ function formatCny(value: number): string {
 
         <SettingsPanel v-else embedded :sync-signal="settingsSyncSignal" @synced="syncEverything" />
       </div>
-    </section>
-
-    <AboutDialog v-model:open="aboutOpen" />
-  </main>
+      </div>
+    </template>
+  </UDashboardPanel>
 </template>
 
 <style scoped>
-.workspace-shell {
-  display: flex;
-  width: 100%;
-  height: 100vh;
-  min-height: 0;
-  gap: 14px;
-  padding: 16px;
-  overflow: hidden;
-  background: var(--bg);
-}
-
-.rail-wrap {
-  position: relative;
-  z-index: 20;
-  display: flex;
-  width: 68px;
-  height: 100%;
-  flex: 0 0 68px;
-}
-
-.rail {
-  display: flex;
-  width: 100%;
-  min-height: 0;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 14px 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-}
-
-.rail-logo {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  margin-bottom: 10px;
-  border-radius: 10px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 750;
-  letter-spacing: -0.04em;
-}
-
-.rail-nav {
-  display: flex;
-  width: 100%;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-}
-
-.rail-btn {
-  position: relative;
-  display: grid;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text-subtle);
-  cursor: pointer;
-  transition: background-color 0.16s ease, color 0.16s ease;
-}
-
-.rail-btn svg {
-  width: 18px;
-  height: 18px;
-}
-
-.rail-btn:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.rail-btn.active {
-  background: var(--accent-weak);
-  color: var(--accent);
-}
-
-.rail-btn.active::before {
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: -13px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent);
-  content: "";
-}
-
-.rail-btn:focus-visible,
-.sync-chip:focus-visible,
 .range-switch button:focus-visible,
-.btn-primary:focus-visible,
 .cell-meta.link:focus-visible {
   outline: 2px solid var(--accent-ring);
   outline-offset: 2px;
 }
-
-.tip {
-  position: absolute;
-  top: 50%;
-  left: 54px;
-  z-index: 30;
-  padding: 6px 9px;
-  transform: translateY(-50%);
-  border-radius: 6px;
-  background: var(--text);
-  box-shadow: var(--shadow-pop);
-  color: var(--surface);
-  font-size: 11px;
-  line-height: 1;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.14s ease;
-}
-
-.rail-btn:hover .tip {
-  opacity: 1;
-}
-
-.rail-divider {
-  width: 24px;
-  height: 1px;
-  margin: 7px 0;
-  background: var(--border);
-}
-
-.sync-chip {
-  display: flex;
-  width: 56px;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  margin-top: 3px;
-  padding: 8px 2px 7px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.sync-chip:hover {
-  background: var(--surface-2);
-}
-
-.sync-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--u-ok);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--u-ok) 15%, transparent);
-}
-
-.sync-chip.warn .sync-dot {
-  background: var(--u-warn);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--u-warn) 15%, transparent);
-}
-
-.sync-chip.error .sync-dot {
-  background: var(--u-crit);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--u-crit) 15%, transparent);
-}
-
-.sync-chip.syncing .sync-dot {
-  animation: pulse 1s ease-in-out infinite;
-}
-
-.sync-chip .t1 {
-  max-width: 52px;
-  overflow: hidden;
-  font-size: 9.5px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sync-chip .t2 {
-  color: var(--text-subtle);
-  font-size: 9px;
-}
-
 .workspace-main {
   display: flex;
   min-width: 0;
@@ -707,105 +402,6 @@ function formatCny(value: number): string {
   flex-direction: column;
   gap: 12px;
 }
-
-.topbar {
-  display: flex;
-  min-height: 56px;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 6px 6px 8px;
-}
-
-.crumb {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 3px;
-  color: var(--text-subtle);
-  font-size: 12px;
-}
-
-.crumb span {
-  opacity: 0.55;
-}
-
-.topbar h1 {
-  margin: 0;
-  color: var(--text);
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 9px;
-}
-
-.conn-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 22px;
-  padding: 3px 10px;
-  border: 1px solid color-mix(in srgb, var(--u-ok) 30%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--u-ok) 8%, transparent);
-  color: var(--u-ok);
-  font-size: 11.5px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.conn-pill .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.conn-pill.off {
-  border-color: var(--border);
-  background: var(--surface-2);
-  color: var(--text-subtle);
-}
-
-.btn-outline-sm {
-  display: inline-flex;
-  height: 28px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: border-color 0.15s ease, color 0.15s ease;
-}
-
-.btn-outline-sm:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.btn-outline-sm:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
-.btn-outline-sm svg {
-  width: 13px;
-  height: 13px;
-}
-
 .rate-field {
   display: flex;
   align-items: center;
@@ -819,12 +415,10 @@ function formatCny(value: number): string {
   font-size: 12px;
   white-space: nowrap;
 }
-
 .rate-field:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-weak);
 }
-
 .rate-field input {
   width: 52px;
   padding: 0;
@@ -836,26 +430,6 @@ function formatCny(value: number): string {
   font-size: 12px;
   font-weight: 650;
 }
-
-.btn-primary {
-  min-height: 34px;
-  padding: 0 14px;
-  border: 1px solid var(--accent);
-  border-radius: var(--r-sm);
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 650;
-  cursor: pointer;
-  transition: background-color 0.16s ease, border-color 0.16s ease;
-}
-
-.btn-primary:hover {
-  border-color: var(--accent-hover);
-  background: var(--accent-hover);
-}
-
 .range-switch {
   display: flex;
   padding: 3px;
@@ -863,7 +437,6 @@ function formatCny(value: number): string {
   border-radius: var(--r-sm);
   background: var(--surface-2);
 }
-
 .range-switch button {
   min-height: 28px;
   padding: 0 12px;
@@ -876,18 +449,15 @@ function formatCny(value: number): string {
   font-weight: 550;
   cursor: pointer;
 }
-
 .range-switch button:hover {
   color: var(--text);
 }
-
 .range-switch button.on {
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   color: var(--accent);
   font-weight: 650;
 }
-
 .page-scroll {
   min-height: 0;
   flex: 1;
@@ -896,98 +466,24 @@ function formatCny(value: number): string {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
-
 .page-scroll::-webkit-scrollbar {
   display: none;
 }
-
-.snippet-workspace .page-scroll {
-  padding: 0;
-}
-
-.clipboard-workspace-shell .page-scroll {
-  overflow: hidden;
-}
-
 .overview-stack {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   margin-top: 14px;
 }
-
 .overview-stack > * {
   min-width: 0;
 }
-
-.banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  padding: 10px 13px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.banner-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  border-radius: 50%;
-}
-
-.banner-text {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.banner-hint {
-  flex: 0 0 auto;
-  font-weight: 600;
-}
-
-.banner-error {
-  border-color: color-mix(in srgb, var(--u-crit) 35%, var(--border));
-  background: color-mix(in srgb, var(--u-crit) 8%, var(--surface));
-  color: var(--u-crit);
-}
-
-.banner-warn {
-  border-color: color-mix(in srgb, var(--u-warn) 35%, var(--border));
-  background: color-mix(in srgb, var(--u-warn) 8%, var(--surface));
-  color: var(--u-warn);
-}
-
-.banner-empty {
-  color: var(--text-muted);
-}
-
-.banner-error .banner-dot {
-  background: var(--u-crit);
-}
-
-.banner-warn .banner-dot {
-  background: var(--u-warn);
-}
-
-.banner-empty .banner-dot {
-  background: var(--accent);
-}
-
 .cockpit {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 14px;
 }
-
 .cell {
   position: relative;
   display: flex;
@@ -1001,7 +497,6 @@ function formatCny(value: number): string {
   background: var(--surface);
   box-shadow: var(--shadow-card);
 }
-
 .cell-label {
   color: var(--text-subtle);
   font-size: 11px;
@@ -1009,7 +504,6 @@ function formatCny(value: number): string {
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-
 .cell-value {
   max-width: 100%;
   overflow: hidden;
@@ -1023,28 +517,22 @@ function formatCny(value: number): string {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-
 .cell-value small {
   margin-left: 1px;
   font-size: 13px;
 }
-
 .cell-value.muted {
   color: var(--text-subtle);
 }
-
 .cell-value.tone-ok {
   color: var(--u-ok);
 }
-
 .cell-value.tone-warn {
   color: var(--u-warn);
 }
-
 .cell-value.tone-crit {
   color: var(--u-crit);
 }
-
 .cell-delta {
   width: fit-content;
   padding: 2px 7px;
@@ -1055,17 +543,14 @@ function formatCny(value: number): string {
   font-size: 10.5px;
   font-weight: 650;
 }
-
 .cell-delta.up {
   background: color-mix(in srgb, var(--u-warn) 12%, transparent);
   color: var(--u-warn);
 }
-
 .cell-meta {
   color: var(--text-muted);
   font-size: 11.5px;
 }
-
 .cell-meta.link {
   width: fit-content;
   padding: 0;
@@ -1078,16 +563,13 @@ function formatCny(value: number): string {
   text-align: left;
   cursor: pointer;
 }
-
 .cell-meta.link:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-
 .block {
   margin-top: 16px;
 }
-
 .block-head {
   display: flex;
   align-items: flex-end;
@@ -1095,36 +577,30 @@ function formatCny(value: number): string {
   gap: 16px;
   margin-bottom: 11px;
 }
-
 .block-head h2 {
   margin: 0;
   color: var(--text);
   font-size: 15px;
   font-weight: 680;
 }
-
 .block-head p {
   margin: 3px 0 0;
   color: var(--text-subtle);
   font-size: 11.5px;
 }
-
 .quota-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
 }
-
 .stats {
   display: grid;
   gap: 12px;
 }
-
 .stats-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
-
 .skeleton-card {
   display: flex;
   min-height: 106px;
@@ -1136,7 +612,6 @@ function formatCny(value: number): string {
   background: var(--surface);
   box-shadow: var(--shadow-card);
 }
-
 .heatmap-card {
   padding: 18px 20px;
   border: 1px solid var(--border);
@@ -1144,17 +619,14 @@ function formatCny(value: number): string {
   background: var(--surface);
   box-shadow: var(--shadow-card);
 }
-
 .charts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
-
 .charts > * {
   min-width: 0;
 }
-
 .charts-placeholder {
   grid-column: 1 / -1;
   display: grid;
@@ -1166,17 +638,14 @@ function formatCny(value: number): string {
   color: var(--text-subtle);
   font-size: 12px;
 }
-
 .analytics-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
   gap: 12px;
 }
-
 .subscription-manager-wrap {
   margin-top: 16px;
 }
-
 .quota-section {
   margin-top: 0;
 }
@@ -1188,126 +657,41 @@ function formatCny(value: number): string {
 }
 
 @media (max-width: 1180px) {
-  .cockpit,
-  .stats-5 {
+.cockpit,
+.stats-5 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-
-  .overview-stack {
+.overview-stack {
     grid-template-columns: 1fr;
   }
-
-  .quota-grid {
+.quota-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 980px) {
-  .analytics-grid,
-  .charts {
+.analytics-grid,
+.charts {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 760px) {
-  .workspace-shell {
-    height: 100vh;
-    flex-direction: column;
-    gap: 10px;
-    padding: 10px;
-  }
-
-  .rail-wrap {
-    width: 100%;
-    height: 58px;
-    flex: 0 0 58px;
-  }
-
-  .rail {
-    flex-direction: row;
-    gap: 3px;
-    padding: 7px 8px;
-    overflow-x: auto;
-    border-radius: var(--r-md);
-  }
-
-  .rail-logo {
-    width: 36px;
-    height: 36px;
-    flex: 0 0 36px;
-    margin: 0 5px 0 0;
-  }
-
-  .rail-nav {
-    width: auto;
-    flex-direction: row;
-  }
-
-  .rail-btn {
-    width: 38px;
-    height: 38px;
-    flex-basis: 38px;
-  }
-
-  .rail-btn.active::before {
-    top: auto;
-    right: 10px;
-    bottom: -7px;
-    left: 10px;
-    width: auto;
-    height: 3px;
-    border-radius: 3px 3px 0 0;
-  }
-
-  .tip,
-  .rail-divider,
-  .sync-chip .t2 {
-    display: none;
-  }
-
-  .sync-chip {
-    width: 44px;
-    flex: 0 0 44px;
-    padding: 5px 2px;
-  }
-
-  .topbar {
-    min-height: auto;
-    align-items: flex-start;
-    padding: 11px 13px;
-    border-radius: var(--r-md);
-  }
-
-  .topbar-actions {
-    flex-wrap: wrap;
-  }
-
-  .page-scroll {
+.page-scroll {
     padding-right: 0;
   }
 }
 
 @media (max-width: 620px) {
-  .topbar {
-    flex-direction: column;
-  }
-
-  .topbar-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .rate-field {
+.rate-field {
     flex: 1;
   }
-
-  .cockpit,
-  .stats-5,
-  .quota-grid {
+.cockpit,
+.stats-5,
+.quota-grid {
     grid-template-columns: 1fr;
   }
-
-  .block-head {
+.block-head {
     align-items: flex-start;
     flex-direction: column;
   }

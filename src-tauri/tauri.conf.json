@@ -22,8 +22,7 @@
         "center": true,
         "visible": false,
         "titleBarStyle": "Transparent",
-        "hiddenTitle": true,
-        "theme": "Light"
+        "hiddenTitle": true
       },
       {
         "label": "tray-panel",

@@ -32,7 +32,6 @@ import { Input } from "@/components/ui/input";
 import { pushToast } from "@/composables/useToast";
 import { isTauriDesktop } from "@/connectors/types";
 import { clipboardService } from "@/services/clipboard-service";
-import HighlightedCode from "@/components/HighlightedCode.vue";
 import type {
     ClipboardFilePreview,
     ClipboardItem,
@@ -40,9 +39,6 @@ import type {
     ClipboardScope,
     ClipboardStatus,
 } from "@/types/clipboard";
-import {
-    detectClipboardCodeLanguage,
-} from "@/utils/clipboard-content";
 
 interface ClipboardGroup {
     key: string;
@@ -81,10 +77,6 @@ const scopes: { value: ClipboardScope; label: string; icon: typeof Clipboard }[]
 ];
 
 const selected = computed(() => items.value.find((item) => item.id === selectedId.value) ?? null);
-const codeLanguage = computed(() => selected.value?.kind === "text" ? detectClipboardCodeLanguage(selected.value.content) : null);
-const fileCodeLanguage = computed(() => filePreview.value?.kind === "text" && filePreview.value.content
-    ? detectClipboardCodeLanguage(filePreview.value.content)
-    : null);
 const unpinnedCount = computed(() => Math.max(0, ( status.value?.total ?? 0 ) - ( status.value?.pinned ?? 0 )));
 const groups = computed<ClipboardGroup[]>(() => {
     const grouped = new Map<string, ClipboardGroup>();
@@ -546,10 +538,7 @@ onUnmounted(() => {
                             </div>
                         </header>
                         <div :class="{ 'file-preview-body': selected.kind === 'files' }" class="preview-body">
-                            <HighlightedCode v-if="selected.kind === 'text' && codeLanguage"
-                                             :code="selected.content" :language="codeLanguage"
-                                             appearance="light" class="clipboard-code-preview"/>
-                            <pre v-else-if="selected.kind === 'text'">{{ selected.content }}</pre>
+                            <pre v-if="selected.kind === 'text'">{{ selected.content }}</pre>
                             <div v-else-if="selected.kind === 'image'" class="image-preview"><img v-if="imageDataUrl"
                                                                                                   :src="imageDataUrl"
                                                                                                   alt="剪贴板图片预览"/><span
@@ -577,11 +566,7 @@ onUnmounted(() => {
                                          :alt="filePreview.name" :src="filePreview.dataUrl"/>
                                     <iframe v-else-if="filePreview?.kind === 'pdf' && filePreview.dataUrl"
                                             :src="filePreview.dataUrl" :title="filePreview.name"/>
-                                    <HighlightedCode
-                                        v-else-if="filePreview?.kind === 'text' && filePreview.content && fileCodeLanguage"
-                                        :code="filePreview.content" :language="fileCodeLanguage"
-                                        appearance="light" class="clipboard-code-preview file-code-preview"/>
-                                    <pre v-else-if="filePreview?.kind === 'text'">{{ filePreview.content }}</pre>
+                                    <pre v-if="filePreview?.kind === 'text'">{{ filePreview.content }}</pre>
                                     <div v-else-if="filePreview" class="file-preview-state">
                                         <File :size="30"/>
                                         <strong>无法预览此文件</strong><span>{{
@@ -1138,14 +1123,6 @@ onUnmounted(() => {
     max-height: 420px;
     object-fit: contain;
     border-radius: 7px;
-}
-
-.clipboard-code-preview {
-    min-height: 100%;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 1.7;
 }
 
 .preview-body.file-preview-body {

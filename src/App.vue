@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
-import DashboardView from "@/views/DashboardView.vue";
 import ToastHost from "@/components/ToastHost.vue";
+import AppLayout from "@/layouts/AppLayout.vue";
 import { isTauriDesktop } from "@/connectors/types";
 import { clipboardService } from "@/services/clipboard-service";
 
@@ -20,6 +20,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <DashboardView />
+  <UApp>
+    <AppLayout />
+  </UApp>
   <ToastHost />
 </template>

@@ -8,12 +8,16 @@ import {
   LayoutGrid,
   Plug,
   ShieldAlert,
+  Sparkles,
   Sun,
 } from "lucide-vue-next";
 import { httpGet, isTauriDesktop } from "@/connectors/types";
 import { clipboardService } from "@/services/clipboard-service";
+import { dailyReportService } from "@/services/daily-report-service";
+import { AI_PROVIDERS, AI_PROVIDER_OPTIONS, aiModelOptions } from "@/config/ai-providers";
 import { pushToast } from "@/composables/useToast";
 import type { ClipboardSettingsDraft, ClipboardStatus } from "@/types/clipboard";
+import type { AiProvider } from "@/types/daily-report";
 import { useUsageDashboard } from "@/composables/useUsageDashboard";
 import { useTheme } from "@/composables/useTheme";
 import type { OilGrade } from "@/types/oil";
@@ -188,6 +192,43 @@ const arkStatus = ref<{ checking: boolean; ok: boolean | null; message: string }
 });
 const saved = ref(false);
 
+// ---- AI 报告（Git 日报 / 周报）：读写 daily-report 偏好 ----
+const reportPrefs = ref(dailyReportService.loadPreferences());
+const reportProvider = ref<AiProvider>("minimax");
+const reportModel = ref("");
+const reportApiKey = ref("");
+const reportProviderOptions = AI_PROVIDER_OPTIONS;
+const reportModelOptions = computed(() => aiModelOptions(reportProvider.value));
+
+function fillReportAi(): void {
+  reportPrefs.value = dailyReportService.loadPreferences();
+  const provider = reportPrefs.value.ai?.provider ?? "minimax";
+  reportProvider.value = provider;
+  reportModel.value = reportPrefs.value.ai?.model ?? AI_PROVIDERS[provider].models[0];
+  reportApiKey.value = reportPrefs.value.aiApiKeys?.[provider] ?? "";
+}
+
+function persistReportAi(): void {
+  const prefs = { ...reportPrefs.value };
+  prefs.ai = { provider: reportProvider.value, model: reportModel.value };
+  prefs.aiApiKeys = {
+    ...prefs.aiApiKeys,
+    [reportProvider.value]: reportApiKey.value.trim(),
+  };
+  reportPrefs.value = prefs;
+  dailyReportService.savePreferences(prefs);
+  saved.value = true;
+}
+
+function changeReportProvider(value: string): void {
+  const next = value as AiProvider;
+  persistReportAi();
+  reportProvider.value = next;
+  reportModel.value = AI_PROVIDERS[next].models[0];
+  reportApiKey.value = reportPrefs.value.aiApiKeys?.[next] ?? "";
+  persistReportAi();
+}
+
 // 常见时区选项（含跟随系统）。
 const TIMEZONE_OPTIONS = [
   "Asia/Shanghai",
@@ -312,6 +353,7 @@ watch(
     if (v || props.embedded) {
       saved.value = false;
       fillForm();
+      fillReportAi();
       checkArkStatus();
       void loadClipboardStatus();
     }
@@ -616,6 +658,40 @@ function updateStatsSince(value: string): void {
 
         <!-- ===================== 高级 ===================== -->
         <template v-else>
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-accent"><Sparkles :size="18" /></span>
+              <span class="sec-copy">
+                <strong>AI 报告</strong>
+                <small>Git 日报 / 周报使用的 Provider、模型与 API Key（仅保存在本机）</small>
+              </span>
+            </div>
+            <div class="sec-body">
+              <div class="setting-row">
+                <div class="setting-copy"><strong>Provider</strong><span>生成报告使用的 AI 服务</span></div>
+                <Select
+                  :model-value="reportProvider"
+                  :options="reportProviderOptions"
+                  placeholder="选择 Provider"
+                  @update:model-value="changeReportProvider"
+                />
+              </div>
+              <div class="pref-grid">
+                <label class="pref-field">
+                  <span>模型</span>
+                  <Select v-model="reportModel" :options="reportModelOptions" placeholder="选择模型"
+                    @update:model-value="persistReportAi" />
+                </label>
+                <label class="pref-field">
+                  <span>API Key</span>
+                  <Input v-model="reportApiKey" type="password" autocomplete="off" placeholder="本机保存"
+                    @change="persistReportAi" />
+                </label>
+              </div>
+              <p class="pref-note">修改后立即保存；Git 报告页按此处配置生成内容。</p>
+            </div>
+          </section>
+
           <section class="sec">
             <div class="sec-head solo">
               <span class="sec-icon tone-info"><Database :size="18" /></span>

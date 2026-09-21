@@ -460,7 +460,7 @@ async function copyReport(): Promise<void> {
           <button type="button" role="tab" :aria-selected="workspaceTab === 'report'" :class="{ active: workspaceTab === 'report' }" @click="workspaceTab = 'report'">报告预览</button>
           <button type="button" role="tab" :aria-selected="workspaceTab === 'commits'" :class="{ active: workspaceTab === 'commits' }" @click="workspaceTab = 'commits'">Git 记录<span v-if="hasLoaded">{{ totalCommitCount }}</span></button>
         </div>
-        <code>{{ selectedProjects.length }} 个仓库已连接</code>
+        <span class="badge">{{ hasLoaded ? `${totalCommitCount} 条提交` : `${selectedProjects.length} 个仓库` }}</span>
       </header>
 
       <section v-if="workspaceTab === 'report'" class="canvas-body">
@@ -555,7 +555,7 @@ async function copyReport(): Promise<void> {
 .type-segment {
   gap: 2px;
   padding: 3px;
-  border: 0;
+  border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--segment-bg);
 }
@@ -572,18 +572,18 @@ async function copyReport(): Promise<void> {
 
 .type-segment button {
   min-width: 52px;
-  padding: 7px 12px;
+  padding: 5px 11px;
   border-radius: 5px;
   background: transparent;
-  color: var(--report-muted);
-  font-size: 13px;
-  font-weight: 650;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .type-segment button.active {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 24%, transparent);
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-sm);
 }
 
 .person-icon {
@@ -640,13 +640,12 @@ async function copyReport(): Promise<void> {
   backdrop-filter: blur(20px) saturate(150%);
 }
 
-.canvas-tabs { min-height: 51px; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--report-line); }
-.canvas-tabs > div { align-self: stretch; gap: 22px; }
-.canvas-tabs button { position: relative; align-self: stretch; padding: 0; background: transparent; color: var(--report-muted); font-size: 13px; }
-.canvas-tabs button.active { color: var(--accent); font-weight: 700; }
-.canvas-tabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--accent); content: ""; }
-.canvas-tabs button span { display: inline-grid; min-width: 17px; height: 17px; place-items: center; margin-left: 6px; border-radius: 999px; background: color-mix(in srgb, var(--text) 7%, transparent); font-family: var(--font-mono); font-size: 9px; }
-.canvas-tabs > code { color: var(--report-muted); font-family: var(--font-mono); font-size: 11px; }
+.canvas-tabs { min-height: 51px; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--report-line); }
+.canvas-tabs > div { align-self: center; gap: 2px; padding: 3px; border: 1px solid var(--report-line); border-radius: 7px; background: var(--segment-bg); }
+.canvas-tabs button { min-width: 72px; padding: 5px 11px; border: 0; border-radius: 5px; background: transparent; color: var(--report-muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.canvas-tabs button.active { background: var(--surface); box-shadow: var(--shadow-sm); color: var(--accent); }
+.canvas-tabs button span { display: inline-grid; min-width: 16px; height: 16px; place-items: center; margin-left: 6px; border-radius: 999px; background: var(--accent-weak); color: var(--accent); font-family: var(--font-mono); font-size: 9px; font-weight: 650; }
+.canvas-tabs > .badge { margin-left: auto; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text-muted); font-size: 11px; font-weight: 650; }
 .canvas-body { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: auto; }
 
 .empty-state,
@@ -659,11 +658,11 @@ async function copyReport(): Promise<void> {
 .loading-state i { width: 8px; height: 15px; margin-left: 3px; background: var(--report-ink); animation: cursor-blink 1s step-end infinite; }
 @keyframes cursor-blink { 50% { opacity: 0; } }
 
-.report-document { display: flex; min-height: 100%; flex-direction: column; padding: 22px 24px 26px; }
-.document-head { justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--report-line); }
-.document-head > div { gap: 7px; color: var(--report-muted); font-family: var(--font-mono); font-size: 11px; }
-.document-head strong { color: var(--report-ink); font-weight: 700; }
-.document-head button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 11px; border: 1px solid var(--report-line-strong); border-radius: 6px; background: transparent; color: var(--report-soft); font-size: 11px; }
+.report-document { display: flex; min-height: 100%; flex-direction: column; padding: 0 24px 26px; }
+.document-head { justify-content: space-between; gap: 16px; margin: 0 -24px 14px; padding: 14px 20px; border-bottom: 1px solid var(--report-line); background: var(--surface-2); }
+.document-head > div { gap: 9px; color: var(--report-muted); font-size: 11.5px; }
+.document-head strong { color: var(--report-ink); font-size: 13.5px; font-weight: 700; }
+.document-head button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border: 1px solid var(--report-line-strong); border-radius: 6px; background: var(--surface); color: var(--report-soft); font-size: 11.5px; font-weight: 600; }
 .document-head button:hover:not(:disabled),
 .document-head button.copied { border-color: var(--accent); color: var(--accent); }
 .document-head button:disabled { cursor: not-allowed; opacity: .4; }
@@ -673,7 +672,7 @@ async function copyReport(): Promise<void> {
 
 .commit-list { padding: 6px 22px 22px; }
 .commit-row { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 11px 4px; border-bottom: 1px solid var(--report-line); }
-.commit-row > code { padding: 2px 5px; border-radius: 4px; background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--report-soft); font-family: var(--font-mono); font-size: 10px; text-align: center; }
+.commit-row > code { padding: 2px 7px; border-radius: 5px; background: var(--accent-weak); color: var(--accent); font-family: var(--font-mono); font-size: 11px; text-align: center; }
 .commit-row > div { display: grid; min-width: 0; gap: 2px; }
 .commit-row strong { overflow: hidden; font-size: 12.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .commit-row span,

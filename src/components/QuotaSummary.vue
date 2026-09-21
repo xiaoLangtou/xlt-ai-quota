@@ -54,25 +54,24 @@ const rows = computed<Row[]>(() =>
   <article class="qsummary">
     <div class="qsummary-head">
       <div>
-        <h2>订阅额度</h2>
-        <p>{{ platformCount }} 个平台 · {{ views.length }} 个套餐</p>
+        <h2>配额摘要</h2>
+        <p>按平台聚合的额度使用率 · {{ platformCount }} 个平台</p>
       </div>
       <Button class="qsummary-link" type="button" variant="ghost" size="sm" @click="emit('navigate')">
-        前往订阅与账单 →
+        详情 →
       </Button>
     </div>
     <ul class="qsummary-rows">
       <li v-for="r in rows" :key="r.id" class="qrow">
         <span class="qname">
-          <ToolLogo :platform="r.platform" :size="18" />
+          <ToolLogo :platform="r.platform" :size="15" />
           {{ r.name }}
-          <em class="qtag">{{ r.planTag }}</em>
         </span>
         <template v-if="r.pct != null">
           <div class="qbar">
             <span :class="r.tone" :style="{ width: `${Math.min(100, r.pct)}%` }" />
           </div>
-          <span class="qval" :class="r.tone">{{ r.exhausted ? "已耗尽" : `${r.pct}%` }}</span>
+          <span class="qval" :class="r.tone">{{ r.exhausted ? "耗尽" : `${r.pct}%` }}</span>
         </template>
         <template v-else>
           <span class="qnote">{{ r.note }}</span>
@@ -85,8 +84,10 @@ const rows = computed<Row[]>(() =>
 
 <style scoped>
 .qsummary {
-  padding-bottom: 4px;
-  overflow: hidden;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  padding: 16px 18px;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
@@ -95,77 +96,66 @@ const rows = computed<Row[]>(() =>
 
 .qsummary-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 15px 18px 8px;
+  gap: 10px;
 }
 
 .qsummary-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   color: var(--text);
-  font-size: 15px;
-  font-weight: 680;
+  font-size: 13.5px;
+  font-weight: 700;
 }
 
 .qsummary-head p {
-  margin: 3px 0 0;
+  margin: 2px 0 0;
   color: var(--text-subtle);
   font-size: 11.5px;
 }
 
 .qsummary-link {
   flex: 0 0 auto;
-  height: 28px;
+  height: 24px;
   padding: 0 6px;
   color: var(--accent);
   font-size: 11.5px;
 }
 
 .qsummary-rows {
-  margin: 0;
+  margin: 10px 0 0;
   padding: 0;
   list-style: none;
 }
 
 .qrow {
   display: grid;
-  min-height: 46px;
-  grid-template-columns: 175px minmax(120px, 1fr) 66px;
+  grid-template-columns: minmax(76px, 92px) minmax(60px, 1fr) 40px;
   align-items: center;
-  gap: 14px;
-  padding: 9px 18px;
-  border-top: 1px solid var(--border);
+  gap: 9px;
+  padding: 6px 0;
+  font-size: 12.5px;
 }
 
 .qname {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 8px;
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 620;
-}
-
-.qtag {
+  gap: 7px;
   overflow: hidden;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: var(--surface-3);
-  color: var(--text-subtle);
-  font-size: 9.5px;
-  font-style: normal;
-  font-weight: 600;
-  text-overflow: ellipsis;
+  color: var(--text);
+  font-weight: 550;
   white-space: nowrap;
 }
 
 .qbar {
-  height: 5px;
+  height: 6px;
   overflow: hidden;
   border-radius: 999px;
-  background: var(--track);
+  background: var(--surface-3);
 }
 
 .qbar span {
@@ -177,7 +167,7 @@ const rows = computed<Row[]>(() =>
 }
 
 .qbar span.ok {
-  background: var(--u-ok);
+  background: var(--accent);
 }
 
 .qbar span.warn {
@@ -189,16 +179,11 @@ const rows = computed<Row[]>(() =>
 }
 
 .qval {
-  width: 66px;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: 11.5px;
   font-weight: 650;
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-
-.qval.ok {
-  color: var(--text);
 }
 
 .qval.warn {
@@ -216,27 +201,8 @@ const rows = computed<Row[]>(() =>
 
 .qnote {
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@media (max-width: 640px) {
-  .qsummary-head {
-    align-items: flex-start;
-  }
-
-  .qrow {
-    grid-template-columns: 1fr 52px;
-    padding: 10px 16px;
-  }
-
-  .qname {
-    grid-column: 1 / -1;
-  }
-
-  .qval {
-    width: 52px;
-  }
 }
 </style>

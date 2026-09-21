@@ -65,7 +65,7 @@ export interface ConnectorConfigPersist {
   preferences?: UsagePreferences;
   ark?: { baseUrl?: string };
   /** 国内油价监控；API Key 可选，省份为空时不启动采集。 */
-  oil?: { province?: string; apiKey?: string };
+  oil?: { province?: string; apiKey?: string; grade?: string };
   /** 套餐额度区域中由用户隐藏的平台或方舟套餐。 */
   quotaDisplay?: { hiddenPlatforms?: QuotaDisplayTarget[] };
 }

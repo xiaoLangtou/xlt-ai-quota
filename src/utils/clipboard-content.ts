@@ -9,11 +9,20 @@ const URL_PATTERN = /https?:\/\/[^\s<>{}\[\]"'，。；！？、]+/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const COLOR_PATTERN = /(?:^|(?<=\s))(?:#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8})(?=$|\s|[,;.)])/gi;
 
+// 检测只扫描内容前缀：对整段超长文本跑正则/JSON.parse 会拖慢选中预览，
+// 而链接、邮箱、色值与语言特征基本都出现在开头，扫描前缀已足够。
+const MAX_SCAN_LENGTH = 20_000;
+
+function scanPrefix(content: string): string {
+  return content.length > MAX_SCAN_LENGTH ? content.slice(0, MAX_SCAN_LENGTH) : content;
+}
+
 function stripTrailingPunctuation(value: string): string {
   return value.replace(/[.,;:!?)]*$/, "");
 }
 
 export function detectClipboardSpecialContent(content: string): ClipboardSpecialContent[] {
+  const scan = scanPrefix(content);
   const detected: ClipboardSpecialContent[] = [];
   const seen = new Set<string>();
   const collect = (kind: ClipboardSpecialKind, values: string[]) => {
@@ -26,14 +35,14 @@ export function detectClipboardSpecialContent(content: string): ClipboardSpecial
       if (detected.length === 8) return;
     }
   };
-  collect("url", content.match(URL_PATTERN) ?? []);
-  if (detected.length < 8) collect("email", content.match(EMAIL_PATTERN) ?? []);
-  if (detected.length < 8) collect("color", content.match(COLOR_PATTERN) ?? []);
+  collect("url", scan.match(URL_PATTERN) ?? []);
+  if (detected.length < 8) collect("email", scan.match(EMAIL_PATTERN) ?? []);
+  if (detected.length < 8) collect("color", scan.match(COLOR_PATTERN) ?? []);
   return detected;
 }
 
 export function detectClipboardCodeLanguage(content: string): string | null {
-  const value = content.trim();
+  const value = scanPrefix(content).trim();
   if (!value) return null;
   if ((value.startsWith("{") || value.startsWith("[")) && (() => {
     try { JSON.parse(value); return true; }

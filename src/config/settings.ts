@@ -1,5 +1,8 @@
 import { createStorage } from "@/storage/web-storage";
 import { QUOTA_DISPLAY_TARGETS, type QuotaDisplayTarget } from "@/types/usage";
+import type { OilGrade } from "@/types/oil";
+
+const OIL_GRADES: readonly OilGrade[] = ["92", "95", "98", "0"];
 
 const storage = createStorage();
 
@@ -21,23 +24,27 @@ export const settings = {
     storage.saveConnectorConfig({ ...full, ark: { baseUrl } });
   },
 
-  getOilConfig(): { province: string; apiKey: string } {
+  getOilConfig(): { province: string; apiKey: string; grade: OilGrade } {
     const cfg = storage.getConnectorConfig().oil ?? {};
+    const grade = OIL_GRADES.includes(cfg.grade as OilGrade) ? (cfg.grade as OilGrade) : "92";
     return {
       province: cfg.province?.trim() ?? "",
       apiKey: cfg.apiKey?.trim() ?? "",
+      grade,
     };
   },
 
-  saveOilConfig(config: { province: string; apiKey: string }): void {
+  saveOilConfig(config: { province: string; apiKey: string; grade?: OilGrade }): void {
     const full = storage.getConnectorConfig();
     const province = config.province.trim();
     const apiKey = config.apiKey.trim();
+    const grade = config.grade ?? full.oil?.grade;
     storage.saveConnectorConfig({
       ...full,
       oil: {
         ...(province ? { province } : {}),
         ...(apiKey ? { apiKey } : {}),
+        ...(grade ? { grade } : {}),
       },
     });
   },

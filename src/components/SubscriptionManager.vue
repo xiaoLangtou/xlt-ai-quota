@@ -430,9 +430,10 @@ watch(usdToCnyRate, (value) => {
             <Tabs v-model="activeView" class="workspace-tabs">
               <div class="ws-bar">
                 <TabsList aria-label="订阅工作区">
-                  <TabsTrigger value="subscriptions">订阅</TabsTrigger>
+                  <TabsTrigger value="subscriptions">订阅列表</TabsTrigger>
                   <TabsTrigger value="bills">账单流水</TabsTrigger>
                 </TabsList>
+                <span class="ws-badge">月均 {{ formatMoney(monthlyCny, "CNY") }}</span>
                 <div class="ws-actions">
                   <template v-if="activeView === 'subscriptions'">
                     <label class="toolbar-rate"><span>USD 汇率</span><b>1 USD = ¥</b><Input v-model="exchangeRate" type="number" min="0.01" step="0.01" @change="saveExchangeRate" /></label>
@@ -846,11 +847,22 @@ watch(usdToCnyRate, (value) => {
 .ws-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 14px;
   margin-bottom: 14px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border);
+}
+
+.ws-badge {
+  margin-left: auto;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 .ws-actions {

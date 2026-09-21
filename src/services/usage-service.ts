@@ -1,4 +1,5 @@
 import { settings } from "@/config/settings";
+import type { OilGrade } from "@/types/oil";
 import { createStorage } from "@/storage/web-storage";
 import type { UsageStorage } from "@/storage/storage";
 import {
@@ -706,10 +707,10 @@ export class UsageService {
   saveArkBaseUrl(baseUrl: string): void {
     settings.saveArkBaseUrl(baseUrl);
   }
-  getOilConfigView(): { province: string; apiKey: string } {
+  getOilConfigView(): { province: string; apiKey: string; grade: OilGrade } {
     return settings.getOilConfig();
   }
-  saveOilConfig(config: { province: string; apiKey: string }): void {
+  saveOilConfig(config: { province: string; apiKey: string; grade?: OilGrade }): void {
     settings.saveOilConfig(config);
   }
   getQuotaDisplayConfigView(): { hiddenPlatforms: QuotaDisplayTarget[] } {

@@ -166,15 +166,15 @@ const themeLabel = computed(() =>
 );
 
 const pageMeta = computed(() => {
-  const pages: Record<WorkspaceSection, { crumb: string; title: string }> = {
-    overview: { crumb: "Overview", title: "用量概览" },
-    "daily-report": { crumb: "Git Reports", title: "Git 报告" },
-    snippets: { crumb: "Snippets", title: "片段库" },
-    clipboard: { crumb: "Clipboard", title: "剪贴板历史" },
-    vault: { crumb: "Vault", title: "密钥库" },
-    analytics: { crumb: "Analytics", title: "用量分析" },
-    subscriptions: { crumb: "Billing", title: "订阅与账单" },
-    settings: { crumb: "Connectors", title: "连接与设置" },
+  const pages: Record<WorkspaceSection, { group: string; crumb: string; title: string }> = {
+    overview: { group: "用量看板", crumb: "Overview", title: "用量概览" },
+    "daily-report": { group: "效率工具", crumb: "Git Report", title: "Git 报告" },
+    snippets: { group: "效率工具", crumb: "Snippets", title: "代码片段" },
+    clipboard: { group: "效率工具", crumb: "Clipboard", title: "剪贴板历史" },
+    vault: { group: "效率工具", crumb: "Vault", title: "密钥库" },
+    analytics: { group: "用量看板", crumb: "Analytics", title: "用量分析" },
+    subscriptions: { group: "用量看板", crumb: "Subscriptions", title: "订阅与账单" },
+    settings: { group: "系统", crumb: "Settings", title: "设置" },
   };
   return pages[activeWorkspace.value];
 });
@@ -217,70 +217,66 @@ function formatCny(value: number): string {
           <button class="rail-btn" :class="{ active: activeWorkspace === 'daily-report' }" type="button"
             @click="activeWorkspace = 'daily-report'">
             <span class="tip">Git 报告</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
-              <rect x="4" y="3" width="16" height="18" rx="3" />
-              <path d="M8 8h8M8 12h8M8 16h5" />
+              <circle cx="6" cy="6" r="2.5" />
+              <circle cx="6" cy="18" r="2.5" />
+              <circle cx="18" cy="8" r="2.5" />
+              <path d="M6 8.5v7M18 10.5c0 4-4 4.5-8 5" />
             </svg>
           </button>
           <button class="rail-btn" :class="{ active: activeWorkspace === 'snippets' }" type="button"
             @click="activeWorkspace = 'snippets'">
             <span class="tip">片段库</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
-              <path d="M8 4.5H5.8A1.8 1.8 0 0 0 4 6.3v11.9A1.8 1.8 0 0 0 5.8 20H16.2A1.8 1.8 0 0 0 18 18.2V14" />
-              <path d="M14 4h6v6M12 12l8-8" />
-              <path d="M8 10h4M8 14h6" />
+              <path d="m8 6-6 6 6 6M16 6l6 6-6 6" />
             </svg>
           </button>
           <button class="rail-btn" :class="{ active: activeWorkspace === 'clipboard' }" type="button"
             @click="activeWorkspace = 'clipboard'">
             <span class="tip">剪贴板历史</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
-              <rect x="5" y="4" width="14" height="17" rx="3" />
-              <path d="M9 4.5V3h6v1.5M9 9h6M9 13h6M9 17h4" />
+              <rect x="5" y="4" width="14" height="17" rx="2" />
+              <path d="M9 4a2 2 0 0 1 6 0" />
+              <path d="M9 11h6M9 15h4" />
             </svg>
           </button>
           <button class="rail-btn" :class="{ active: activeWorkspace === 'vault' }" type="button"
             @click="activeWorkspace = 'vault'">
             <span class="tip">密钥库</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="8" cy="15" r="4" />
-              <path d="m11 12 8-8M16 4l4 4M14 6l4 4" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <rect x="4" y="10" width="16" height="11" rx="2" />
+              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
           </button>
           <button class="rail-btn" :class="{ active: activeWorkspace === 'analytics' }" type="button"
             @click="activeWorkspace = 'analytics'">
             <span class="tip">用量分析</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
-              <path d="M4 19V10" />
-              <path d="M11 19V5" />
-              <path d="M18 19v-7" />
-              <path d="M3 19h18" />
+              <path d="M3 3v18h18" />
+              <path d="M7 15l4-5 3 3 5-7" />
             </svg>
           </button>
           <button class="rail-btn" :class="{ active: activeWorkspace === 'subscriptions' }" type="button"
             @click="activeWorkspace = 'subscriptions'">
             <span class="tip">订阅与账单</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
-              <rect x="2.5" y="5.5" width="19" height="14" rx="3" />
-              <path d="M2.5 10h19" />
-              <path d="M6.5 15h4" />
+              <rect x="3" y="6" width="18" height="13" rx="2" />
+              <path d="M3 10h18M7 15h4" />
             </svg>
           </button>
           <button class="rail-btn" :class="{ active: activeWorkspace === 'settings' }" type="button"
             @click="activeWorkspace = 'settings'">
             <span class="tip">连接与设置</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
               stroke-linejoin="round">
-              <path d="M8 3v4" />
-              <path d="M16 3v4" />
-              <path d="M4 10h16" />
-              <rect x="4" y="6" width="16" height="15" rx="3" />
-              <path d="M9 15.5l2 2 4-4.5" />
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
         </nav>
@@ -323,13 +319,25 @@ function formatCny(value: number): string {
     </aside>
 
     <section class="workspace-main content" :class="{ 'snippet-workspace': activeWorkspace === 'snippets', 'clipboard-workspace-shell': activeWorkspace === 'clipboard' }">
-      <header v-if="activeWorkspace !== 'snippets' && activeWorkspace !== 'clipboard'" class="topbar">
+      <header v-if="activeWorkspace !== 'snippets'" class="topbar">
         <div>
-          <div class="crumb">用量看板 <span>/</span> {{ pageMeta.crumb }}</div>
+          <div class="crumb">{{ pageMeta.group }} <span>/</span> {{ pageMeta.crumb }}</div>
           <h1>{{ pageMeta.title }}</h1>
         </div>
         <div class="topbar-actions">
-          <div v-if="activeWorkspace === 'analytics'" class="range-switch" role="group" aria-label="统计周期">
+          <template v-if="activeWorkspace === 'overview'">
+            <span class="conn-pill" :class="{ off: !quotaPlatformCount }">
+              <i class="dot" />{{ quotaPlatformCount || "0" }} 个平台已连接
+            </span>
+            <button class="btn-outline-sm" type="button" :disabled="isSyncing" @click="syncEverything">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />
+              </svg>
+              {{ isSyncing ? "同步中…" : "同步全部" }}
+            </button>
+          </template>
+          <div v-else-if="activeWorkspace === 'analytics'" class="range-switch" role="group" aria-label="统计周期">
             <button v-for="r in RANGES" :key="r.preset" type="button" :class="{ on: state.range === r.preset }"
               @click="setRange(r.preset)">{{ r.label }}</button>
           </div>
@@ -702,25 +710,21 @@ function formatCny(value: number): string {
 
 .topbar {
   display: flex;
-  min-height: 64px;
+  min-height: 56px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 11px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
+  gap: 14px;
+  padding: 6px 6px 8px;
 }
 
 .crumb {
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-bottom: 2px;
+  margin-bottom: 3px;
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .crumb span {
@@ -730,9 +734,9 @@ function formatCny(value: number): string {
 .topbar h1 {
   margin: 0;
   color: var(--text);
-  font-size: 18px;
-  font-weight: 720;
-  letter-spacing: -0.02em;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .topbar-actions {
@@ -740,6 +744,66 @@ function formatCny(value: number): string {
   align-items: center;
   justify-content: flex-end;
   gap: 9px;
+}
+
+.conn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--u-ok) 30%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--u-ok) 8%, transparent);
+  color: var(--u-ok);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.conn-pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.conn-pill.off {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-subtle);
+}
+
+.btn-outline-sm {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn-outline-sm:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-outline-sm:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.btn-outline-sm svg {
+  width: 13px;
+  height: 13px;
 }
 
 .rate-field {
@@ -847,8 +911,13 @@ function formatCny(value: number): string {
 
 .overview-stack {
   display: grid;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
   margin-top: 14px;
+}
+
+.overview-stack > * {
+  min-width: 0;
 }
 
 .banner {
@@ -915,61 +984,41 @@ function formatCny(value: number): string {
 .cockpit {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 12px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
 .cell {
   position: relative;
   display: flex;
   min-width: 0;
-  min-height: 108px;
+  min-height: 104px;
   flex-direction: column;
   gap: 7px;
-  padding: 15px 18px;
-  border-left: 1px solid var(--border);
-}
-
-.cell:first-child {
-  border-left: 0;
-}
-
-.cell:nth-child(-n + 2) {
-  background: color-mix(in srgb, var(--accent) 3%, var(--surface));
-}
-
-.cell:nth-child(-n + 2)::before {
-  position: absolute;
-  top: 0;
-  right: 18px;
-  left: 18px;
-  height: 2px;
-  border-radius: 0 0 2px 2px;
-  background: var(--accent);
-  content: "";
-  opacity: 0.72;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .cell-label {
   color: var(--text-subtle);
   font-size: 11px;
   font-weight: 650;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .cell-value {
   max-width: 100%;
   overflow: hidden;
+  margin-top: 2px;
   color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 24px;
-  font-weight: 720;
-  line-height: 1.2;
-  letter-spacing: -0.04em;
+  font-size: 27px;
+  font-weight: 750;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -1003,7 +1052,7 @@ function formatCny(value: number): string {
   background: color-mix(in srgb, var(--u-ok) 12%, transparent);
   color: var(--u-ok);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 650;
 }
 
@@ -1013,7 +1062,7 @@ function formatCny(value: number): string {
 }
 
 .cell-meta {
-  color: var(--text-subtle);
+  color: var(--text-muted);
   font-size: 11.5px;
 }
 
@@ -1062,7 +1111,7 @@ function formatCny(value: number): string {
 
 .quota-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
 }
@@ -1140,17 +1189,16 @@ function formatCny(value: number): string {
 
 @media (max-width: 1180px) {
   .cockpit,
-  .stats-5,
-  .quota-grid {
+  .stats-5 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .cockpit .cell:nth-child(odd) {
-    border-left: 0;
+  .overview-stack {
+    grid-template-columns: 1fr;
   }
 
-  .cockpit .cell:nth-child(n + 3) {
-    border-top: 1px solid var(--border);
+  .quota-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1257,15 +1305,6 @@ function formatCny(value: number): string {
   .stats-5,
   .quota-grid {
     grid-template-columns: 1fr;
-  }
-
-  .cockpit .cell {
-    border-top: 1px solid var(--border);
-    border-left: 0;
-  }
-
-  .cockpit .cell:first-child {
-    border-top: 0;
   }
 
   .block-head {

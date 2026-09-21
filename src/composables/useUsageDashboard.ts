@@ -15,6 +15,7 @@ import type {
   HeatmapDay,
   QuotaDisplayTarget,
 } from "@/types/usage";
+import type { OilGrade } from "@/types/oil";
 
 interface DashboardState {
   range: RangePreset;
@@ -180,7 +181,7 @@ export function useUsageDashboard() {
 
   function saveSettings(patch: {
     ark?: { baseUrl?: string };
-    oil?: { province: string; apiKey: string };
+    oil?: { province: string; apiKey: string; grade?: OilGrade };
     quotaDisplay?: { hiddenPlatforms: QuotaDisplayTarget[] };
     preferences?: { timezone?: string; statsSince?: string | null };
   }): void {

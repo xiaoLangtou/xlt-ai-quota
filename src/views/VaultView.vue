@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import {
-  Bot,
   Copy,
   ExternalLink,
   Eye,
@@ -11,12 +10,12 @@ import {
   KeyRound,
   LockKeyhole,
   Pencil,
+  Pin,
   Plus,
   Search,
   Settings2,
   ShieldCheck,
   Trash2,
-  UserRound,
   X,
 } from "lucide-vue-next";
 import { DialogDescription, DialogTitle } from "reka-ui";
@@ -123,9 +122,6 @@ const typeCounts = computed<Record<VaultRecordType, number>>(() => ({
   ai_key: records.value.filter((record) => record.type === "ai_key").length,
   other_key: records.value.filter((record) => record.type === "other_key").length,
 }));
-const tagCounts = computed(() => Object.fromEntries(
-  tags.value.map((tag) => [tag, records.value.filter((record) => record.tags.includes(tag)).length]),
-));
 const filteredRecords = computed(() => {
   const keyword = query.value.trim().toLocaleLowerCase();
   const result = records.value.filter((record) => {
@@ -208,10 +204,6 @@ function setFilter(filter: VaultFilter): void {
 
 function typeLabel(type: VaultRecordType): string {
   return TYPE_OPTIONS.find((item) => item.value === type)?.label ?? "其他 Key";
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function safeUrl(value: string): string | null {
@@ -428,67 +420,60 @@ onUnmounted(() => {
     <div class="vault-auth-card">正在读取本机密钥库…</div>
   </section>
 
-  <section v-else-if="!unlocked" class="vault-auth-shell" aria-label="解锁密钥库">
-    <form class="vault-auth-card" @submit.prevent="submitAuth">
-      <span class="vault-auth-icon">
-        <LockKeyhole :size="24" />
+  <section v-else-if="!unlocked" class="vault-lock" aria-label="解锁密钥库">
+    <form class="vault-lock-card" @submit.prevent="submitAuth">
+      <span class="lock-circle">
+        <LockKeyhole :size="32" />
       </span>
-      <div>
-        <h2>{{ initialized ? "解锁密钥库" : "设置主密码" }}</h2>
-        <p>{{ initialized ? "输入主密码以解密本机记录" : "主密码不会保存，遗忘后无法恢复密钥库" }}</p>
+      <h3>{{ initialized ? "解锁密钥库" : "设置主密码" }}</h3>
+      <p class="vl-sub">{{ initialized ? "输入主密码以访问本机加密记录" : "主密码不会保存，遗忘后无法恢复密钥库" }}</p>
+      <div class="vl-form" :class="{ inline: initialized }">
+        <label class="sr-label"><span class="sr-only">主密码</span><Input v-model="password" type="password" autofocus
+            autocomplete="current-password" placeholder="主密码" /></label>
+        <label v-if="!initialized" class="sr-label"><span class="sr-only">确认主密码</span><Input v-model="passwordConfirm"
+            type="password" autocomplete="new-password" placeholder="确认主密码" /></label>
+        <Button type="submit" :disabled="authBusy || !password">{{ authBusy ? "处理中…" : initialized ? "解锁" : "创建并解锁"
+          }}</Button>
       </div>
-      <label><span>主密码</span><Input v-model="password" type="password" autofocus autocomplete="current-password"
-          placeholder="至少 8 个字符" /></label>
-      <label v-if="!initialized"><span>确认主密码</span><Input v-model="passwordConfirm" type="password"
-          autocomplete="new-password" placeholder="再次输入主密码" /></label>
       <p v-if="authError" class="vault-auth-error">{{ authError }}</p>
-      <Button type="submit" size="lg" :disabled="authBusy || !password">{{ authBusy ? "处理中…" : initialized ? "解锁" :
-        "创建并解锁" }}</Button>
-      <small>
-        <ShieldCheck :size="14" /> AES-256-GCM · PBKDF2 · 仅存储在本机
-      </small>
+      <div class="vl-tip">
+        <ShieldCheck :size="13" />
+        AES-256-GCM · PBKDF2 · 数据仅保存在本机
+      </div>
     </form>
   </section>
 
   <section v-else class="vault-layout" aria-label="密钥库">
     <div class="vault-toolbar">
-      <div class="type-filter" aria-label="记录类型">
-        <span>记录类型</span>
+      <div class="type-seg" role="group" aria-label="记录类型">
         <button :class="{ active: activeFilter === 'all' }" type="button" :aria-pressed="activeFilter === 'all'"
-          @click="setFilter('all')">全部<em>{{ records.length }}</em></button>
+          @click="setFilter('all')">全部 {{ records.length }}</button>
         <button v-for="option in TYPE_OPTIONS" :key="option.value" :class="{ active: activeFilter === option.value }"
-          type="button" :aria-pressed="activeFilter === option.value" @click="setFilter(option.value)">{{ option.label
-          }}<em>{{ typeCounts[option.value] }}</em></button>
+          type="button" :aria-pressed="activeFilter === option.value" @click="setFilter(option.value)">{{ option.label }}
+          {{ typeCounts[option.value] }}</button>
       </div>
-      <div class="vault-toolbar-row">
-        <label class="vault-search">
-          <Search :size="15" /><Input v-model="query" placeholder="搜索名称、账号、服务商或标签" /><Button v-if="query" type="button"
-            variant="ghost" size="icon" aria-label="清除搜索" @click="query = ''">
-            <X :size="15" />
-          </Button>
-        </label>
-        <div class="vault-toolbar-actions">
-          <span>{{ filteredRecords.length }} 条记录</span>
-          <Select :model-value="sort" :options="SORT_OPTIONS" @update:model-value="sort = $event as VaultSort" />
-          <Button type="button" variant="outline" size="icon" title="密钥库设置" aria-label="密钥库设置"
-            @click="settingsOpen = true">
-            <Settings2 :size="16" />
-          </Button>
-          <Button type="button" @click="openCreate">
-            <Plus :size="16" />新增记录
-          </Button>
-        </div>
+      <label class="vault-search">
+        <Search :size="15" /><Input v-model="query" placeholder="搜索名称或账号…" />
+        <Button v-if="query" type="button" variant="ghost" size="icon" aria-label="清除搜索" @click="query = ''">
+          <X :size="15" />
+        </Button>
+      </label>
+      <div class="vault-toolbar-actions">
+        <Select :model-value="sort" :options="SORT_OPTIONS" @update:model-value="sort = $event as VaultSort" />
+        <Button type="button" variant="ghost" size="icon" title="密钥库设置" aria-label="密钥库设置"
+          @click="settingsOpen = true">
+          <Settings2 :size="16" />
+        </Button>
+        <Button type="button" size="sm" @click="openCreate">
+          <Plus :size="15" />新增记录
+        </Button>
       </div>
     </div>
 
-    <div v-if="tags.length" class="vault-tag-filter" aria-label="记录标签">
-      <span>标签</span>
-      <div class="tag-options">
-        <button :class="{ active: !activeTag }" type="button" :aria-pressed="!activeTag"
-          @click="activeTag = ''">全部<em>{{ records.length }}</em></button>
-        <button v-for="tag in tags" :key="tag" :class="{ active: activeTag === tag }" type="button"
-          :aria-pressed="activeTag === tag" @click="activeTag = tag">{{ tag }}<em>{{ tagCounts[tag] }}</em></button>
-      </div>
+    <div v-if="tags.length" class="vault-tags" aria-label="记录标签">
+      <button :class="{ active: !activeTag }" type="button" :aria-pressed="!activeTag" @click="activeTag = ''">所有标签</button>
+      <button v-for="tag in tags" :key="tag" :class="{ active: activeTag === tag }" type="button"
+        :aria-pressed="activeTag === tag" @click="activeTag = tag">{{ tag }}</button>
     </div>
 
     <div class="vault-content">
@@ -499,67 +484,52 @@ onUnmounted(() => {
           <Plus :size="15" />添加第一条记录
         </Button>
       </div>
-      <div v-else class="vault-list">
-        <div class="vault-list-header" aria-hidden="true">
+      <div v-else class="vault-table">
+        <div class="vault-row head" aria-hidden="true">
+          <span></span>
           <span>名称</span>
           <span>账号 / 服务商</span>
-          <span>密码或 Key</span>
-          <span>操作</span>
+          <span>密码 / Key</span>
+          <span class="cell-actions-label">操作</span>
         </div>
-        <div class="vault-card-list">
-          <article v-for="record in filteredRecords" :key="record.id" class="vault-record-card">
-            <header class="record-card-meta">
-              <span>更新时间：<time>{{ formatDate(record.updatedAt) }}</time></span>
-              <span>{{ typeLabel(record.type) }}</span>
-            </header>
-            <div class="record-card-body">
-              <div class="record-overview">
-                <div class="record-name"><span class="record-icon" :data-type="record.type">
-                    <UserRound v-if="record.type === 'credential'" :size="16" />
-                    <Bot v-else-if="record.type === 'ai_key'" :size="16" />
-                    <KeyRound v-else :size="16" />
-                  </span>
-                  <div><strong>{{ record.name }}</strong><span class="record-badges">
-                      <Badge :data-type="record.type">{{ typeLabel(record.type) }}</Badge>
-                      <Badge v-for="tag in record.tags.slice(0, 3)" :key="tag">{{ tag }}</Badge>
-                    </span></div>
-                </div>
-                <p v-if="record.note">{{ record.note }}</p>
-              </div>
-              <div class="record-card-cell record-identity-cell">
-                <span class="cell-label">账号 / 服务商</span>
-                <strong v-if="secondaryValue(record)" class="record-identity">{{ secondaryValue(record) }}</strong><span
-                  v-else class="muted-cell">—</span>
-                <a v-if="safeUrl(record.loginUrl || record.baseUrl)" class="record-link"
-                  :href="safeUrl(record.loginUrl || record.baseUrl) ?? undefined" target="_blank" rel="noreferrer">
-                  <ExternalLink :size="12" />打开地址
-                </a>
-              </div>
-              <div class="record-card-cell record-secret-cell">
-                <span class="cell-label">密码或 Key</span>
-                <div class="record-secret"><code>{{ revealed[record.id] ?? "••••••••••••" }}</code><Button type="button"
-                    variant="ghost" size="icon" :aria-label="revealed[record.id] ? '隐藏' : '显示'"
-                    :title="revealed[record.id] ? '隐藏（15 秒后自动隐藏）' : '显示 15 秒'" @click="toggleSecret(record)">
-                    <EyeOff v-if="revealed[record.id]" :size="15" />
-                    <Eye v-else :size="15" />
-                  </Button><Button type="button" variant="ghost" size="icon" aria-label="复制" title="复制，30 秒后清空剪贴板"
-                    @click="copySecret(record)">
-                    <Copy :size="15" />
-                  </Button></div>
-              </div>
-              <div class="record-card-cell record-actions-cell">
-                <span class="cell-label">操作</span>
-                <div class="record-actions"><Button type="button" variant="ghost" size="icon" title="编辑" aria-label="编辑"
-                    @click="openEdit(record)">
-                    <Pencil :size="14" />
-                  </Button><Button class="delete-button" type="button" variant="ghost" size="icon" title="删除"
-                    aria-label="删除" @click="deleteTarget = record">
-                    <Trash2 :size="14" />
-                  </Button></div>
-              </div>
-            </div>
-          </article>
-        </div>
+        <article v-for="record in filteredRecords" :key="record.id" class="vault-row" :title="record.note || undefined">
+          <span class="vault-avatar" :data-type="record.type">{{ (record.provider || record.name).slice(0, 1) }}</span>
+          <div class="vr-name">
+            <strong>{{ record.name }}<Pin v-if="record.favorite" class="vr-fav" :size="12" /></strong>
+            <span class="vr-badges">
+              <Badge>{{ typeLabel(record.type) }}</Badge>
+              <Badge v-for="tag in record.tags.slice(0, 3)" :key="tag">{{ tag }}</Badge>
+            </span>
+          </div>
+          <div class="vr-account">
+            <span class="vr-account-value">{{ secondaryValue(record) || "—" }}</span>
+            <a v-if="safeUrl(record.loginUrl || record.baseUrl)" class="vr-link"
+              :href="safeUrl(record.loginUrl || record.baseUrl) ?? undefined" target="_blank" rel="noreferrer">
+              <ExternalLink :size="11" />打开地址
+            </a>
+          </div>
+          <div class="vr-secret">
+            <code>{{ revealed[record.id] ?? "••••••••••••" }}</code>
+            <Button type="button" variant="ghost" size="icon" :aria-label="revealed[record.id] ? '隐藏' : '显示'"
+              :title="revealed[record.id] ? '隐藏（15 秒后自动隐藏）' : '显示 15 秒'" @click="toggleSecret(record)">
+              <EyeOff v-if="revealed[record.id]" :size="14" />
+              <Eye v-else :size="14" />
+            </Button>
+            <Button type="button" variant="ghost" size="icon" aria-label="复制" title="复制，30 秒后清空剪贴板"
+              @click="copySecret(record)">
+              <Copy :size="14" />
+            </Button>
+          </div>
+          <div class="vr-actions">
+            <Button type="button" variant="ghost" size="icon" title="编辑" aria-label="编辑" @click="openEdit(record)">
+              <Pencil :size="14" />
+            </Button>
+            <Button class="delete-button" type="button" variant="ghost" size="icon" title="删除" aria-label="删除"
+              @click="deleteTarget = record">
+              <Trash2 :size="14" />
+            </Button>
+          </div>
+        </article>
       </div>
     </div>
   </section>
@@ -691,180 +661,160 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.vault-auth-shell {
+/* ---------- 解锁视图（原型 vault-lock） ---------- */
+.vault-lock {
   display: grid;
   min-height: min(570px, calc(100vh - 150px));
   place-items: center;
 }
 
-.vault-auth-card {
-  display: grid;
-  width: min(390px, 100%);
-  gap: 18px;
-  padding: 30px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
+.vault-lock-card {
+  display: flex;
+  width: min(420px, 100%);
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 0 40px;
+  text-align: center;
 }
 
-.vault-auth-icon {
+.lock-circle {
   display: grid;
-  width: 46px;
-  height: 46px;
+  width: 76px;
+  height: 76px;
   place-items: center;
-  border-radius: 12px;
+  margin-bottom: 20px;
+  border-radius: 24px;
   background: var(--accent-weak);
   color: var(--accent);
 }
 
-.vault-auth-card h2 {
+.vault-lock-card h3 {
   margin: 0;
   color: var(--text);
-  font-size: 20px;
+  font-size: 18px;
+  font-weight: 700;
 }
 
-.vault-auth-card p {
-  margin: 5px 0 0;
+.vl-sub {
+  margin: 7px 0 22px;
   color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 12.5px;
 }
 
-.vault-auth-card label {
-  display: grid;
-  gap: 6px;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.vault-auth-card .vault-auth-error {
-  margin: -8px 0;
-  color: var(--u-crit);
-}
-
-.vault-auth-card small {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: var(--text-subtle);
-  font-size: 10px;
-}
-
-.vault-layout {
-  min-height: min(600px, calc(100vh - 148px));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-}
-
-.vault-toolbar {
+.vl-form {
   display: grid;
   gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 11px;
+  width: min(320px, 100%);
 }
 
-.vault-toolbar-row {
-  display: flex;
-  min-width: 0;
+.vl-form.inline {
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
+}
+
+.sr-label {
+  display: contents;
+}
+
+.vl-form :deep(.cn-input) {
+  height: 34px;
+}
+
+.vl-form :deep(.cn-button) {
+  height: 34px;
+}
+
+.vault-auth-error {
+  margin: 12px 0 0;
+  color: var(--u-crit);
+  font-size: 12px;
+}
+
+.vl-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 22px;
+  color: var(--text-subtle);
+  font-size: 11.5px;
+}
+
+/* ---------- 解锁后布局 ---------- */
+.vault-layout {
+  display: flex;
+  min-height: min(600px, calc(100vh - 148px));
+  flex-direction: column;
   gap: 12px;
 }
 
-.type-filter {
+.vault-toolbar {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
-  overflow-x: auto;
+  gap: 10px;
 }
 
-.type-filter>span {
-  margin-right: 2px;
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-.type-filter button,
-.tag-options button {
+.type-seg {
   display: inline-flex;
-  height: 30px;
+  flex: 0 0 auto;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--segment-bg);
+}
+
+.type-seg button {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
-  border-radius: 999px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 5px;
   background: transparent;
-  color: var(--accent);
+  color: var(--text-muted);
   font: inherit;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.type-filter button em,
-.tag-options button em {
-  min-width: 17px;
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: var(--accent-weak);
-  color: var(--text-muted);
-  font-size: 9px;
-  font-style: normal;
-  line-height: 15px;
-  text-align: center;
+.type-seg button:hover {
+  color: var(--text);
 }
 
-.type-filter button:hover,
-.tag-options button:hover {
-  background: var(--accent-weak);
-}
-
-.type-filter button.active,
-.tag-options button.active {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-
-.type-filter button.active em,
-.tag-options button.active em {
-  background: color-mix(in srgb, var(--accent-contrast) 18%, transparent);
-  color: var(--accent-contrast);
+.type-seg button.active {
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--accent);
 }
 
 .vault-search {
   display: flex;
-  min-width: 190px;
-  max-width: 620px;
+  min-width: 180px;
+  max-width: 300px;
+  height: 32px;
   flex: 1;
   align-items: center;
   gap: 6px;
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  background: var(--surface-2);
+  background: var(--surface);
   color: var(--text-subtle);
 }
 
 .vault-search:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-weak);
 }
 
 .vault-search :deep(.cn-input) {
-  height: 32px;
+  min-width: 0;
+  height: 30px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -881,6 +831,7 @@ onUnmounted(() => {
   flex: 0 0 auto;
   align-items: center;
   gap: 7px;
+  margin-left: auto;
 }
 
 .vault-toolbar-actions :deep(.cn-select-trigger) {
@@ -888,258 +839,201 @@ onUnmounted(() => {
   height: 32px;
 }
 
-.vault-toolbar-actions :deep(.cn-button) {
-  display: inline-flex;
-  height: 32px;
-  gap: 5px;
-}
-
-.vault-tag-filter {
+/* 标签 chips */
+.vault-tags {
   display: flex;
+  min-height: 26px;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin: 8px 14px 0;
-  padding: 6px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface-2);
+  gap: 6px;
 }
 
-.vault-tag-filter>span {
-  color: var(--text-subtle);
-  font-size: 10px;
+.vault-tags button {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.vault-tags button:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.vault-tags button.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
   font-weight: 650;
 }
 
-.tag-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.tag-options button {
-  height: 26px;
-  padding-inline: 9px;
-}
-
+/* ---------- 记录表（原型 vault-row） ---------- */
 .vault-content {
   min-width: 0;
-  padding: 10px 14px 14px;
+  flex: 1;
 }
 
-.vault-list-header,
-.record-card-body {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.5fr) minmax(150px, .8fr) minmax(220px, 1fr) 82px;
-}
-
-.vault-list-header {
-  margin-bottom: 6px;
+.vault-table {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.vault-row {
+  display: grid;
+  grid-template-columns: 34px 1.4fr 1.2fr 1.4fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+.vault-row:last-child {
+  border-bottom: 0;
+}
+
+.vault-row:not(.head):hover {
+  background: var(--surface-2);
+}
+
+.vault-row.head {
+  padding: 9px 16px;
   background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 650;
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.vault-list-header span {
-  padding: 7px 12px;
-}
-
-.vault-list-header span+span {
-  border-left: 1px solid var(--border);
-}
-
-.vault-list-header span:last-child {
-  text-align: center;
-}
-
-.vault-card-list {
+.vault-avatar {
   display: grid;
-  gap: 7px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--accent-contrast);
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.vault-record-card {
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  transition: border-color .16s ease, box-shadow .16s ease;
+.vault-avatar[data-type="credential"] {
+  background: var(--brand-open);
 }
 
-.vault-record-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
-  box-shadow: var(--shadow-sm);
+.vault-avatar[data-type="ai_key"] {
+  background: var(--brand-ark);
 }
 
-.record-card-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 5px 12px;
-  background: var(--surface-2);
-  color: var(--text-subtle);
-  font-size: 9px;
+.vault-avatar[data-type="other_key"] {
+  background: var(--brand-codex);
 }
 
-.record-card-body {
-  min-height: 66px;
+.vr-name {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
 }
 
-.record-overview,
-.record-card-cell {
+.vr-name strong {
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  justify-content: center;
-  padding: 9px 12px;
-}
-
-.record-card-cell {
-  border-left: 1px solid var(--border);
-}
-
-.record-overview>p {
+  align-items: center;
+  gap: 5px;
   overflow: hidden;
-  margin: 4px 0 0 35px;
-  color: var(--text-subtle);
-  font-size: 9px;
-  line-height: 1.4;
+  color: var(--text);
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.cell-label {
-  display: none;
-  margin-bottom: 5px;
-  color: var(--text-subtle);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: .04em;
+.vr-fav {
+  flex: none;
+  color: var(--u-warn);
 }
 
-.record-name {
+.vr-badges {
   display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 7px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
-.record-name>div {
+.vr-account {
+  display: grid;
   min-width: 0;
+  gap: 3px;
 }
 
-.record-name strong {
-  display: block;
+.vr-account-value {
   overflow: hidden;
-  color: var(--text);
+  color: var(--text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.record-icon {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
-  place-items: center;
-  border-radius: var(--r-sm);
-  background: var(--accent-weak);
-  color: var(--accent);
-}
-
-.record-icon[data-type="ai_key"] {
-  background: color-mix(in srgb, var(--u-warn) 13%, transparent);
-  color: var(--u-warn);
-}
-
-.record-icon[data-type="other_key"] {
-  background: color-mix(in srgb, var(--brand-codex) 12%, transparent);
-  color: var(--brand-codex);
-}
-
-.record-badges {
-  display: flex;
-  gap: 4px;
-  margin-top: 3px;
-}
-
-.record-badges :deep(.cn-badge[data-type="credential"]) {
-  color: var(--accent);
-}
-
-.record-badges :deep(.cn-badge[data-type="ai_key"]) {
-  color: var(--u-warn);
-}
-
-.record-badges :deep(.cn-badge[data-type="other_key"]) {
-  color: var(--brand-codex);
-}
-
-.record-identity {
-  display: block;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.record-link {
+.vr-link {
   display: inline-flex;
+  width: fit-content;
   align-items: center;
   gap: 4px;
-  margin-top: 4px;
   color: var(--accent);
-  font-size: 9px;
+  font-size: 10.5px;
   text-decoration: none;
 }
 
-.record-secret {
+.vr-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.vr-secret {
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
-.record-secret code {
+.vr-secret code {
   min-width: 0;
   flex: 1;
   overflow: hidden;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
+  letter-spacing: 1px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.record-secret :deep(.cn-button),
-.record-actions :deep(.cn-button) {
+.vr-secret :deep(.cn-button),
+.vr-actions :deep(.cn-button) {
   width: 26px;
   height: 26px;
+  flex: none;
 }
 
-.record-actions {
+.vr-secret :deep(.cn-button):hover {
+  color: var(--accent);
+}
+
+.vr-actions {
   display: flex;
-  gap: 1px;
+  justify-content: flex-end;
+  gap: 2px;
 }
 
-.record-actions-cell {
-  align-items: center;
-}
-
-.record-actions :deep(.delete-button:hover) {
+.vr-actions :deep(.delete-button:hover) {
   color: var(--u-crit);
-}
-
-.muted-cell,
-.record-card-meta time {
-  color: var(--text-subtle);
-  font-size: 9px;
 }
 
 .vault-empty {
@@ -1149,6 +1043,8 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
   color: var(--text-subtle);
   font-size: 12px;
 }
@@ -1162,6 +1058,7 @@ onUnmounted(() => {
   margin-top: 8px;
 }
 
+/* ---------- 对话框（保持原功能样式） ---------- */
 .vault-dialog {
   width: min(590px, calc(100vw - 32px));
 }
@@ -1297,115 +1194,52 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
-@media (max-width: 1120px) {
-  .vault-search {
-    max-width: none;
-  }
-}
-
+/* ---------- 响应式 ---------- */
 @media (max-width: 980px) {
-
-  .vault-list-header,
-  .record-card-body {
-    grid-template-columns: minmax(210px, 1.3fr) minmax(150px, .8fr) minmax(210px, 1fr);
+  .vault-row {
+    grid-template-columns: 34px 1.4fr 1.2fr;
   }
 
-  .vault-list-header span:last-child {
+  .vault-row.head .cell-actions-label,
+  .vault-row .vr-secret,
+  .vault-row.head span:nth-child(4) {
     display: none;
   }
 
-  .record-actions-cell {
-    grid-column: 1 / -1;
-    flex-direction: row;
-    justify-content: flex-end;
-    padding: 5px 10px;
-    border-top: 1px solid var(--border);
-    border-left: 0;
+  .vault-row .vr-actions {
+    grid-column: 3;
+    grid-row: 2;
+    justify-content: flex-start;
+    padding-top: 2px;
   }
 }
 
 @media (max-width: 760px) {
-  .vault-toolbar-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .vault-toolbar-actions {
-    justify-content: flex-end;
-  }
-
-  .type-filter {
-    padding-bottom: 2px;
-  }
-
   .vault-search {
-    width: 100%;
+    max-width: none;
+    order: 3;
+    flex-basis: 100%;
   }
 
-  .vault-list-header {
+  .vault-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+
+  .vault-row.head {
     display: none;
   }
 
-  .record-card-body {
-    grid-template-columns: 1fr 1fr;
+  .vault-row .vr-account {
+    grid-column: 2;
   }
 
-  .record-overview {
-    grid-column: 1 / -1;
-  }
-
-  .record-identity-cell {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .record-secret-cell {
-    border-top: 1px solid var(--border);
-  }
-
-  .record-actions-cell {
-    grid-column: 1 / -1;
-  }
-
-  .record-card-cell .cell-label {
-    display: block;
+  .vault-row .vr-actions {
+    grid-column: 3;
+    grid-row: 2;
   }
 }
 
 @media (max-width: 520px) {
-  .vault-toolbar-actions>span {
-    display: none;
-  }
-
-  .vault-toolbar-actions {
-    flex-wrap: wrap;
-  }
-
-  .vault-tag-filter {
-    margin-inline: 10px;
-  }
-
-  .vault-content {
-    padding-inline: 10px;
-  }
-
-  .record-card-body {
-    display: block;
-  }
-
-  .record-card-cell {
-    border-top: 1px solid var(--border);
-    border-left: 0;
-  }
-
-  .record-actions-cell {
-    flex-direction: row;
-  }
-
-  .record-actions-cell .cell-label {
-    display: none;
-  }
-
   .vault-settings-body section {
     grid-template-columns: 1fr;
   }

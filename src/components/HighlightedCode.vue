@@ -15,10 +15,16 @@ const highlighter = Promise.all([
 </script>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+
+// 超过该长度的内容不再走 Shiki 同步高亮：codeToHtml 会阻塞主线程，
+// 且 v-html 注入的 token DOM 体量巨大，复制千行文件时界面会明显卡顿。
+// 此时降级为纯文本 <pre>，由 Vue 文本绑定渲染，安全且几乎零成本。
+const MAX_HIGHLIGHT_CHARS = 30_000;
 
 const props = withDefaults(defineProps<{ code: string; language: string | null; appearance?: "dark" | "light" }>(), { appearance: "dark" });
 const html = ref("");
+const plain = computed(() => props.code.length > MAX_HIGHLIGHT_CHARS);
 
 function languageId(value: string | null): string {
   const aliases: Record<string, string> = {
@@ -34,6 +40,7 @@ function languageId(value: string | null): string {
 }
 
 async function highlight(): Promise<void> {
+  if (plain.value) { html.value = ""; return; }
   const instance = await highlighter;
   html.value = instance.codeToHtml(props.code, {
     lang: languageId(props.language),
@@ -44,7 +51,10 @@ async function highlight(): Promise<void> {
 watch(() => [props.code, props.language, props.appearance], () => void highlight(), { immediate: true });
 </script>
 
-<template><div class="highlighted-code" :class="appearance" v-html="html" /></template>
+<template>
+  <pre v-if="plain" class="highlighted-plain" :class="appearance">{{ code }}</pre>
+  <div v-else class="highlighted-code" :class="appearance" v-html="html" />
+</template>
 
 <style scoped>
 .highlighted-code :deep(pre.shiki) {
@@ -60,4 +70,14 @@ watch(() => [props.code, props.language, props.appearance], () => void highlight
 }
 .highlighted-code :deep(code) { font-family: inherit; }
 .highlighted-code.light :deep(pre.shiki) { background:transparent!important; }
+.highlighted-plain {
+  margin: 0;
+  overflow: auto;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 </style>

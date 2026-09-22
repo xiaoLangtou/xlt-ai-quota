@@ -6,9 +6,13 @@ import { useSkillsStore } from "@/stores/skills";
 /**
  * 工作区筛选下拉：全局根目录 / 项目 / Agent 三类入口。
  * Skills 与 MCP 共用；侧边栏不再承载任何动态列表。
- * 选中值编码为 `root:<id>` / `project:<id>` / `agent:<name>`，空串表示全部。
+ * 对外约定空串表示「全部」；reka-ui 的 SelectItem 不允许空串 value，
+ * 所以内部用 `ALL` 哨兵值，在读写边界处与空串互转。
  * 按计数降序排列，计数为 0 的项折叠进「更多」分组。
  */
+
+/** 「全部工作区」的内部哨兵值（SelectItem 的 value 不能是空串）。 */
+const ALL = "__all__";
 
 const props = withDefaults(
   defineProps<{
@@ -22,6 +26,12 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
+
+/** 把内部的哨兵值还原成对外的空串（全部工作区）。 */
+function handleUpdate(value: unknown): void {
+  const next = String(value ?? "");
+  emit("update:modelValue", next === ALL ? "" : next);
+}
 
 const store = useSkillsStore();
 const { roots, projects } = storeToRefs(store);
@@ -56,7 +66,7 @@ interface WorkspaceEntry {
 }
 
 const items = computed<FilterOption[]>(() => {
-  const list: FilterOption[] = [{ label: props.placeholder, value: "", icon: "i-lucide-boxes" }];
+  const list: FilterOption[] = [{ label: props.placeholder, value: ALL, icon: "i-lucide-boxes" }];
 
   function pushGroup(title: string, entries: WorkspaceEntry[]) {
     if (!entries.length) return;
@@ -106,11 +116,11 @@ const items = computed<FilterOption[]>(() => {
 
 <template>
   <USelect
-    :model-value="modelValue"
+    :model-value="modelValue || ALL"
     :items="items"
     icon="i-lucide-boxes"
     :placeholder="placeholder"
     :class="props.class ?? 'w-56'"
-    @update:model-value="emit('update:modelValue', String($event ?? ''))"
+    @update:model-value="handleUpdate"
   />
 </template>

@@ -1,4 +1,5 @@
 import { useSkillsStore } from "@/stores/skills";
+import { useMcpStore } from "@/stores/mcp";
 
 /**
  * 侧边栏导航配置。AppLayout 只负责渲染，新增入口（如 MCP）只改这里。
@@ -28,9 +29,9 @@ export function skillsErrorCount(): number {
   return store.skills.filter((skill) => !skill.valid).length;
 }
 
-/** MCP 配置异常数（预留）：解析失败 / 命令不存在等，暂无数据源。 */
-export function mcpIssueCount(): number | undefined {
-  return undefined;
+/** MCP 配置异常数：配置解析失败 + 命令不存在（含扫描文件级问题）。 */
+export function mcpIssueCount(): number {
+  return useMcpStore().errorCount;
 }
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -52,7 +53,10 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     title: "MCP",
-    items: [{ label: "MCP 服务", icon: "i-lucide-plug", to: "/mcp", badge: mcpIssueCount }],
+    items: [
+      { label: "MCP 服务", icon: "i-lucide-plug", to: "/mcp", badge: mcpIssueCount },
+      { label: "MCP 库", icon: "i-lucide-library-big", to: "/mcp/library" },
+    ],
   },
   {
     title: "工具",

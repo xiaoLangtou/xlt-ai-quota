@@ -231,8 +231,10 @@ fn build_report_prompt(
         if group.commits.is_empty() {
             continue;
         }
-        lines.push(String::new());
-        lines.push(format!("【{}】", group.project.name));
+        if report_type == "周报" {
+            lines.push(String::new());
+            lines.push(format!("【{}】", group.project.name));
+        }
         for commit in &group.commits {
             lines.push(format!("- [{}] {}", commit.date, commit.message));
             commit_count += 1;
@@ -246,6 +248,7 @@ fn build_report_prompt(
     if report_type == "日报" {
         lines.push("- 直接输出编号列表，不要标题、不要总结段落".to_owned());
         lines.push("- 将 commit message 转为自然中文，去掉 feat、fix、refactor 等前缀".to_owned());
+        lines.push("- 不要出现仓库名、项目名或提交号，只描述具体工作内容".to_owned());
         lines.push("- 合并相近提交，每条不超过 30 字".to_owned());
     } else {
         lines.push("- 使用“本周完成”和“下周计划”两个小标题".to_owned());

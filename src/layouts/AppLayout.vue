@@ -4,6 +4,7 @@ import { useColorMode } from "@vueuse/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { NavigationMenuItem } from "@nuxt/ui";
 import { useSkillsStore } from "@/stores/skills";
+import { useMcpStore } from "@/stores/mcp";
 import { useTheme } from "@/composables/useTheme";
 import { isTauriDesktop } from "@/connectors/types";
 import { NAV_GROUPS } from "@/config/navigation";
@@ -53,9 +54,12 @@ const links = computed<NavigationMenuItem[]>(() =>
 );
 
 const store = useSkillsStore();
+const mcpStore = useMcpStore();
 
 onMounted(() => {
-  if (isDesktop) void store.refresh();
+  if (!isDesktop) return;
+  void store.refresh();
+  void mcpStore.refresh();
 });
 </script>
 

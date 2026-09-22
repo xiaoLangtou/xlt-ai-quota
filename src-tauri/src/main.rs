@@ -5,6 +5,7 @@ mod clipboard_history;
 mod connectors;
 mod daily_report;
 mod database;
+mod mcp;
 mod skills;
 mod snippets;
 mod vault;
@@ -55,6 +56,7 @@ fn main() {
                 .build(),
         )
         .manage(skills::SkillsState::new())
+        .manage(mcp::McpState::new())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -152,6 +154,22 @@ fn main() {
             skills::commands::skills_rollback_install,
             vault::vault_read,
             vault::vault_write,
+            mcp::commands::mcp_scan,
+            mcp::commands::mcp_agents,
+            mcp::commands::mcp_plan,
+            mcp::commands::mcp_apply,
+            mcp::commands::mcp_probe,
+            mcp::commands::mcp_restore_backup,
+            mcp::commands::mcp_set_meta,
+            mcp::commands::mcp_parse_paste,
+            mcp::commands::mcp_catalog_sources,
+            mcp::commands::mcp_catalog_sync,
+            mcp::commands::mcp_catalog_list,
+            mcp::commands::mcp_catalog_detail,
+            mcp::commands::mcp_catalog_readme,
+            mcp::commands::mcp_catalog_source_save,
+            mcp::commands::mcp_catalog_source_remove,
+            mcp::commands::mcp_catalog_favorite,
             quit_app,
             show_dashboard,
             hide_dashboard

@@ -100,6 +100,46 @@ pub fn initialize(connection: &Connection) -> Result<(), String> {
               ('shortcut', 'CommandOrControl+Shift+V'),
               ('launch_at_login', 'false'),
               ('excluded_apps', '[\"1Password\",\"Bitwarden\",\"KeePass\",\"KeePassXC\"]');
+
+            CREATE TABLE IF NOT EXISTS mcp_meta (
+              key TEXT PRIMARY KEY NOT NULL,
+              note TEXT NOT NULL DEFAULT '',
+              tags TEXT NOT NULL DEFAULT '[]',
+              source_id TEXT,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS mcp_staged (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              agent TEXT NOT NULL,
+              scope TEXT NOT NULL,
+              project_path TEXT NOT NULL DEFAULT '',
+              name TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              UNIQUE(agent, scope, project_path, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS mcp_catalog (
+              source TEXT NOT NULL,
+              id TEXT NOT NULL,
+              kind TEXT NOT NULL DEFAULT 'server',
+              payload TEXT NOT NULL,
+              fetched_at TEXT NOT NULL,
+              PRIMARY KEY (source, id)
+            );
+
+            CREATE TABLE IF NOT EXISTS mcp_catalog_source (
+              id TEXT PRIMARY KEY NOT NULL,
+              payload TEXT NOT NULL,
+              fetched_at TEXT NOT NULL,
+              error TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS mcp_favorite (
+              package_id TEXT PRIMARY KEY NOT NULL,
+              created_at TEXT NOT NULL
+            );
             ",
         )
         .map_err(|error| format!("无法初始化本机数据库: {error}"))?;

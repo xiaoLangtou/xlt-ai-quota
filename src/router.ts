@@ -44,6 +44,11 @@ export const router = createRouter({
       component: () => import("./views/mcp/McpServersView.vue"),
     },
     {
+      path: "/mcp/library",
+      name: "mcp-library",
+      component: () => import("./views/mcp/McpLibraryView.vue"),
+    },
+    {
       path: "/skills",
       name: "skills-dashboard",
       component: () => import("./views/skills/SkillsDashboardView.vue"),

@@ -1,0 +1,458 @@
+[
+  {
+    "id": "builtin:filesystem",
+    "name": "Filesystem",
+    "description": "官方参考实现：在指定目录内读写文件、搜索与目录遍历。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "文件系统"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "platforms": ["Windows", "macOS", "Linux"],
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:git",
+    "name": "Git",
+    "description": "官方参考实现：查看状态、差异、提交历史与执行只读 Git 操作。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "版本控制"],
+    "language": { "name": "Python", "color": "#3572A5" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "uvx", "command": "uvx", "args": ["mcp-server-git", "--repository", "/path/to/repo"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:github",
+    "name": "GitHub",
+    "description": "官方参考实现：仓库、Issue、PR、代码搜索等 GitHub API 操作。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "代码托管"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
+      ],
+      "envSpec": [
+        { "name": "GITHUB_PERSONAL_ACCESS_TOKEN", "description": "GitHub 个人访问令牌", "required": true, "secret": true }
+      ]
+    }
+  },
+  {
+    "id": "builtin:gitlab",
+    "name": "GitLab",
+    "description": "官方参考实现：GitLab 仓库、合并请求与 Issue 操作。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "代码托管"],
+    "language": { "name": "JavaScript", "color": "#f1e05a" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-gitlab"] }
+      ],
+      "envSpec": [
+        { "name": "GITLAB_PERSONAL_ACCESS_TOKEN", "description": "GitLab 个人访问令牌", "required": true, "secret": true },
+        { "name": "GITLAB_API_URL", "description": "GitLab API 地址（自建实例填自己的域名）", "required": false, "secret": false }
+      ]
+    }
+  },
+  {
+    "id": "builtin:google-maps",
+    "name": "Google Maps",
+    "description": "官方参考实现：地理编码、地点搜索、路线规划。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/google-maps",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "地图"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-google-maps"] }
+      ],
+      "envSpec": [
+        { "name": "GOOGLE_MAPS_API_KEY", "description": "Google Maps API Key", "required": true, "secret": true }
+      ]
+    }
+  },
+  {
+    "id": "builtin:memory",
+    "name": "Memory",
+    "description": "官方参考实现：基于知识图谱的持久记忆，跨会话保留信息。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "记忆"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:sequential-thinking",
+    "name": "Sequential Thinking",
+    "description": "官方参考实现：把复杂问题拆成可回退的动态思考步骤。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "推理"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:everything",
+    "name": "Everything",
+    "description": "官方参考实现：集成全部能力用于测试 MCP 客户端。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/everything",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "测试"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-everything"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:time",
+    "name": "Time",
+    "description": "官方参考实现：时区换算与当前时间查询。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/time",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "时间"],
+    "language": { "name": "Python", "color": "#3572A5" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "uvx", "command": "uvx", "args": ["mcp-server-time"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:fetch",
+    "name": "Fetch",
+    "description": "官方参考实现：抓取网页并转为便于模型阅读的格式。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "网页"],
+    "language": { "name": "Python", "color": "#3572A5" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "uvx", "command": "uvx", "args": ["mcp-server-fetch"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:slack",
+    "name": "Slack",
+    "description": "官方参考实现：频道消息读取与发送。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "协作"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-slack"] }
+      ],
+      "envSpec": [
+        { "name": "SLACK_BOT_TOKEN", "description": "Slack Bot Token", "required": true, "secret": true },
+        { "name": "SLACK_TEAM_ID", "description": "Slack Team ID", "required": true, "secret": false }
+      ]
+    }
+  },
+  {
+    "id": "builtin:postgres",
+    "name": "PostgreSQL",
+    "description": "官方参考实现：只读查询 PostgreSQL 数据库与查看表结构。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "数据库"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/db"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:sqlite",
+    "name": "SQLite",
+    "description": "官方参考实现：对本地 SQLite 文件执行查询与写入。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "数据库"],
+    "language": { "name": "Python", "color": "#3572A5" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "uvx", "command": "uvx", "args": ["mcp-server-sqlite", "--db-path", "/path/to/db.sqlite"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:puppeteer",
+    "name": "Puppeteer",
+    "description": "官方参考实现：浏览器自动化、截图与页面交互。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/puppeteer",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "浏览器"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-puppeteer"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:playwright",
+    "name": "Playwright",
+    "description": "微软官方：跨浏览器自动化与可访问性树快照。",
+    "source": "builtin",
+    "homepage": "https://github.com/microsoft/playwright-mcp",
+    "repo": "microsoft/playwright-mcp",
+    "tags": ["官方", "浏览器"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "Apache-2.0",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["@playwright/mcp@latest"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:brave-search",
+    "name": "Brave Search",
+    "description": "官方参考实现：Brave 网页与本地搜索。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "搜索"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-brave-search"] }
+      ],
+      "envSpec": [
+        { "name": "BRAVE_API_KEY", "description": "Brave Search API Key", "required": true, "secret": true }
+      ]
+    }
+  },
+  {
+    "id": "builtin:redis",
+    "name": "Redis",
+    "description": "官方参考实现：Redis 键值读写与数据结构操作。",
+    "source": "builtin",
+    "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/redis",
+    "repo": "modelcontextprotocol/servers",
+    "tags": ["官方", "数据库"],
+    "language": { "name": "Python", "color": "#3572A5" },
+    "license": "MIT",
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "uvx", "command": "uvx", "args": ["mcp-server-redis", "--url", "redis://localhost:6379"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:notion",
+    "name": "Notion",
+    "description": "Notion 官方 MCP：读取与更新页面、数据库条目。",
+    "source": "builtin",
+    "homepage": "https://github.com/makenotion/notion-mcp-server",
+    "repo": "makenotion/notion-mcp-server",
+    "tags": ["知识库"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": false,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@notionhq/notion-mcp-server"] }
+      ],
+      "envSpec": [
+        { "name": "NOTION_TOKEN", "description": "Notion 集成令牌", "required": true, "secret": true }
+      ]
+    }
+  },
+  {
+    "id": "builtin:linear",
+    "name": "Linear",
+    "description": "Linear 官方远程 MCP：Issue、项目与团队协作。",
+    "source": "builtin",
+    "homepage": "https://linear.app/docs/mcp",
+    "repo": "linear/linear",
+    "tags": ["项目管理", "远程"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "verified": true,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "remote", "url": "https://mcp.linear.app/sse" }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:context7",
+    "name": "Context7",
+    "description": "按需注入最新版库文档，减少 API 幻觉。",
+    "source": "builtin",
+    "homepage": "https://github.com/upstash/context7",
+    "repo": "upstash/context7",
+    "tags": ["文档", "检索"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "MIT",
+    "verified": false,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@upstash/context7-mcp"] }
+      ],
+      "envSpec": []
+    }
+  },
+  {
+    "id": "builtin:elasticsearch",
+    "name": "Elasticsearch",
+    "description": "Elastic 官方 MCP：索引查询与集群信息。",
+    "source": "builtin",
+    "homepage": "https://github.com/elastic/mcp-server-elasticsearch",
+    "repo": "elastic/mcp-server-elasticsearch",
+    "tags": ["搜索", "数据库"],
+    "language": { "name": "TypeScript", "color": "#3178c6" },
+    "license": "Apache-2.0",
+    "verified": false,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "npx", "command": "npx", "args": ["-y", "@elastic/mcp-server-elasticsearch"] }
+      ],
+      "envSpec": [
+        { "name": "ES_URL", "description": "Elasticsearch 地址", "required": true, "secret": false },
+        { "name": "ES_API_KEY", "description": "Elasticsearch API Key", "required": true, "secret": true }
+      ]
+    }
+  },
+  {
+    "id": "builtin:docker",
+    "name": "Docker",
+    "description": "容器与镜像管理（docker MCP 网关示例）。",
+    "source": "builtin",
+    "homepage": "https://hub.docker.com/mcp",
+    "repo": "docker/mcp-gateway",
+    "tags": ["容器"],
+    "language": { "name": "Go", "color": "#00ADD8" },
+    "verified": false,
+    "kind": "server",
+    "install": {
+      "level": "ready",
+      "runtimes": [
+        { "type": "docker", "command": "docker", "args": ["run", "-i", "--rm", "mcp/filesystem", "/data"] }
+      ],
+      "envSpec": []
+    }
+  }
+]

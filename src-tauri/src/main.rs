@@ -1,22 +1,37 @@
 // Prevents additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(not(feature = "diagnostic"))]
 mod clipboard_history;
+#[cfg(not(feature = "diagnostic"))]
 mod connectors;
+#[cfg(not(feature = "diagnostic"))]
 mod daily_report;
+#[cfg(not(feature = "diagnostic"))]
 mod database;
+#[cfg(feature = "diagnostic")]
+mod diagnostic;
+#[cfg(skills_mcp)]
+#[cfg(not(feature = "diagnostic"))]
 mod mcp;
+#[cfg(skills_mcp)]
+#[cfg(not(feature = "diagnostic"))]
 mod skills;
+#[cfg(not(feature = "diagnostic"))]
 mod snippets;
+#[cfg(not(feature = "diagnostic"))]
 mod vault;
 
+#[cfg(not(feature = "diagnostic"))]
 use tauri::Manager;
 
+#[cfg(not(feature = "diagnostic"))]
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+#[cfg(not(feature = "diagnostic"))]
 #[tauri::command]
 fn show_dashboard(app: tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -30,6 +45,7 @@ fn show_dashboard(app: tauri::AppHandle) -> Result<(), String> {
     window.set_focus().map_err(|error| error.to_string())
 }
 
+#[cfg(not(feature = "diagnostic"))]
 #[tauri::command]
 fn hide_dashboard(app: tauri::AppHandle) -> Result<(), String> {
     let window = app
@@ -43,6 +59,12 @@ fn hide_dashboard(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "diagnostic")]
+fn main() {
+    diagnostic::run();
+}
+
+#[cfg(not(feature = "diagnostic"))]
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -55,9 +77,12 @@ fn main() {
                 })
                 .build(),
         )
-        .manage(skills::SkillsState::new())
-        .manage(mcp::McpState::new())
         .setup(|app| {
+            #[cfg(skills_mcp)]
+            {
+                app.manage(skills::SkillsState::new());
+                app.manage(mcp::McpState::new());
+            }
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -110,65 +135,123 @@ fn main() {
             snippets::snippet_delete,
             snippets::snippet_touch,
             snippets::snippet_copy,
+            #[cfg(skills_mcp)]
             skills::commands::skills_list_roots,
+            #[cfg(skills_mcp)]
             skills::commands::skills_add_root,
+            #[cfg(skills_mcp)]
             skills::commands::skills_remove_root,
+            #[cfg(skills_mcp)]
             skills::commands::skills_update_root_label,
+            #[cfg(skills_mcp)]
             skills::commands::skills_init_root,
+            #[cfg(skills_mcp)]
             skills::commands::skills_list_projects,
+            #[cfg(skills_mcp)]
             skills::commands::skills_add_project,
+            #[cfg(skills_mcp)]
             skills::commands::skills_remove_project,
+            #[cfg(skills_mcp)]
             skills::commands::skills_list_project_agent_dirs,
+            #[cfg(skills_mcp)]
             skills::commands::skills_scan_dir,
+            #[cfg(skills_mcp)]
             skills::commands::skills_scan,
+            #[cfg(skills_mcp)]
             skills::commands::skills_list_issues,
+            #[cfg(skills_mcp)]
             skills::commands::skills_get_detail,
+            #[cfg(skills_mcp)]
             skills::commands::skills_read_file,
+            #[cfg(skills_mcp)]
             skills::commands::skills_save,
+            #[cfg(skills_mcp)]
             skills::commands::skills_create,
+            #[cfg(skills_mcp)]
             skills::commands::skills_rename,
+            #[cfg(skills_mcp)]
             skills::commands::skills_delete,
+            #[cfg(skills_mcp)]
             skills::commands::skills_list_trash,
+            #[cfg(skills_mcp)]
             skills::commands::skills_restore_trash,
+            #[cfg(skills_mcp)]
             skills::commands::skills_purge_trash,
+            #[cfg(skills_mcp)]
             skills::commands::skills_prepare_local_source,
+            #[cfg(skills_mcp)]
             skills::commands::skills_prepare_upload_source,
+            #[cfg(skills_mcp)]
             skills::commands::skills_prepare_remote_source,
+            #[cfg(skills_mcp)]
             skills::commands::skills_remove_staging,
+            #[cfg(skills_mcp)]
             skills::commands::skills_create_install_plan,
+            #[cfg(skills_mcp)]
             skills::commands::skills_get_install_plan,
+            #[cfg(skills_mcp)]
             skills::commands::skills_cancel_install_plan,
+            #[cfg(skills_mcp)]
             skills::commands::skills_commit_install_plan,
+            #[cfg(skills_mcp)]
             skills::commands::skills_get_catalog,
+            #[cfg(skills_mcp)]
             skills::commands::skills_list_sources,
+            #[cfg(skills_mcp)]
             skills::commands::skills_add_source,
+            #[cfg(skills_mcp)]
             skills::commands::skills_remove_source,
+            #[cfg(skills_mcp)]
             skills::commands::skills_sync_source,
+            #[cfg(skills_mcp)]
             skills::commands::skills_search_skillssh,
+            #[cfg(skills_mcp)]
             skills::commands::skills_remote_detail,
+            #[cfg(skills_mcp)]
             skills::commands::skills_remote_file,
+            #[cfg(skills_mcp)]
             skills::commands::skills_list_installs,
+            #[cfg(skills_mcp)]
             skills::commands::skills_check_install_update,
+            #[cfg(skills_mcp)]
             skills::commands::skills_preview_update,
+            #[cfg(skills_mcp)]
             skills::commands::skills_apply_update,
+            #[cfg(skills_mcp)]
             skills::commands::skills_rollback_install,
             vault::vault_read,
             vault::vault_write,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_scan,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_agents,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_plan,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_apply,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_probe,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_restore_backup,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_set_meta,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_parse_paste,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_sources,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_sync,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_list,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_detail,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_readme,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_source_save,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_source_remove,
+            #[cfg(skills_mcp)]
             mcp::commands::mcp_catalog_favorite,
             quit_app,
             show_dashboard,
@@ -176,4 +259,14 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod feature_tests {
+    #[test]
+    fn native_gate_matches_shared_config() {
+        let features: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/config/features.json")).unwrap();
+        assert_eq!(Some(cfg!(skills_mcp)), features["skillsMcp"].as_bool());
+    }
 }

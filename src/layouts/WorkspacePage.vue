@@ -29,7 +29,7 @@ const VARIANT_CLASS: Record<string, string> = {
 </script>
 
 <template>
-  <UDashboardPanel :id="id">
+  <UDashboardPanel :id="id" :ui="variant === 'clipboard' ? { body: 'p-0 sm:p-0 gap-0 overflow-hidden' } : undefined">
     <template #header>
       <UDashboardNavbar v-if="nav" :title="title" :description="description">
         <template #leading>
@@ -76,5 +76,6 @@ const VARIANT_CLASS: Record<string, string> = {
 }
 .clipboard-workspace-shell .page-scroll {
   overflow: hidden;
+  padding: 0;
 }
 </style>

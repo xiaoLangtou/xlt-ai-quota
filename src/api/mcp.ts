@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { skillsMcp as skillsMcpEnabled } from "@/config/features.json";
 import type {
   ApplyPlanRequest,
   ApplyResult,
@@ -32,6 +33,7 @@ export function mcpErrorMessage(error: unknown): string {
 }
 
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (!skillsMcpEnabled) throw new Error("排查期间 MCP 功能已暂时停用");
   try {
     return await invoke<T>(command, args);
   } catch (error) {

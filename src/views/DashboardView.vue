@@ -6,7 +6,8 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { useUsageDashboard } from "@/composables/useUsageDashboard";
 import { useSubscriptions } from "@/composables/useSubscriptions";
 import QuotaCard from "@/components/QuotaCard.vue";
-import QuotaSummary from "@/components/QuotaSummary.vue";
+import OverviewStatCard from "@/components/OverviewStatCard.vue";
+import ClipboardWidget from "@/components/ClipboardWidget.vue";
 import ToolBreakdown from "@/components/ToolBreakdown.vue";
 import ToolDonutChart from "@/components/ToolDonutChart.vue";
 import ModelBreakdown from "@/components/ModelBreakdown.vue";
@@ -19,7 +20,6 @@ import TodayWorkCard from "@/components/TodayWorkCard.vue";
 import OilPriceCard from "@/components/OilPriceCard.vue";
 import { useOilMonitor } from "@/composables/useOilMonitor";
 import { isTauriDesktop } from "@/connectors/types";
-import { formatTokens } from "@/utils/format";
 import { USAGE_PAGE_META } from "@/config/navigation";
 import type { RangePreset } from "@/types/usage";
 
@@ -34,7 +34,6 @@ const {
   heatmap,
   todayHourly,
   loading,
-  syncError,
   setRange,
   sync: syncNow,
 } = useUsageDashboard();
@@ -42,6 +41,7 @@ const {
   subscriptions,
   monthlyCny,
   monthTotalCny,
+  upcomingCount,
   usdToCnyRate,
   setUsdToCnyRate,
 } = useSubscriptions();
@@ -68,7 +68,7 @@ const router = useRouter();
 const activeWorkspace = computed<WorkspaceSection>(
   () => SECTION_BY_ROUTE[String(route.name)] ?? "overview",
 );
-function go(name: "analytics" | "subscriptions" | "settings" | "daily-report"): void {
+function go(name: "analytics" | "subscriptions" | "settings" | "daily-report" | "clipboard"): void {
   void router.push({ name });
 }
 const subscriptionCreateSignal = ref(0);
@@ -109,18 +109,12 @@ const sparkRequests = computed(() => trend.value.map((p) => p.requests));
 const activeSubs = computed(() =>
   subscriptions.value.filter((item) => item.status === "active"),
 );
-const hasData = computed(() =>
-  quotas.value.some((q) => q.windows.length || q.credits),
-);
 const quotaPlatformCount = computed(() => new Set(quotas.value.map((item) => item.platform)).size);
 
 const isSyncing = computed(() => loading.value || state.sync.syncing);
 /** 首次同步且暂无 Token 数据时，用骨架占位替代空白。 */
 const firstLoading = computed(() => loading.value && summary.value.total === 0);
 const isPartialSync = computed(() => state.sync.outcome === "partial");
-const syncIssueText = computed(() =>
-  (syncError.value ?? "").replace(/^部分连接器同步失败：\s*/, ""),
-);
 
 const syncText = computed(() => {
   if (isSyncing.value) return "同步中…";
@@ -151,6 +145,17 @@ const outputPct = computed(() =>
 const rangeLabel = computed(
   () => RANGES.find((r) => r.preset === state.range)?.label ?? "",
 );
+
+/** 概览统计卡把数值与单位拆开展示，沿用原型 stat-value/unit 结构。 */
+const tokenParts = computed(() => {
+  const n = summary.value.total;
+  if (n >= 1_000_000_000) return { value: (n / 1_000_000_000).toFixed(1), unit: "B" };
+  if (n >= 1_000_000) return { value: (n / 1_000_000).toFixed(1), unit: "M" };
+  if (n >= 1_000) return { value: (n / 1_000).toFixed(1), unit: "K" };
+  return { value: String(n), unit: "" };
+});
+const tokenValue = computed(() => tokenParts.value.value);
+const tokenUnit = computed(() => tokenParts.value.unit);
 
 /** 全平台里利用率最高的一个额度窗口，作为驾驶舱「峰值」信号。 */
 const peakUsage = computed(() => {
@@ -232,76 +237,68 @@ function formatCny(value: number): string {
       <div class="workspace-main">
       <div class="page-scroll">
         <template v-if="activeWorkspace === 'overview'">
-          <UAlert
-            v-if="syncError && !isPartialSync"
-            color="error"
-            variant="subtle"
-            icon="i-lucide-triangle-alert"
-            title="同步出错"
-            :description="syncError"
-            class="cursor-pointer"
-            @click="syncEverything"
-          />
-          <UAlert
-            v-else-if="syncError"
-            color="warning"
-            variant="subtle"
-            icon="i-lucide-triangle-alert"
-            title="部分数据未更新"
-            :description="syncIssueText"
-            class="cursor-pointer"
-            @click="syncEverything"
-          />
-          <UAlert
-            v-else-if="!state.sync.lastSyncAt && !hasData"
-            color="neutral"
-            variant="subtle"
-            icon="i-lucide-cloud-download"
-            title="暂无数据 · 从本机 CLI 拉取真实用量"
-            description="点击立即同步"
-            class="cursor-pointer"
-            @click="syncEverything"
-          />
+          <!-- 同步状态只在页头小字/圆点体现，不再放整块提示。 -->
+          <!-- 概览：关键指标 → 套餐额度 → 小组件，参考改版原型结构。 -->
+          <section class="stat-grid" aria-label="关键指标">
+            <OverviewStatCard
+              label="订阅月支出 · 计划"
+              :value="formatCny(monthlyCny)"
+              :hint="`${activeSubs.length} 项活跃订阅`"
+              clickable
+              @click="go('subscriptions')"
+            />
+            <OverviewStatCard
+              label="本月实际支出 · 已记"
+              :value="formatCny(actualSpend)"
+              hint="仅统计账单流水"
+              clickable
+              @click="go('subscriptions')"
+            />
+            <OverviewStatCard
+              :label="`${rangeLabel} TOKEN`"
+              :value="tokenValue"
+              :unit="tokenUnit"
+              :delta-pct="summary.deltaPct"
+              :spark="sparkTotal"
+              :spark-color="(summary.deltaPct ?? 0) >= 0 ? 'var(--u-warn)' : 'var(--u-ok)'"
+            />
+            <OverviewStatCard
+              label="峰值利用率"
+              :value="peakUsage ? String(peakUsage.pct) : '—'"
+              :unit="peakUsage ? '%' : undefined"
+              :hint="peakUsage ? peakUsage.name : '暂无额度'"
+              :tone="peakTone"
+            />
+          </section>
 
-          <!-- 账务指标优先，用量指标作为补充运营信号。 -->
-          <section class="cockpit" aria-label="关键指标">
-            <div class="cell">
-              <span class="cell-label">订阅月支出 · 计划</span>
-              <strong class="cell-value">{{ formatCny(monthlyCny) }}</strong>
-              <button class="cell-meta link" type="button" @click="go('subscriptions')">
-                {{ activeSubs.length }} 项活跃订阅 →
-              </button>
+          <section class="block">
+            <div class="block-head">
+              <div>
+                <h2>套餐额度</h2>
+                <p>{{ quotaPlatformCount }} 个平台 · {{ quotas.length }} 个套餐的可用额度与重置时间</p>
+              </div>
+              <UButton color="neutral" variant="outline" size="sm" @click="go('subscriptions')">
+                全部
+              </UButton>
             </div>
-            <div class="cell">
-              <span class="cell-label">本月实际支出 · 已记</span>
-              <strong class="cell-value">{{ formatCny(actualSpend) }}</strong>
-              <button class="cell-meta link" type="button" @click="go('subscriptions')">
-                查看账单流水 →
-              </button>
-            </div>
-            <div class="cell">
-              <span class="cell-label">{{ rangeLabel }} TOKEN</span>
-              <strong class="cell-value">{{ formatTokens(summary.total) }}</strong>
-              <span v-if="summary.deltaPct != null" class="cell-delta" :class="summary.deltaPct >= 0 ? 'up' : 'down'">
-                {{ summary.deltaPct >= 0 ? "↑" : "↓" }} {{ Math.abs(summary.deltaPct) }}%
-              </span>
-              <span v-else class="cell-meta">较上一周期</span>
-            </div>
-            <div class="cell">
-              <span class="cell-label">峰值利用率</span>
-              <strong v-if="peakUsage" class="cell-value" :class="`tone-${peakTone}`">
-                {{ peakUsage.pct }}<small>%</small>
-              </strong>
-              <strong v-else class="cell-value muted">—</strong>
-              <span class="cell-meta">{{ peakUsage ? peakUsage.name : "暂无额度" }}</span>
+            <div class="quota-grid">
+              <QuotaCard v-for="view in quotas" :key="view.id" :view="view" />
             </div>
           </section>
 
-          <div class="overview-stack">
-            <OilPriceCard @configure="go('settings')" />
-            <TodayWorkCard @open="go('daily-report')" />
-            <QuotaSummary :views="quotas" @navigate="go('subscriptions')" />
-          </div>
+          <section class="block">
+            <div class="block-head">
+              <div>
+                <h2>小组件</h2>
+                <p>可按需配置与排序</p>
+              </div>
+            </div>
+            <div class="widget-grid">
+              <OilPriceCard class="span-5" @configure="go('settings')" />
+              <TodayWorkCard class="span-4" @open="go('daily-report')" />
+              <ClipboardWidget class="span-3" @open="go('clipboard')" />
+            </div>
+          </section>
         </template>
 
         <template v-else-if="activeWorkspace === 'analytics'">
@@ -362,22 +359,35 @@ function formatCny(value: number): string {
         </template>
 
         <template v-else-if="activeWorkspace === 'subscriptions'">
-          <section class="block quota-section">
-            <div class="block-head">
-              <div>
-                <h2>套餐额度</h2>
-                <p>{{ quotaPlatformCount }} 个平台 · {{ quotas.length }} 个套餐的可用额度与重置时间</p>
-              </div>
-              <UButton color="neutral" variant="outline" size="sm" @click="go('settings')">
-                显示设置
-              </UButton>
-            </div>
-            <div class="quota-grid">
-              <QuotaCard v-for="view in quotas" :key="view.id" :view="view" />
-            </div>
+          <!-- 费用中心：账单摘要 → 套餐额度 → 订阅 / 账单列表，参考改版原型结构。 -->
+          <section class="stat-grid stat-grid-3" aria-label="订阅账单摘要">
+            <OverviewStatCard
+              label="计划月支出"
+              :value="formatCny(monthlyCny)"
+              :hint="`${activeSubs.length} 项生效中`"
+            />
+            <OverviewStatCard
+              label="本月实际已记"
+              :value="formatCny(actualSpend)"
+              hint="仅统计账单流水"
+            />
+            <OverviewStatCard
+              label="7 天内续费"
+              :value="String(upcomingCount)"
+              :hint="upcomingCount ? '请核对付款账户' : '近期无待续费'"
+              :tone="upcomingCount ? 'warn' : 'default'"
+            />
           </section>
+
           <div class="subscription-manager-wrap">
-            <SubscriptionManager embedded :create-signal="subscriptionCreateSignal" />
+            <SubscriptionManager
+              embedded
+              hide-overview
+              hide-header
+              :quota-views="quotas"
+              :create-signal="subscriptionCreateSignal"
+              @open-settings="go('settings')"
+            />
           </div>
         </template>
 
@@ -469,103 +479,31 @@ function formatCny(value: number): string {
 .page-scroll::-webkit-scrollbar {
   display: none;
 }
-.overview-stack {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 14px;
-  margin-top: 14px;
-}
-.overview-stack > * {
-  min-width: 0;
-}
-.cockpit {
+.stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  margin-bottom: 14px;
 }
-.cell {
-  position: relative;
-  display: flex;
+.stat-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.widget-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+.widget-grid > * {
   min-width: 0;
-  min-height: 104px;
-  flex-direction: column;
-  gap: 7px;
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
 }
-.cell-label {
-  color: var(--text-subtle);
-  font-size: 11px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.span-3 {
+  grid-column: span 3;
 }
-.cell-value {
-  max-width: 100%;
-  overflow: hidden;
-  margin-top: 2px;
-  color: var(--text);
-  font-size: 27px;
-  font-weight: 750;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
+.span-4 {
+  grid-column: span 4;
 }
-.cell-value small {
-  margin-left: 1px;
-  font-size: 13px;
-}
-.cell-value.muted {
-  color: var(--text-subtle);
-}
-.cell-value.tone-ok {
-  color: var(--u-ok);
-}
-.cell-value.tone-warn {
-  color: var(--u-warn);
-}
-.cell-value.tone-crit {
-  color: var(--u-crit);
-}
-.cell-delta {
-  width: fit-content;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--u-ok) 12%, transparent);
-  color: var(--u-ok);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 650;
-}
-.cell-delta.up {
-  background: color-mix(in srgb, var(--u-warn) 12%, transparent);
-  color: var(--u-warn);
-}
-.cell-meta {
-  color: var(--text-muted);
-  font-size: 11.5px;
-}
-.cell-meta.link {
-  width: fit-content;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-.cell-meta.link:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.span-5 {
+  grid-column: span 5;
 }
 .block {
   margin-top: 16px;
@@ -657,12 +595,14 @@ function formatCny(value: number): string {
 }
 
 @media (max-width: 1180px) {
-.cockpit,
+.stat-grid,
 .stats-5 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-.overview-stack {
-    grid-template-columns: 1fr;
+.span-3,
+.span-4,
+.span-5 {
+    grid-column: 1 / -1;
   }
 .quota-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -686,7 +626,7 @@ function formatCny(value: number): string {
 .rate-field {
     flex: 1;
   }
-.cockpit,
+.stat-grid,
 .stats-5,
 .quota-grid {
     grid-template-columns: 1fr;

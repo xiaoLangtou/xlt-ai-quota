@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 用量看板 · 最小诊断模式</title>
+    <style>
+      :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+      body { margin: 0; padding: 32px; line-height: 1.7; }
+      main { max-width: 640px; margin: auto; }
+      h1 { font-size: 24px; margin-top: 0; }
+      li { margin: 8px 0; }
+      button { font: inherit; padding: 8px 18px; cursor: pointer; }
+      output { font-variant-numeric: tabular-nums; font-weight: 600; }
+      .note { opacity: .75; font-size: 14px; }
+      #error { color: #dc4444; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>最小诊断模式</h1>
+      <p>此版本仅保留一个普通桌面窗口，用于隔离启动后闲置卡死问题，不提供业务功能。</p>
+      <ul>
+        <li>不读取剪贴板，不注册全局快捷键，不请求辅助功能权限。</li>
+        <li>不创建托盘和隐藏面板，不置顶，不切换窗口激活策略。</li>
+        <li>不扫描 Skills / MCP，不查询用量和油价，不启动任何 CLI、Qoder SDK 或 AOCI。</li>
+        <li>使用独立应用标识，不读取原版业务数据，不注册登录启动。</li>
+      </ul>
+      <p>页面已运行：<output id="elapsed">0 秒</output></p>
+      <p class="note">计时只反映页面刷新，不代表系统输入或后台线程健康，也不能证明问题已修复。</p>
+      <button id="quit" type="button">退出诊断版</button>
+      <p id="error" role="alert"></p>
+      <p class="note">关闭窗口或按 ⌘Q 即可退出。请仅在可承受故障的隔离环境验证，不要与原版同时运行。</p>
+    </main>
+    <script type="module">
+      import { invoke } from "@tauri-apps/api/core";
+
+      const startedAt = Date.now();
+      const elapsed = document.querySelector("#elapsed");
+      const timer = window.setInterval(() => {
+        const seconds = Math.floor((Date.now() - startedAt) / 1000);
+        elapsed.textContent = `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+      }, 1000);
+      window.addEventListener("pagehide", () => window.clearInterval(timer), { once: true });
+      document.querySelector("#quit").addEventListener("click", async () => {
+        try {
+          await invoke("quit_diagnostic");
+        } catch {
+          document.querySelector("#error").textContent = "退出请求失败，请关闭窗口或按 ⌘Q。";
+        }
+      });
+    </script>
+  </body>
+</html>

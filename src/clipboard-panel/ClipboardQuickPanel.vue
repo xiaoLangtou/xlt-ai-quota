@@ -5,10 +5,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AlignLeft, BookmarkPlus, ChevronDown, ChevronLeft, Clipboard, ClipboardPaste, Command, CornerDownLeft, ExternalLink, File, FileText, Image, ListFilter, ListOrdered, Maximize2, Minimize2, MoreHorizontal, Pin, Search, ShieldAlert, Sparkles, Trash2, X } from "lucide-vue-next";
 import { clipboardService } from "@/services/clipboard-service";
 import { snippetService } from "@/services/snippet-service";
-import HighlightedCode from "@/components/HighlightedCode.vue";
 import type { ClipboardItem, ClipboardKind, ClipboardSequenceStatus, ClipboardStatus } from "@/types/clipboard";
 import type { Snippet } from "@/types/snippet";
-import { detectClipboardCodeLanguage, detectClipboardSpecialContent, type ClipboardSpecialContent } from "@/utils/clipboard-content";
+import { detectClipboardSpecialContent, type ClipboardSpecialContent } from "@/utils/clipboard-content";
 
 type QuickScope = "all" | ClipboardKind | "pinned" | "snippets";
 
@@ -41,7 +40,6 @@ const selectedSnippet = computed(() => scope.value === "snippets" ? snippets.val
 const activeCount = computed(() => scope.value === "snippets" ? snippets.value.length : items.value.length);
 const selectedText = computed(() => selected.value?.kind === "text" ? selected.value.content : selectedSnippet.value?.content ?? "");
 const specialContent = computed(() => detectClipboardSpecialContent(selectedText.value));
-const codeLanguage = computed(() => detectClipboardCodeLanguage(selectedText.value));
 const mergeableSelection = computed(() => sequenceIds.value.length > 1 && sequenceIds.value.every((id) => items.value.find((item) => item.id === id)?.kind === "text"));
 const filePaths = computed(() => {
   if (selected.value?.kind !== "files") return [];
@@ -370,11 +368,9 @@ onUnmounted(() => {
               <button v-if="selectedText.length > 600" type="button" :title="previewExpanded ? '退出展开预览' : '展开大文本预览'" @click="previewExpanded = !previewExpanded"><Minimize2 v-if="previewExpanded" :size="13" /><Maximize2 v-else :size="13" />{{ previewExpanded ? "收起" : "展开" }}</button>
             </div>
             <div ref="previewScroll" class="preview-media" @scroll="updateScrollbars">
-              <HighlightedCode v-if="selected?.kind === 'text' && codeLanguage" class="clipboard-code-preview" :code="selected.content" :language="codeLanguage" appearance="light" />
-              <pre v-else-if="selected?.kind === 'text'">{{ selected.content }}</pre>
+              <pre v-if="selected?.kind === 'text'">{{ selected.content }}</pre>
               <div v-else-if="selected?.kind === 'image'" class="panel-image"><img v-if="imageDataUrl" :src="imageDataUrl" alt="图片预览" @load="updateScrollbars" /></div>
               <ul v-else-if="selected?.kind === 'files'"><li v-for="path in filePaths" :key="path"><File :size="16" /><span>{{ path.split(/[\\/]/).pop() }}</span></li></ul>
-              <HighlightedCode v-else-if="selectedSnippet && codeLanguage" class="clipboard-code-preview" :code="selectedSnippet.content" :language="codeLanguage" appearance="light" />
               <pre v-else>{{ selectedSnippet?.content }}</pre>
             </div>
             <span v-if="previewScrollbar.visible" class="custom-scrollbar" aria-hidden="true"><i :style="{ height: `${previewScrollbar.height}px`, transform: `translateY(${previewScrollbar.top}px)` }" /></span>
@@ -557,7 +553,6 @@ onUnmounted(() => {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.clipboard-code-preview { width:100%; color:var(--text); font-family:var(--font-mono); font-size:11px; line-height:1.65; }
 .preview-media ul { display:grid; width:100%; gap:7px; margin:0; padding:0; list-style:none; }
 .preview-media li { display:flex; align-items:center; gap:8px; padding:9px; border:1px solid var(--border); border-radius:9px; background:var(--surface-2); color:var(--text-muted); font-size:11px; }
 .panel-image {

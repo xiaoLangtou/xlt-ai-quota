@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "aoci": {
+      "command": "/Users/weipengcheng/.local/bin/aoci",
+      "args": [
+        "mcp",
+        "--repo",
+        "/Volumes/weipengcheng/个人项目/tva/xlt-workbench"
+      ]
+    }
+  }
+}

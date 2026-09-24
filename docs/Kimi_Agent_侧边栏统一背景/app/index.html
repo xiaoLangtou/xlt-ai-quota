@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XLT Workbench — 改版原型</title>
+<script>
+(function(){
+  var q = new URLSearchParams(location.search).get('theme');
+  var t = (q === 'light' || q === 'dark') ? q : (localStorage.getItem('xlt-theme') || 'dark');
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="noise" aria-hidden="true"></div>
+<div id="app">
+  <aside id="sidebar"></aside>
+  <main id="main">
+    <div id="view"></div>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

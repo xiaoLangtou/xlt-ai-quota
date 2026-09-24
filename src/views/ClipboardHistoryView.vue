@@ -1,9 +1,12 @@
 <script lang="ts" setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
     AlignLeft,
+    ArrowLeft,
+    Check,
+    ChevronUp,
     Clipboard,
     ClipboardCheck,
     Clock3,
@@ -11,6 +14,7 @@ import {
     File,
     FileText,
     Image,
+    LoaderCircle,
     Maximize2,
     Minimize2,
     Pause,
@@ -20,11 +24,10 @@ import {
     Plus,
     Search,
     ShieldAlert,
-    ShieldCheck,
     Trash2,
     X,
 } from "lucide-vue-next";
-import { DialogDescription, DialogTitle } from "reka-ui";
+import { DialogDescription, DialogTitle, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from "reka-ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
@@ -52,7 +55,13 @@ const status = ref<ClipboardStatus | null>(null);
 const query = ref("");
 const scope = ref<ClipboardScope>("all");
 const selectedId = ref<string | null>(null);
-const loading = ref(false);
+const loading = ref(desktop);
+const loadError = ref("");
+const workspace = ref<HTMLElement | null>(null);
+const searchField = ref<HTMLElement | null>(null);
+const historyScroll = ref<HTMLElement | null>(null);
+const copiedId = ref<string | null>(null);
+let copiedTimer: number | undefined;
 const imageDataUrl = ref("");
 const filePreview = ref<ClipboardFilePreview | null>(null);
 const filePreviewIndex = ref(0);
@@ -62,9 +71,11 @@ const thumbnailUrls = ref<Record<string, string>>({});
 const previewExpanded = ref(false);
 const clearOpen = ref(false);
 const clearPinned = ref(false);
+const permissionOpen = ref(false);
 let searchTimer: number | undefined;
 let unlisten: UnlistenFn | undefined;
 let unlistenFocus: UnlistenFn | undefined;
+let disposed = false;
 let request = 0;
 let filePreviewRequest = 0;
 
@@ -77,20 +88,23 @@ const scopes: { value: ClipboardScope; label: string; icon: typeof Clipboard }[]
 ];
 
 const selected = computed(() => items.value.find((item) => item.id === selectedId.value) ?? null);
-const unpinnedCount = computed(() => Math.max(0, ( status.value?.total ?? 0 ) - ( status.value?.pinned ?? 0 )));
+const unpinnedCount = computed(() => Math.max(0, (status.value?.total ?? 0) - (status.value?.pinned ?? 0)));
 const groups = computed<ClipboardGroup[]>(() => {
     const grouped = new Map<string, ClipboardGroup>();
-    for ( const item of items.value ) {
+    for (const item of items.value) {
         const group = item.pinned
             ? { key: "pinned", label: "已收藏" }
             : dateGroup(item.updatedAt);
-        if ( !grouped.has(group.key) ) grouped.set(group.key, { ...group, items: [] });
+        if (!grouped.has(group.key)) grouped.set(group.key, { ...group, items: [] });
         grouped.get(group.key)?.items.push(item);
     }
-    return [ ...grouped.values() ];
+    return [...grouped.values()];
 });
+const displayedItems = computed(() => groups.value.flatMap((group) => group.items));
+const selectedPosition = computed(() => displayedItems.value.findIndex((item) => item.id === selectedId.value) + 1);
+const searchShortcut = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ F" : "Ctrl F";
 const filePaths = computed(() => {
-    if ( selected.value?.kind !== "files" ) return [];
+    if (selected.value?.kind !== "files") return [];
     try {
         return JSON.parse(selected.value.content) as string[];
     } catch {
@@ -103,10 +117,10 @@ function dateGroup(value: string): { key: string; label: string } {
     const today = new Date();
     const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
     const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-    const diff = Math.round(( start - day ) / 86_400_000);
-    if ( diff <= 0 ) return { key: "today", label: "今天" };
-    if ( diff === 1 ) return { key: "yesterday", label: "昨天" };
-    if ( diff < 7 ) return { key: "week", label: "过去 7 天" };
+    const diff = Math.round((start - day) / 86_400_000);
+    if (diff <= 0) return { key: "today", label: "今天" };
+    if (diff === 1) return { key: "yesterday", label: "昨天" };
+    if (diff < 7) return { key: "week", label: "过去 7 天" };
     return { key: "earlier", label: "更早" };
 }
 
@@ -118,27 +132,33 @@ function kindIcon(kind: ClipboardKind) {
     return kind === "text" ? FileText : kind === "image" ? Image : File;
 }
 
-
+function scopeCount(value: ClipboardScope): number {
+    if (value === "all") return status.value?.total ?? items.value.length;
+    if (value === "text") return status.value?.textCount ?? 0;
+    if (value === "image") return status.value?.imageCount ?? 0;
+    if (value === "files") return status.value?.fileCount ?? 0;
+    return status.value?.pinned ?? 0;
+}
 
 function shortcutLabel(value: string): string {
     const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-    return value.split("+").map((part) => ( {
+    return value.split("+").map((part) => ({
         CommandOrControl: mac ? "⌘" : "Ctrl",
         Command: "⌘",
         Control: "Ctrl",
         Alt: mac ? "⌥" : "Alt",
         Shift: "⇧",
         Space: "Space",
-    } )[part] ?? part).join("  ");
+    })[part] ?? part).join("  ");
 }
 
 function itemTitle(item: ClipboardItem): string {
-    if ( item.kind === "image" ) return `图片 · ${ item.imageWidth ?? 0 } × ${ item.imageHeight ?? 0 }`;
-    if ( item.kind === "files" ) {
+    if (item.kind === "image") return `图片 · ${item.imageWidth ?? 0} × ${item.imageHeight ?? 0}`;
+    if (item.kind === "files") {
         try {
             const paths = JSON.parse(item.content) as string[];
             const name = paths[0]?.split(/[\\/]/).pop() ?? "文件";
-            return paths.length > 1 ? `${ name } 等 ${ paths.length } 个文件` : name;
+            return paths.length > 1 ? `${name} 等 ${paths.length} 个文件` : name;
         } catch {
             return "文件";
         }
@@ -150,23 +170,23 @@ function itemTitle(item: ClipboardItem): string {
 
 function formatTime(value: string, full = false): string {
     const date = new Date(value);
-    if ( full ) return new Intl.DateTimeFormat("zh-CN", {
+    if (full) return new Intl.DateTimeFormat("zh-CN", {
         month: "long",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
     }).format(date);
     const diff = Date.now() - date.getTime();
-    if ( diff < 60_000 ) return "刚刚";
-    if ( diff < 3_600_000 ) return `${ Math.floor(diff / 60_000) } 分钟前`;
-    if ( diff < 86_400_000 ) return `${ Math.floor(diff / 3_600_000) } 小时前`;
+    if (diff < 60_000) return "刚刚";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
     return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric" }).format(date);
 }
 
 function formatBytes(value: number): string {
-    if ( value < 1024 ) return `${ value } B`;
-    if ( value < 1024 * 1024 ) return `${ ( value / 1024 ).toFixed(1) } KB`;
-    return `${ ( value / 1024 / 1024 ).toFixed(1) } MB`;
+    if (value < 1024) return `${value} B`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /**
@@ -178,24 +198,25 @@ const displayOrder = new Map<string, number>();
 let displaySeq = 0;
 
 function sortByStableOrder(nextItems: ClipboardItem[]): ClipboardItem[] {
-    for ( const item of nextItems ) {
-        if ( !displayOrder.has(item.id) ) displayOrder.set(item.id, displaySeq++);
+    for (const item of nextItems) {
+        if (!displayOrder.has(item.id)) displayOrder.set(item.id, displaySeq++);
     }
-    if ( displayOrder.size > nextItems.length * 3 + 500 ) {
+    if (displayOrder.size > nextItems.length * 3 + 500) {
         const alive = new Set(nextItems.map((item) => item.id));
-        for ( const key of displayOrder.keys() ) if ( !alive.has(key) ) displayOrder.delete(key);
+        for (const key of displayOrder.keys()) if (!alive.has(key)) displayOrder.delete(key);
     }
-    return [ ...nextItems ].sort((left, right) =>
-        ( displayOrder.get(right.id) ?? 0 ) - ( displayOrder.get(left.id) ?? 0 ));
+    return [...nextItems].sort((left, right) =>
+        (displayOrder.get(right.id) ?? 0) - (displayOrder.get(left.id) ?? 0));
 }
 
 async function load(keepSelection = true): Promise<void> {
-    if ( !desktop ) return;
+    if (!desktop) return;
     const id = ++request;
     loading.value = true;
+    loadError.value = "";
     try {
-        const kind = [ "text", "image", "files" ].includes(scope.value) ? scope.value as ClipboardKind : null;
-        const [ nextItems, nextStatus ] = await Promise.all([
+        const kind = ["text", "image", "files"].includes(scope.value) ? scope.value as ClipboardKind : null;
+        const [nextItems, nextStatus] = await Promise.all([
             clipboardService.list({
                 query: query.value.trim() || null,
                 kind,
@@ -204,33 +225,35 @@ async function load(keepSelection = true): Promise<void> {
             }),
             clipboardService.status(),
         ]);
-        if ( id !== request ) return;
+        if (id !== request) return;
         items.value = sortByStableOrder(nextItems);
         status.value = nextStatus;
-        if ( !keepSelection || !nextItems.some((item) => item.id === selectedId.value) ) {
-            selectedId.value = nextItems[0]?.id ?? null;
+        if (!keepSelection || !nextItems.some((item) => item.id === selectedId.value)) {
+            selectedId.value = displayedItems.value[0]?.id ?? null;
         }
         void loadThumbnails(nextItems);
-    } catch ( reason ) {
-        pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+    } catch (reason) {
+        if (id !== request) return;
+        loadError.value = reason instanceof Error ? reason.message : String(reason);
+        pushToast(loadError.value, "error");
     } finally {
-        if ( id === request ) loading.value = false;
+        if (id === request) loading.value = false;
     }
 }
 
 async function loadThumbnails(values: ClipboardItem[]): Promise<void> {
     const images = values.filter((item) => item.kind === "image" && !thumbnailUrls.value[item.id]).slice(0, 36);
     try {
-        const loaded = await Promise.all(images.map(async (item) => [ item.id, await clipboardService.imageThumbnailDataUrl(item.id, 72) ] as const));
+        const loaded = await Promise.all(images.map(async (item) => [item.id, await clipboardService.imageThumbnailDataUrl(item.id, 72)] as const));
         thumbnailUrls.value = { ...thumbnailUrls.value, ...Object.fromEntries(loaded) };
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
 
 async function selectFile(index: number): Promise<void> {
     const item = selected.value;
-    if ( !item || item.kind !== "files" ) return;
+    if (!item || item.kind !== "files") return;
     const id = ++filePreviewRequest;
     filePreviewIndex.value = index;
     filePreview.value = null;
@@ -238,25 +261,37 @@ async function selectFile(index: number): Promise<void> {
     filePreviewLoading.value = true;
     try {
         const preview = await clipboardService.filePreview(item.id, index);
-        if ( id === filePreviewRequest && selected.value?.id === item.id ) filePreview.value = preview;
-    } catch ( reason ) {
-        if ( id === filePreviewRequest ) filePreviewError.value = reason instanceof Error ? reason.message : String(reason);
+        if (id === filePreviewRequest && selected.value?.id === item.id) filePreview.value = preview;
+    } catch (reason) {
+        if (id === filePreviewRequest) filePreviewError.value = reason instanceof Error ? reason.message : String(reason);
     } finally {
-        if ( id === filePreviewRequest ) filePreviewLoading.value = false;
+        if (id === filePreviewRequest) filePreviewLoading.value = false;
     }
 }
 
 function scheduleLoad(): void {
-    if ( searchTimer !== undefined ) window.clearTimeout(searchTimer);
+    if (searchTimer !== undefined) window.clearTimeout(searchTimer);
     searchTimer = window.setTimeout(() => void load(false), 160);
+}
+
+function showCopied(id: string): void {
+    if (copiedTimer !== undefined) window.clearTimeout(copiedTimer);
+    copiedId.value = id;
+    copiedTimer = window.setTimeout(() => { copiedId.value = null; }, 1800);
+}
+
+function resetFilters(): void {
+    query.value = "";
+    scope.value = "all";
 }
 
 async function copy(item: ClipboardItem): Promise<void> {
     try {
         const updated = await clipboardService.copy(item.id);
         items.value = items.value.map((current) => current.id === updated.id ? updated : current);
+        showCopied(item.id);
         pushToast("已复制到系统剪贴板。", "success");
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
@@ -265,8 +300,9 @@ async function copyPlain(item: ClipboardItem): Promise<void> {
     try {
         const updated = await clipboardService.copyPlain(item.id);
         items.value = items.value.map((current) => current.id === updated.id ? updated : current);
+        showCopied(item.id);
         pushToast("已以纯文本写入系统剪贴板。", "success");
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
@@ -276,7 +312,7 @@ async function togglePin(item: ClipboardItem): Promise<void> {
         await clipboardService.setPinned(item.id, !item.pinned);
         await load();
         pushToast(item.pinned ? "已取消收藏。" : "已收藏，不参与自动清理。", "success");
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
@@ -286,7 +322,7 @@ async function remove(item: ClipboardItem): Promise<void> {
         await clipboardService.delete(item.id);
         await load(false);
         pushToast("记录已删除。", "success");
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
@@ -295,7 +331,7 @@ async function saveAsSnippet(item: ClipboardItem): Promise<void> {
     try {
         await clipboardService.saveAsSnippet(item.id);
         pushToast("已保存到片段库。", "success");
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
@@ -306,8 +342,8 @@ async function clearHistory(): Promise<void> {
         clearOpen.value = false;
         clearPinned.value = false;
         await load(false);
-        pushToast(`已删除 ${ count } 条记录。`, "success");
-    } catch ( reason ) {
+        pushToast(`已删除 ${count} 条记录。`, "success");
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
@@ -315,8 +351,8 @@ async function clearHistory(): Promise<void> {
 async function refreshAccessibility(): Promise<void> {
     try {
         status.value = await clipboardService.status();
-        if ( status.value.accessibilityGranted ) pushToast("辅助功能权限已生效。", "success");
-    } catch ( reason ) {
+        if (status.value.accessibilityGranted) pushToast("辅助功能权限已生效。", "success");
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
@@ -324,53 +360,70 @@ async function refreshAccessibility(): Promise<void> {
 async function requestAccessibility(): Promise<void> {
     try {
         await clipboardService.requestAccessibility();
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
 
 async function toggleCapture(): Promise<void> {
-    if ( !status.value ) return;
+    if (!status.value) return;
     try {
         status.value = await clipboardService.updateSettings({
             ...status.value.settings,
             enabled: !status.value.settings.enabled,
         });
         pushToast(status.value.settings.enabled ? "剪贴板采集已恢复。" : "剪贴板采集已暂停。", "success");
-    } catch ( reason ) {
+    } catch (reason) {
         pushToast(reason instanceof Error ? reason.message : String(reason), "error");
     }
 }
 
-function navigate(offset: number): void {
-    if ( !items.value.length ) return;
-    const index = Math.max(0, items.value.findIndex((item) => item.id === selectedId.value));
-    selectedId.value = items.value[Math.min(items.value.length - 1, Math.max(0, index + offset))]?.id ?? null;
+async function navigate(offset: number): Promise<void> {
+    const visible = displayedItems.value;
+    if (!visible.length) return;
+    const index = Math.max(0, visible.findIndex((item) => item.id === selectedId.value));
+    selectedId.value = visible[Math.min(visible.length - 1, Math.max(0, index + offset))]?.id ?? null;
+    await nextTick();
+    const active = historyScroll.value?.querySelector<HTMLButtonElement>(".history-item.selected .item-select");
+    active?.focus({ preventScroll: true });
+    active?.scrollIntoView({ block: "nearest" });
 }
 
 function keyboard(event: KeyboardEvent): void {
     const target = event.target as HTMLElement;
-    if ( [ "INPUT", "TEXTAREA" ].includes(target.tagName) ) return;
-    if ( event.key === "ArrowDown" ) {
+    if (clearOpen.value || permissionOpen.value || target.closest('[role="dialog"]')) return;
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchField.value?.querySelector("input")?.focus();
+        return;
+    }
+    if (event.key === "Escape" && previewExpanded.value) {
+        event.preventDefault();
+        previewExpanded.value = false;
+        return;
+    }
+    if (!workspace.value?.contains(target) || ["INPUT", "TEXTAREA"].includes(target.tagName) || target.isContentEditable) return;
+    if (target.closest("button, a, [role='button']") && !target.closest(".item-select")) return;
+    if (event.key === "ArrowDown") {
         event.preventDefault();
         navigate(1);
     }
-    if ( event.key === "ArrowUp" ) {
+    if (event.key === "ArrowUp") {
         event.preventDefault();
         navigate(-1);
     }
-    if ( event.key === " " ) {
+    if (event.key === " " && selected.value) {
         event.preventDefault();
         previewExpanded.value = !previewExpanded.value;
     }
-    if ( event.key === "Enter" && event.shiftKey && selected.value?.kind === "text" ) {
+    if (event.key === "Enter" && event.shiftKey && selected.value?.kind === "text") {
         event.preventDefault();
         void copyPlain(selected.value);
-    } else if ( event.key === "Enter" && selected.value ) {
+    } else if (event.key === "Enter" && selected.value) {
         event.preventDefault();
         void copy(selected.value);
     }
-    if ( ( event.key === "Delete" || event.key === "Backspace" ) && selected.value ) {
+    if ((event.key === "Delete" || event.key === "Backspace") && selected.value) {
         event.preventDefault();
         void remove(selected.value);
     }
@@ -378,36 +431,51 @@ function keyboard(event: KeyboardEvent): void {
 
 watch(query, scheduleLoad);
 watch(scope, () => void load(false));
+watch(() => status.value?.accessibilityGranted, (granted) => {
+    if (granted) permissionOpen.value = false;
+});
+watch(selectedId, () => { previewExpanded.value = false; });
 watch(selected, async (item) => {
-    previewExpanded.value = false;
     imageDataUrl.value = "";
     filePreviewRequest += 1;
     filePreview.value = null;
     filePreviewIndex.value = 0;
     filePreviewLoading.value = false;
     filePreviewError.value = "";
-    if ( item?.kind === "image" ) {
+    if (item?.kind === "image") {
         try {
-            imageDataUrl.value = await clipboardService.imageDataUrl(item.id);
-        } catch ( reason ) {
+            const dataUrl = await clipboardService.imageDataUrl(item.id);
+            if (selected.value?.id === item.id) imageDataUrl.value = dataUrl;
+        } catch (reason) {
             pushToast(reason instanceof Error ? reason.message : String(reason), "error");
         }
-    } else if ( item?.kind === "files" ) {
+    } else if (item?.kind === "files") {
         await selectFile(0);
     }
 });
 
 onMounted(async () => {
-    if ( !desktop ) return;
+    if (!desktop) return;
     window.addEventListener("keydown", keyboard);
-    unlisten = await listen("clipboard-history-updated", () => void load());
-    unlistenFocus = await getCurrentWindow().onFocusChanged(({ payload }) => {
-        if ( payload ) void refreshAccessibility();
-    });
-    await load(false);
+    void load(false);
+    try {
+        const stopHistory = await listen("clipboard-history-updated", () => void load());
+        if (disposed) { stopHistory(); return; }
+        unlisten = stopHistory;
+        const stopFocus = await getCurrentWindow().onFocusChanged(({ payload }) => {
+            if (payload) void refreshAccessibility();
+        });
+        if (disposed) stopFocus();
+        else unlistenFocus = stopFocus;
+    } catch (reason) {
+        if (!disposed) pushToast(`自动更新暂不可用，请重新打开页面重试：${String(reason)}`, "warn");
+    }
 });
 onUnmounted(() => {
-    if ( searchTimer !== undefined ) window.clearTimeout(searchTimer);
+    disposed = true;
+    request += 1;
+    if (searchTimer !== undefined) window.clearTimeout(searchTimer);
+    if (copiedTimer !== undefined) window.clearTimeout(copiedTimer);
     window.removeEventListener("keydown", keyboard);
     unlisten?.();
     unlistenFocus?.();
@@ -416,162 +484,189 @@ onUnmounted(() => {
 
 <template>
     <section v-if="!desktop" class="unavailable">
-        <Clipboard :size="38"/>
+        <Clipboard :size="38" />
         <strong>剪贴板历史仅在桌面端可用</strong>
         <p>系统监听、全局快捷键和本机历史记录需要通过 Tauri 桌面应用运行。</p>
     </section>
-    <section v-else class="clipboard-workspace">
+    <section v-else ref="workspace" class="clipboard-workspace">
         <section class="clipboard-card">
             <header aria-label="剪贴板历史操作" class="clipboard-toolbar">
                 <div class="toolbar-identity">
-                    <span :class="{ paused: !status?.settings.enabled }" class="capture-state"><i/>{{
-                            status?.settings.enabled ? "正在记录" : "已暂停"
+                    <span :class="{ paused: status && !status.settings.enabled, pending: !status }"
+                        class="capture-state" role="status"><i />{{
+                            !status ? (loading ? "正在读取" : "未连接") : status.settings.enabled ? "正在记录" : "已暂停"
                         }}</span>
                 </div>
-                <div class="search-field">
-                    <Search :size="17"/>
-                    <Input v-model="query" aria-label="搜索剪贴板历史" placeholder="搜索内容或来源应用…"/>
+                <div ref="searchField" class="search-field">
+                    <Search :size="17" />
+                    <Input v-model="query" aria-label="搜索剪贴板历史" placeholder="搜索内容或来源应用…" />
                     <button v-if="query" aria-label="清除搜索" type="button" @click="query = ''">
-                        <X :size="15"/>
+                        <X :size="15" />
                     </button>
+                    <kbd v-else>{{ searchShortcut }}</kbd>
                 </div>
                 <div class="toolbar-actions">
-                    <Button size="sm" type="button" variant="ghost" @click="toggleCapture">
-                        <Pause v-if="status?.settings.enabled" :size="15"/>
-                        <Play v-else :size="15"/>
-                        {{ status?.settings.enabled ? "暂停" : "继续" }}
+                    <Button :disabled="!status" size="sm" type="button" variant="ghost" @click="toggleCapture">
+                        <Pause v-if="!status || status.settings.enabled" :size="15" />
+                        <Play v-else :size="15" />
+                        {{ !status || status.settings.enabled ? "暂停记录" : "恢复记录" }}
                     </Button>
-                    <Button aria-label="清空历史" size="icon" title="清空历史" type="button" variant="ghost"
-                            @click="clearOpen = true">
-                        <Trash2 :size="17"/>
+                    <Button :disabled="!status?.total" aria-label="清空历史" size="icon" title="清空历史" type="button"
+                        variant="ghost" @click="clearOpen = true">
+                        <Trash2 :size="17" />
                     </Button>
                 </div>
             </header>
 
-            <div v-if="status && !status.accessibilityGranted" class="permission-banner">
-                <ShieldAlert :size="17"/>
-                <div>
-                    <strong>需要辅助功能权限</strong><span>请在“系统设置 → 隐私与安全性 → 辅助功能”中允许当前运行程序，然后返回此窗口复检。</span><small>{{
-                        status.accessibilityTarget
-                    }}</small></div>
-                <span class="permission-actions">
-                    <Button size="sm" type="button" variant="outline" @click="requestAccessibility">去授权</Button>
-                    <Button size="sm" type="button" variant="outline" @click="refreshAccessibility">重新检查</Button>
-                </span>
-            </div>
-
             <nav aria-label="内容类型筛选" class="clipboard-sidebar">
-                <button v-for="item in scopes" :key="item.value" :class="{ active: scope === item.value }" type="button"
-                        @click="scope = item.value">
-                    <component :is="item.icon" :size="15"/>
+                <button v-for="item in scopes" :key="item.value" :class="{ active: scope === item.value }"
+                    :aria-pressed="scope === item.value" type="button" @click="scope = item.value">
+                    <component :is="item.icon" :size="15" />
                     <span>{{ item.label }}</span>
+                    <small>{{ status ? scopeCount(item.value) : '–' }}</small>
                 </button>
-                <div class="sidebar-foot">
-                    <ShieldCheck :size="14"/>
-                    <span>内容仅存储在本机</span></div>
+
             </nav>
 
-            <div :class="{ 'preview-expanded': previewExpanded }" class="clipboard-layout">
-                <main class="history-pane">
-                    <div v-if="loading && !items.length" class="center-state">正在读取本机历史…</div>
-                    <div v-else-if="!items.length" class="center-state empty-state"><span class="empty-icon"><ClipboardCheck
-                        :size="27"/></span><strong>{{
-                            query || scope !== "all" ? "没有匹配的记录" : "等待第一次复制"
-                        }}</strong>
-                        <p>{{
-                                query || scope !== "all" ? "换个关键词，或查看其他内容类型。" : "复制文本、图片或文件后，它们会自动出现在这里。"
-                            }}</p></div>
-                    <div v-else class="history-scroll">
+            <section v-if="loadError || !items.length" class="workspace-state" :aria-busy="loading">
+                <div v-if="loadError" class="workspace-state-content" role="alert">
+                    <ShieldAlert :size="32" />
+                    <strong>暂时无法读取历史</strong>
+                    <p>{{ loadError }}</p>
+                    <Button size="sm" variant="outline" :disabled="loading" @click="load()">重新加载</Button>
+                </div>
+                <div v-else-if="loading" class="workspace-state-content" role="status">
+                    <LoaderCircle :size="28" class="state-loading" />
+                    <strong>正在读取剪贴板历史</strong>
+                    <p>正在连接本机记录，请稍候。</p>
+                </div>
+                <div v-else class="workspace-state-content">
+                    <Search v-if="query.trim() || scope !== 'all'" :size="32" />
+                    <Pause v-else-if="status && !status.settings.enabled" :size="32" />
+                    <ClipboardCheck v-else :size="32" />
+                    <strong>{{ query.trim() || scope !== 'all' ? '没有匹配的记录' :
+                        status && !status.settings.enabled ? '剪贴板记录已暂停' : '还没有剪贴板记录' }}</strong>
+                    <p>{{ query.trim() || scope !== 'all' ? '试试其他关键词，或查看全部记录。' :
+                        status && !status.settings.enabled ? '恢复记录后，新复制的内容会自动保存在这里。' :
+                        '复制一段文字、一张图片或一个文件，即可在这里找回。' }}</p>
+                    <Button v-if="query.trim() || scope !== 'all'" size="sm" variant="outline"
+                        @click="resetFilters">查看全部记录</Button>
+                    <Button v-else-if="status && !status.settings.enabled" size="sm" variant="outline" @click="toggleCapture">
+                        <Play :size="14" />恢复记录
+                    </Button>
+                </div>
+            </section>
+            <div v-else :class="{ 'preview-expanded': previewExpanded }" class="clipboard-layout">
+                <main class="history-pane" aria-label="历史记录" :aria-busy="loading">
+                    <div ref="historyScroll" class="history-scroll">
                         <section v-for="group in groups" :key="group.key" class="history-group">
-                            <header><span>{{ group.label }}</span></header>
-                            <article v-for="item in group.items" :key="item.id" :class="{ selected: selectedId === item.id }"
-                                     class="history-item" tabindex="0"
-                                     @click="selectedId = item.id" @dblclick="copy(item)"
-                                     @keydown.enter.prevent="copy(item)">
-                                <span :data-kind="item.kind" class="kind-mark"><img
-                                    v-if="item.kind === 'image' && thumbnailUrls[item.id]" :src="thumbnailUrls[item.id]"
-                                    alt=""/><component :is="kindIcon(item.kind)" v-else :size="16"/></span>
-                                <div class="item-copy"><strong>{{
+                            <header>
+                                <Pin v-if="group.key === 'pinned'" :size="12" /><span>{{ group.label }}</span><small>{{
+                                    group.items.length }}</small>
+                            </header>
+                            <article v-for="item in group.items" :key="item.id"
+                                :class="{ selected: selectedId === item.id }" class="history-item">
+                                <button class="item-select" type="button" :aria-pressed="selectedId === item.id"
+                                    @focus="selectedId = item.id" @click="selectedId = item.id" @dblclick="copy(item)">
+                                    <span :data-kind="item.kind" class="kind-mark"><img
+                                            v-if="item.kind === 'image' && thumbnailUrls[item.id]"
+                                            :src="thumbnailUrls[item.id]" alt="" />
+                                        <component :is="kindIcon(item.kind)" v-else :size="16" />
+                                    </span>
+                                    <div class="item-copy"><strong>{{
                                         itemTitle(item)
-                                    }}</strong><span>{{ item.sourceApp || "未知来源" }} · {{
-                                        formatTime(item.updatedAt)
-                                    }}<template v-if="item.copyCount > 1"> · 使用 {{
-                                            item.copyCount
-                                        }} 次</template></span></div>
+                                            }}</strong><span>{{ item.sourceApp || "未知来源" }} · {{
+                                                formatTime(item.updatedAt)
+                                            }}<template v-if="item.copyCount > 1"> · 使用 {{
+                                                item.copyCount
+                                                }} 次</template></span></div>
+                                </button>
                                 <div class="item-actions">
                                     <button aria-label="复制" title="复制" type="button" @click.stop="copy(item)">
-                                        <Copy :size="14"/>
+                                        <Check v-if="copiedId === item.id" :size="14" />
+                                        <Copy v-else :size="14" />
                                     </button>
-                                    <button :aria-label="item.pinned ? '取消收藏' : '收藏'" :title="item.pinned ? '取消收藏' : '收藏'"
-                                            type="button"
-                                            @click.stop="togglePin(item)">
-                                        <PinOff v-if="item.pinned" :size="14"/>
-                                        <Pin v-else :size="14"/>
+                                    <button :aria-label="item.pinned ? '取消收藏' : '收藏'"
+                                        :title="item.pinned ? '取消收藏' : '收藏'" type="button"
+                                        @click.stop="togglePin(item)">
+                                        <PinOff v-if="item.pinned" :size="14" />
+                                        <Pin v-else :size="14" />
                                     </button>
                                 </div>
-                                <Pin v-if="item.pinned" :size="13" class="pin-mark"/>
+                                <Pin v-if="item.pinned" :size="13" class="pin-mark" />
                             </article>
                         </section>
                     </div>
                 </main>
 
-                <aside class="preview-pane">
+                <aside class="preview-pane" aria-label="内容预览">
+                    <div class="preview-label"><span>内容预览</span><span v-if="selected">{{ selectedPosition }} / {{
+                            items.length }}</span>
+                    </div>
                     <div v-if="selected" class="preview-content">
                         <header class="preview-head">
-                            <span :data-kind="selected.kind" class="kind-chip"><component :is="kindIcon(selected.kind)"
-                                                                                          :size="13"/>{{
-                                    kindLabel(selected.kind)
-                                }}</span>
-                           <div class="preview-head-actions">
+                            <div class="preview-heading">
+                                <span :data-kind="selected.kind" class="kind-chip">
+                                    <component :is="kindIcon(selected.kind)" :size="13" />{{
+                                        kindLabel(selected.kind)
+                                    }}
+                                </span>
+                                <strong :title="itemTitle(selected)">{{ itemTitle(selected) }}</strong>
+                                <span>{{ selected.kind === 'text' ? selected.content.length.toLocaleString() + ' 字符' :
+                                    formatBytes(selected.sizeBytes) }}<template v-if="selected.pinned"> ·
+                                        已收藏，长期保留</template></span>
+                            </div>
+                            <div class="preview-head-actions">
 
-                                <button v-if="selected.kind === 'text' && selected.content.length > 600" :aria-label="previewExpanded ? '收起预览' : '展开预览'"
-                                        type="button"
-                                        @click="previewExpanded = !previewExpanded">
-                                    <Minimize2 v-if="previewExpanded" :size="15"/>
-                                    <Maximize2 v-else :size="15"/>
+                                <button :aria-label="previewExpanded ? '收起预览' : '展开预览'"
+                                    :title="previewExpanded ? '收起预览' : '展开预览'" type="button"
+                                    @click="previewExpanded = !previewExpanded">
+                                    <Minimize2 v-if="previewExpanded" :size="15" />
+                                    <Maximize2 v-else :size="15" />
                                 </button>
-                                <button :aria-label="selected.pinned ? '取消收藏' : '收藏'" type="button"
-                                        @click="togglePin(selected)">
-                                    <PinOff v-if="selected.pinned" :size="16"/>
-                                    <Pin v-else :size="16"/>
+                                <button :aria-label="selected.pinned ? '取消收藏' : '收藏'"
+                                    :title="selected.pinned ? '取消收藏' : '收藏'" type="button" @click="togglePin(selected)">
+                                    <PinOff v-if="selected.pinned" :size="16" />
+                                    <Pin v-else :size="16" />
                                 </button>
                             </div>
                         </header>
                         <div :class="{ 'file-preview-body': selected.kind === 'files' }" class="preview-body">
                             <pre v-if="selected.kind === 'text'">{{ selected.content }}</pre>
                             <div v-else-if="selected.kind === 'image'" class="image-preview"><img v-if="imageDataUrl"
-                                                                                                  :src="imageDataUrl"
-                                                                                                  alt="剪贴板图片预览"/><span
-                                v-else>正在读取图片…</span></div>
+                                    :src="imageDataUrl" alt="剪贴板图片预览" /><span v-else>正在读取图片…</span></div>
                             <div v-else :class="{ 'has-file-list': filePaths.length > 1 }" class="file-preview">
-                                <nav v-if="filePaths.length > 1" aria-label="选择要预览的文件"
-                                     class="file-preview-list">
-                                    <button v-for="(path, index) in filePaths" :key="path" :class="{ active: filePreviewIndex === index }"
-                                            type="button" @click="selectFile(index)">
-                                        <File :size="15"/>
+                                <nav v-if="filePaths.length > 1" aria-label="选择要预览的文件" class="file-preview-list">
+                                    <button v-for="(path, index) in filePaths" :key="path"
+                                        :class="{ active: filePreviewIndex === index }" type="button"
+                                        @click="selectFile(index)">
+                                        <File :size="15" />
                                         <span>{{ path.split(/[\\/]/).pop() }}</span>
                                     </button>
                                 </nav>
                                 <section class="file-preview-content">
                                     <header v-if="filePreview">
                                         <div>
-                                            <File :size="15"/>
-                                            <strong>{{ filePreview.name }}</strong></div>
-                                        <span>{{ formatBytes(filePreview.sizeBytes) }}</span></header>
+                                            <File :size="15" />
+                                            <strong>{{ filePreview.name }}</strong>
+                                        </div>
+                                        <span>{{ formatBytes(filePreview.sizeBytes) }}</span>
+                                    </header>
                                     <div v-if="filePreviewLoading" class="file-preview-state">正在读取文件…</div>
                                     <div v-else-if="filePreviewError" class="file-preview-state error">
                                         {{ filePreviewError }}
                                     </div>
                                     <img v-else-if="filePreview?.kind === 'image' && filePreview.dataUrl"
-                                         :alt="filePreview.name" :src="filePreview.dataUrl"/>
+                                        :alt="filePreview.name" :src="filePreview.dataUrl" />
                                     <iframe v-else-if="filePreview?.kind === 'pdf' && filePreview.dataUrl"
-                                            :src="filePreview.dataUrl" :title="filePreview.name"/>
-                                    <pre v-if="filePreview?.kind === 'text'">{{ filePreview.content }}</pre>
+                                        :src="filePreview.dataUrl" :title="filePreview.name" />
+                                    <pre v-else-if="filePreview?.kind === 'text'">{{ filePreview.content }}</pre>
                                     <div v-else-if="filePreview" class="file-preview-state">
-                                        <File :size="30"/>
+                                        <File :size="30" />
                                         <strong>无法预览此文件</strong><span>{{
                                             filePreview.message
-                                        }}</span><small>{{ filePreview.path }}</small></div>
+                                            }}</span><small>{{ filePreview.path }}</small>
+                                    </div>
                                 </section>
                             </div>
                         </div>
@@ -595,39 +690,80 @@ onUnmounted(() => {
                                 </div>
                             </dl>
                             <footer class="preview-actions">
-                                <Button type="button" @click="copy(selected)">
-                                    <Copy :size="15"/>
-                                    复制
+                                <Button class="primary-copy" type="button" @click="copy(selected)">
+                                    <Check v-if="copiedId === selected.id" :size="15" />
+                                    <Copy v-else :size="15" />
+                                    {{ copiedId === selected.id ? '已复制' : '复制内容' }}
+                                    <kbd>↵</kbd>
                                 </Button>
                                 <Button v-if="selected.kind === 'text'" type="button" variant="outline"
-                                        @click="copyPlain(selected)">
-                                    <AlignLeft :size="15"/>
-                                    纯文本
+                                    @click="copyPlain(selected)">
+                                    <AlignLeft :size="15" />
+                                    复制纯文本
                                 </Button>
                                 <Button v-if="selected.kind === 'text'" type="button" variant="outline"
-                                        @click="saveAsSnippet(selected)">
-                                    <Plus :size="15"/>
+                                    @click="saveAsSnippet(selected)">
+                                    <Plus :size="15" />
                                     保存为片段
                                 </Button>
-                                <Button aria-label="删除记录" class="delete-btn" size="icon" type="button" variant="ghost"
-                                        @click="remove(selected)">
-                                    <Trash2 :size="16"/>
+                                <Button aria-label="删除记录" title="删除记录" class="delete-btn" size="icon" type="button"
+                                    variant="ghost" @click="remove(selected)">
+                                    <Trash2 :size="16" />
                                 </Button>
                             </footer>
                         </section>
                     </div>
                     <div v-else class="preview-empty">
-                        <Clipboard :size="28"/>
-                        <span>选择一条记录查看完整内容</span></div>
+                        <span class="preview-empty-icon">
+                            <Clipboard :size="30" />
+                        </span>
+                        <strong>复制过的内容，随时找回</strong>
+                        <span>在左侧选择记录，查看完整内容并再次复制。</span>
+                    </div>
+                    <button v-if="previewExpanded" class="back-to-list" type="button" @click="previewExpanded = false">
+                        <ArrowLeft :size="14" />返回记录列表 <kbd>Esc</kbd>
+                    </button>
                 </aside>
             </div>
 
             <footer class="clipboard-statusbar">
-                <span>{{ items.length }} 条记录<template v-if="status?.pinned"> · {{ status.pinned }} 条收藏</template></span>
-                <span class="retention-note"><Clock3 :size="13"/>{{
+                <PopoverRoot v-if="status && !status.accessibilityGranted" v-model:open="permissionOpen">
+                    <PopoverTrigger as-child>
+                        <button class="permission-status" type="button" aria-label="辅助功能未授权，查看授权说明">
+                            <ShieldAlert :size="14" />
+                            <span>辅助功能未授权</span>
+                            <ChevronUp :size="12" />
+                        </button>
+                    </PopoverTrigger>
+                    <PopoverPortal>
+                        <PopoverContent class="clipboard-permission-popover" side="top" align="start"
+                            :side-offset="12" :collision-padding="16" aria-label="辅助功能权限">
+                            <div class="permission-details">
+                                <strong>开启辅助功能权限</strong>
+                                <p>在“系统设置 → 隐私与安全性 → 辅助功能”中允许当前运行程序，返回此窗口后会自动检查。</p>
+                                <div v-if="status.accessibilityTarget" class="permission-target">
+                                    <span>当前运行程序</span>
+                                    <code>{{ status.accessibilityTarget }}</code>
+                                </div>
+                                <div class="permission-actions">
+                                    <Button size="sm" type="button" @click="requestAccessibility">去授权</Button>
+                                    <Button size="sm" type="button" variant="outline" @click="refreshAccessibility">重新检查</Button>
+                                </div>
+                            </div>
+                        </PopoverContent>
+                    </PopoverPortal>
+                </PopoverRoot>
+                <span v-else-if="items.length && !loadError" class="keyboard-hints"><span><kbd>↑</kbd><kbd>↓</kbd> 切换</span><span><kbd>↵</kbd>
+                        复制</span><span><kbd>Space</kbd> 展开预览</span></span>
+                <span v-else class="local-note">历史记录仅保存在本机</span>
+                <span v-if="status" class="retention-note" title="收藏记录不参与自动清理">
+                    <Clock3 :size="13" />未收藏保留 {{
                         status?.settings.ttlDays ?? 3
-                    }} 天 · 最多 {{ status?.settings.maxItems ?? 100 }} 条</span>
-                <kbd>{{ shortcutLabel(status?.settings.shortcut ?? "CommandOrControl+Shift+V") }}</kbd>
+                    }} 天 · 上限 {{ status?.settings.maxItems ?? 100 }} 条
+                </span>
+                <span v-if="status?.settings.shortcut" class="panel-shortcut" title="在任意应用中打开剪贴板快捷面板">快捷面板 <kbd>{{
+                    shortcutLabel(status?.settings.shortcut ??
+                        "CommandOrControl+Shift+V") }}</kbd></span>
             </footer>
         </section>
 
@@ -637,8 +773,9 @@ onUnmounted(() => {
             <DialogDescription class="dialog-desc">将删除 {{ unpinnedCount }} 条未收藏记录，此操作无法撤销。
             </DialogDescription>
             <label class="clear-pinned">
-                <Checkbox v-model="clearPinned"/>
-                <span>同时删除 {{ status?.pinned ?? 0 }} 条收藏记录</span></label>
+                <Checkbox v-model="clearPinned" />
+                <span>同时删除 {{ status?.pinned ?? 0 }} 条收藏记录</span>
+            </label>
             <footer class="dialog-actions">
                 <Button type="button" variant="outline" @click="clearOpen = false">取消</Button>
                 <Button type="button" variant="destructive" @click="clearHistory">确认清空</Button>
@@ -656,6 +793,7 @@ onUnmounted(() => {
     min-height: 0;
     overflow: hidden;
     color: var(--text);
+    container: clipboard / inline-size;
 }
 
 .clipboard-card {
@@ -665,52 +803,47 @@ onUnmounted(() => {
     flex: 1;
     flex-direction: column;
     overflow: hidden;
-    border-radius: 20px;
-    background: var(--surface);
-    box-shadow: 0 1px 3px rgba(26, 29, 38, .06);
+    background: transparent;
 }
 
 .clipboard-toolbar {
     display: grid;
-    min-height: 60px;
+    min-height: 64px;
     flex: 0 0 auto;
-    grid-template-columns:auto minmax(260px, 560px) auto;
+    grid-template-columns: minmax(200px, 360px) minmax(0, 1fr) auto;
     align-items: center;
-    gap: 16px;
-    padding: 16px 20px 10px;
+    gap: 12px;
+    padding: 14px 24px 10px;
 }
 
-.toolbar-identity, .toolbar-actions {
+.toolbar-identity,
+.toolbar-actions {
     display: flex;
     align-items: center;
 }
 
 .toolbar-identity {
+    grid-column: 2;
+    grid-row: 1;
     min-width: 0;
-    gap: 10px;
-}
-
-.toolbar-identity h1 {
-    margin: 0;
-    color: var(--text);
-    font-size: 16px;
-    font-weight: 720;
-    letter-spacing: -.02em;
-    white-space: nowrap;
+    justify-self: end;
 }
 
 .toolbar-actions {
+    grid-column: 3;
+    grid-row: 1;
     justify-content: flex-end;
-    gap: 2px;
+    gap: 4px;
 }
 
 .capture-state {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    padding: 0 8px;
     color: var(--u-ok);
-    font-size: 10px;
-    font-weight: 650;
+    font-size: 11px;
+    font-weight: 550;
     white-space: nowrap;
 }
 
@@ -719,7 +852,7 @@ onUnmounted(() => {
     height: 6px;
     border-radius: 50%;
     background: currentColor;
-    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+    opacity: .85;
 }
 
 .capture-state.paused {
@@ -728,29 +861,35 @@ onUnmounted(() => {
 
 .search-field {
     display: flex;
+    grid-column: 1;
+    grid-row: 1;
     width: 100%;
-    min-width: 180px;
-    height: 40px;
+    min-width: 0;
+    height: 36px;
     align-items: center;
-    gap: 10px;
-    padding: 0 14px;
-    border-radius: 12px;
-    background: var(--surface-3);
-    color: var(--text-subtle);
+    gap: 8px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    transition: border-color .15s, box-shadow .15s;
 }
 
 .search-field:focus-within {
-    background: var(--surface-3);
-    box-shadow: 0 0 0 2px var(--accent-weak);
+    border-color: var(--accent);
+    background: var(--surface);
+    box-shadow: 0 0 0 3px var(--accent-weak);
 }
 
 .search-field .cn-input {
     min-width: 0;
-    height: 38px;
+    height: 32px;
     border: 0;
     background: transparent;
     box-shadow: none;
     padding: 0;
+    font-size: 13px;
 }
 
 .search-field button {
@@ -763,71 +902,108 @@ onUnmounted(() => {
     cursor: pointer;
 }
 
-.permission-banner {
-    display: flex;
-    min-height: 38px;
+.permission-status {
+    display: inline-flex;
+    min-height: 26px;
     flex: 0 0 auto;
     align-items: center;
-    gap: 9px;
-    padding: 7px 16px;
-    background: color-mix(in srgb, var(--u-warn) 6%, var(--surface));
+    gap: 6px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.permission-status>svg:first-child {
     color: var(--u-warn);
 }
 
-.permission-banner div {
+.permission-status:hover,
+.permission-status[data-state="open"] {
+    color: var(--text);
+}
+
+:global(.clipboard-permission-popover) {
+    z-index: 60;
+    width: min(360px, calc(100vw - 32px));
+    max-height: var(--reka-popover-content-available-height);
+    overflow-y: auto;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+    color: var(--text);
+}
+
+.permission-details {
+    display: grid;
+    gap: 12px;
+}
+
+.permission-details>strong {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.permission-details p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.75;
+}
+
+.permission-target {
     display: grid;
     min-width: 0;
-    gap: 2px;
-}
-
-.permission-banner strong {
-    font-size: .72rem;
-}
-
-.permission-banner span, .permission-banner small {
-    overflow: hidden;
-    color: var(--text-muted);
-    font-size: .69rem;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.permission-banner small {
+    gap: 5px;
     color: var(--text-subtle);
+    font-size: 11px;
+}
+
+.permission-target code {
+    color: var(--text-muted);
     font-family: var(--font-mono);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    user-select: text;
 }
 
 .permission-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
-    margin-left: auto;
-    flex: 0 0 auto;
 }
 
 .clipboard-sidebar {
     display: flex;
     min-width: 0;
-    min-height: 46px;
     flex: 0 0 auto;
     align-items: center;
-    gap: 4px;
-    padding: 6px 20px 14px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 24px 12px;
 }
 
+/* 原型风格：类型筛选做成药丸（active = accent-soft 底 + accent 文字）。 */
 .clipboard-sidebar button {
-    display: flex;
-    height: 36px;
+    display: inline-flex;
+    height: 28px;
     align-items: center;
-    gap: 7px;
-    padding: 0 14px;
-    border: 0;
-    border-radius: 10px;
+    gap: 6px;
+    padding: 0 12px;
+    border: 1px solid transparent;
+    border-radius: 20px;
     background: transparent;
     color: var(--text-muted);
     font: inherit;
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
     cursor: pointer;
+    transition: background-color .18s, color .18s;
 }
 
 .clipboard-sidebar button:hover {
@@ -848,7 +1024,7 @@ onUnmounted(() => {
     margin-left: auto;
     padding-right: 4px;
     color: var(--text-subtle);
-    font-size: .65rem;
+    font-size: 11px;
     white-space: nowrap;
 }
 
@@ -856,9 +1032,8 @@ onUnmounted(() => {
     display: grid;
     min-height: 0;
     flex: 1;
-    grid-template-columns:minmax(320px, 42%) minmax(420px, 58%);
+    grid-template-columns: minmax(280px, 34%) minmax(0, 1fr);
     overflow: hidden;
-    border-top: 1px solid var(--surface-3);
 }
 
 .history-pane {
@@ -866,7 +1041,7 @@ onUnmounted(() => {
     min-width: 0;
     min-height: 0;
     flex-direction: column;
-    border-right: 1px solid var(--surface-3);
+    border-right: 1px solid var(--border);
 }
 
 .history-scroll {
@@ -880,56 +1055,88 @@ onUnmounted(() => {
     scrollbar-width: thin;
 }
 
-.history-scroll::-webkit-scrollbar, .preview-body::-webkit-scrollbar {
+.history-scroll::-webkit-scrollbar,
+.preview-body::-webkit-scrollbar {
     width: 8px;
 }
 
-.history-scroll::-webkit-scrollbar-track, .preview-body::-webkit-scrollbar-track {
+.history-scroll::-webkit-scrollbar-track,
+.preview-body::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.history-scroll::-webkit-scrollbar-thumb, .preview-body::-webkit-scrollbar-thumb {
+.history-scroll::-webkit-scrollbar-thumb,
+.preview-body::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
     border-radius: 999px;
     background: color-mix(in srgb, var(--text) 22%, transparent);
     background-clip: padding-box;
 }
 
-.history-group > header {
-    padding: 12px 16px 5px;
+.history-group>header {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 550;
+}
+
+.history-group>header::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    margin-left: 6px;
+    background: var(--border);
+}
+
+.history-group>header small {
+    font-size: 10px;
     color: var(--text-subtle);
-    font-size: .65rem;
-    font-weight: 700;
-    letter-spacing: .02em;
 }
 
 .history-item {
+    position: relative;
     display: flex;
-    min-height: 66px;
+    min-height: 78px;
+    align-items: center;
+    margin: 0 10px 9px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface);
+    content-visibility: auto;
+    contain-intrinsic-size: 78px;
+    transition: border-color .18s, background-color .18s;
+}
+
+.item-select {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    min-height: 76px;
     align-items: center;
     gap: 12px;
-    margin: 0 10px 2px;
-    padding: 10px;
+    padding: 12px 38px 12px 12px;
     border: 0;
-    border-radius: 12px;
-    content-visibility: auto;
-    contain-intrinsic-size: 66px;
+    border-radius: inherit;
+    background: transparent;
+    color: inherit;
+    text-align: left;
     cursor: pointer;
-    transition: background-color .13s;
 }
 
 .history-item:hover {
-    background: var(--surface-2);
+    border-color: var(--border-strong);
 }
 
 .history-item.selected {
-    background: var(--surface-2);
-    box-shadow: inset 0 0 0 1px var(--border);
-}
-
-.history-item:focus-visible {
-    outline: 2px solid var(--accent-ring);
-    outline-offset: -2px;
+    border-color: var(--accent);
+    background: var(--accent-weak);
 }
 
 .kind-mark {
@@ -949,8 +1156,8 @@ onUnmounted(() => {
 }
 
 .kind-mark[data-kind="files"] {
-    background: color-mix(in srgb, #8b67d8 12%, var(--surface));
-    color: #7567d8;
+    background: color-mix(in srgb, var(--u-warn) 10%, var(--surface));
+    color: var(--u-warn);
 }
 
 .item-copy {
@@ -962,19 +1169,22 @@ onUnmounted(() => {
     display: -webkit-box;
     overflow: hidden;
     color: var(--text);
-    font-size: .76rem;
-    font-weight: 630;
-    line-height: 1.45;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.5;
+    word-break: break-all;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
 }
 
 .item-copy span {
     display: block;
-    margin-top: 3px;
+    margin-top: 5px;
     overflow: hidden;
-    color: var(--text-subtle);
-    font-size: .65rem;
+    color: var(--text-muted);
+    font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -985,21 +1195,25 @@ onUnmounted(() => {
 }
 
 .item-actions {
+    position: absolute;
+    right: 7px;
     display: flex;
-    flex: 0 0 auto;
+    flex-direction: column;
     gap: 2px;
     opacity: 0;
     transition: opacity .13s;
 }
 
-.history-item:hover .item-actions, .history-item:focus-within .item-actions, .history-item.selected .item-actions {
+.history-item:hover .item-actions,
+.history-item:focus-within .item-actions,
+.history-item.selected .item-actions {
     opacity: 1;
 }
 
 .item-actions button {
     display: grid;
-    width: 27px;
-    height: 27px;
+    width: 28px;
+    height: 28px;
     place-items: center;
     padding: 0;
     border: 0;
@@ -1015,7 +1229,10 @@ onUnmounted(() => {
 }
 
 .history-item .pin-mark {
+    position: absolute;
+    right: 14px;
     display: none;
+    pointer-events: none;
 }
 
 .history-item:not(:hover):not(:focus-within):not(.selected) .pin-mark {
@@ -1027,24 +1244,24 @@ onUnmounted(() => {
     min-width: 0;
     min-height: 0;
     flex-direction: column;
-    padding: 16px 22px 18px;
-    background: var(--surface);
+    padding: 0 24px 20px;
 }
 
 .preview-content {
     display: flex;
-    height: 100%;
+    flex: 1;
     min-height: 0;
     flex-direction: column;
 }
 
 .preview-head {
     display: flex;
-    min-height: 32px;
+    min-height: 48px;
     flex: 0 0 auto;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 18px;
     padding: 0;
 }
 
@@ -1068,14 +1285,17 @@ onUnmounted(() => {
 .kind-chip {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 5px;
+    padding: 3px 7px;
+    border-radius: 5px;
+    background: var(--surface-2);
     color: var(--u-ok);
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 550;
 }
 
 .kind-chip[data-kind="files"] {
-    color: #7567d8;
+    color: var(--u-warn);
 }
 
 .kind-chip[data-kind="text"] {
@@ -1083,14 +1303,11 @@ onUnmounted(() => {
 }
 
 .preview-body {
-    min-height: 150px;
+    min-height: 0;
     flex: 1;
     overflow-x: hidden;
     overflow-y: auto;
-    padding: 16px;
-    border: 1px solid var(--surface-3);
-    border-radius: 12px;
-    background: var(--surface-2);
+    padding: 8px 0;
     scrollbar-color: color-mix(in srgb, var(--text) 22%, transparent) transparent;
     scrollbar-width: thin;
 }
@@ -1100,27 +1317,26 @@ onUnmounted(() => {
     margin: 0;
     color: var(--text);
     font-family: var(--font-mono);
-    font-size: 12px;
-    line-height: 1.75;
+    font-size: 13px;
+    line-height: 1.85;
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .image-preview {
     display: grid;
     height: 100%;
-    min-height: 190px;
+    min-height: 0;
     place-items: center;
-    border-radius: 8px;
-    background: var(--surface-2);
-    color: var(--text-subtle);
+    color: var(--text-muted);
 }
 
 .image-preview img {
     display: block;
     width: 100%;
     height: 100%;
-    max-height: 420px;
+    min-height: 0;
+    max-height: 100%;
     object-fit: contain;
     border-radius: 7px;
 }
@@ -1141,7 +1357,7 @@ onUnmounted(() => {
 }
 
 .file-preview.has-file-list {
-    grid-template-columns:180px minmax(0, 1fr);
+    grid-template-columns: minmax(100px, 30%) minmax(0, 1fr);
 }
 
 .file-preview-list {
@@ -1190,7 +1406,7 @@ onUnmounted(() => {
     overflow: auto;
 }
 
-.file-preview-content > header {
+.file-preview-content>header {
     display: flex;
     min-height: 40px;
     flex: 0 0 auto;
@@ -1201,14 +1417,14 @@ onUnmounted(() => {
     color: var(--text-subtle);
 }
 
-.file-preview-content > header div {
+.file-preview-content>header div {
     display: flex;
     min-width: 0;
     align-items: center;
     gap: 7px;
 }
 
-.file-preview-content > header strong {
+.file-preview-content>header strong {
     overflow: hidden;
     color: var(--text-muted);
     font-size: .68rem;
@@ -1217,12 +1433,12 @@ onUnmounted(() => {
     white-space: nowrap;
 }
 
-.file-preview-content > header span {
+.file-preview-content>header span {
     flex: none;
     font-size: .62rem;
 }
 
-.file-preview-content > img {
+.file-preview-content>img {
     display: block;
     width: 100%;
     height: 100%;
@@ -1231,7 +1447,7 @@ onUnmounted(() => {
     object-fit: contain;
 }
 
-.file-preview-content > iframe {
+.file-preview-content>iframe {
     width: 100%;
     min-height: 420px;
     flex: 1;
@@ -1239,7 +1455,7 @@ onUnmounted(() => {
     background: var(--surface-2);
 }
 
-.file-preview-content > pre {
+.file-preview-content>pre {
     flex: 1;
     margin: 0;
     padding: 16px 18px;
@@ -1291,35 +1507,32 @@ onUnmounted(() => {
 }
 
 .preview-meta {
-    display: flex;
-    min-height: 36px;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: 24px;
-    margin: 14px 2px 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 14px;
+    margin: 0 0 16px;
     padding: 0;
-    overflow: hidden;
-    color: var(--text-subtle);
-    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.preview-meta:has(> div:nth-child(4)) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .preview-meta div {
-    display: flex;
+    display: grid;
     min-width: 0;
-    align-items: center;
     gap: 5px;
 }
 
-.preview-meta dt, .preview-meta dd {
+.preview-meta dt,
+.preview-meta dd {
     overflow: hidden;
     margin: 0;
-    font-size: 13px;
+    font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.preview-meta dt::after {
-    content: none;
 }
 
 .preview-meta dd {
@@ -1333,15 +1546,17 @@ onUnmounted(() => {
     flex: 0 0 auto;
     align-items: center;
     gap: 8px;
-    margin-top: 14px;
-    padding: 0;
+    margin-top: 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
 }
 
 .preview-actions .cn-button {
-    height: 40px;
-    padding: 0 16px;
-    border-radius: 10px;
-    font-weight: 600;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 550;
 }
 
 .preview-actions .cn-button[data-variant="outline"] {
@@ -1365,7 +1580,8 @@ onUnmounted(() => {
     background: color-mix(in srgb, var(--u-crit) 8%, var(--surface));
 }
 
-.preview-empty, .center-state {
+.preview-empty,
+.center-state {
     display: grid;
     height: 100%;
     place-content: center;
@@ -1400,14 +1616,15 @@ onUnmounted(() => {
 
 .clipboard-statusbar {
     display: flex;
-    min-height: 46px;
+    min-height: 42px;
     flex: 0 0 auto;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 14px;
-    padding: 12px 20px;
-    border-top: 1px solid var(--surface-3);
-    color: var(--text-subtle);
-    font-size: 13px;
+    gap: 8px 18px;
+    padding: 8px 24px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 11px;
 }
 
 .clipboard-statusbar .retention-note {
@@ -1417,14 +1634,8 @@ onUnmounted(() => {
     margin-left: auto;
 }
 
-.clipboard-statusbar kbd {
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--surface-2);
-    color: var(--text-muted);
-    font-family: inherit;
-    font-size: 10px;
+.clipboard-statusbar .retention-note {
+    white-space: nowrap;
 }
 
 .dialog-title {
@@ -1444,7 +1655,8 @@ onUnmounted(() => {
     gap: 16px;
 }
 
-.settings-form > label, .settings-grid label {
+.settings-form>label,
+.settings-grid label {
     display: grid;
     gap: 6px;
     color: var(--text);
@@ -1481,11 +1693,12 @@ onUnmounted(() => {
 
 .settings-grid {
     display: grid;
-    grid-template-columns:1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
 }
 
-.settings-form footer, .dialog-actions {
+.settings-form footer,
+.dialog-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -1523,17 +1736,18 @@ onUnmounted(() => {
     background: var(--surface);
 }
 
-.shortcut-recorder:focus-visible, .shortcut-recorder.recording {
+.shortcut-recorder:focus-visible,
+.shortcut-recorder.recording {
     border-color: var(--accent);
     background: var(--surface);
     box-shadow: 0 0 0 3px var(--accent-weak);
 }
 
-.shortcut-recorder.recording > svg {
+.shortcut-recorder.recording>svg {
     color: var(--accent);
 }
 
-.shortcut-recorder > span {
+.shortcut-recorder>span {
     color: var(--accent);
     font-weight: 650;
 }
@@ -1573,7 +1787,7 @@ onUnmounted(() => {
     color: var(--u-warn);
 }
 
-.settings-permission > span {
+.settings-permission>span {
     display: grid;
     min-width: 0;
     gap: 3px;
@@ -1628,31 +1842,8 @@ onUnmounted(() => {
     padding: 22px;
 }
 
-@media (max-width: 1050px) {
-    .clipboard-toolbar {
-        grid-template-columns:auto minmax(220px, 1fr) auto;
-        gap: 10px;
-    }
-
-    .toolbar-identity {
-        min-width: 0;
-    }
-
-    .toolbar-identity h1 {
-        display: none;
-    }
-
-    .clipboard-layout {
-        grid-template-columns:minmax(310px, 44%) minmax(360px, 56%);
-    }
-
-    .sidebar-foot {
-        display: none;
-    }
-
-    .clipboard-statusbar .retention-note {
-        display: none;
-    }
+.preview-head-actions {
+    flex: 0 0 auto;
 }
 
 .kind-mark img {
@@ -1687,7 +1878,7 @@ onUnmounted(() => {
 }
 
 .clipboard-layout.preview-expanded {
-    grid-template-columns:1fr;
+    grid-template-columns: 1fr;
 }
 
 .clipboard-layout.preview-expanded .history-pane {
@@ -1704,110 +1895,422 @@ onUnmounted(() => {
     padding-left: 44px;
 }
 
-/* Compact framed clipboard workspace. */
-.clipboard-card {
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    box-shadow: 0 14px 32px -24px rgba(26, 29, 38, .28);
-}
-
-.clipboard-toolbar {
-    min-height: 54px;
-    grid-template-columns: auto minmax(240px, 620px) auto;
+/* 分组时间线与独立阅读区，沿用工作台的亮暗主题。 */
+.preview-label {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    padding: 10px 16px 6px;
-}
-
-.capture-state {
-    gap: 5px;
-    font-size: 10px;
-}
-
-.capture-state i {
-    width: 5px;
-    height: 5px;
-}
-
-.search-field {
-    height: 36px;
-    padding: 0 11px;
-    border-radius: 9px;
-}
-
-.search-field .cn-input { height: 34px; font-size: 12px; }
-.toolbar-actions { gap: 0; }
-.toolbar-actions :deep(.cn-button) { height: 32px; padding-inline: 8px; font-size: 12px; }
-
-.clipboard-sidebar {
-    min-height: 40px;
-    gap: 2px;
-    padding: 3px 16px 8px;
-}
-
-.clipboard-sidebar button {
-    height: 31px;
-    gap: 6px;
-    padding: 0 10px;
-    border-radius: 8px;
+    color: var(--text-muted);
     font-size: 12px;
+    font-weight: 600;
 }
 
-.clipboard-layout { border-top-color: var(--border); }
+.preview-label>span:last-child:not(:first-child) {
+    color: var(--text-subtle);
+    font-size: 11px;
+    font-weight: 400;
+}
 
-.preview-pane { padding-right: 12px; padding-left: 12px; }
-.preview-body { padding-right: 14px; padding-left: 14px; }
+.preview-label {
+    min-height: 48px;
+    margin-bottom: 12px;
+}
+
+.preview-heading {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+}
+
+.preview-heading>strong {
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.preview-heading>span:last-child {
+    grid-column: 1 / -1;
+    color: var(--text-muted);
+    font-size: 11px;
+}
 
 .preview-detail-footer {
     flex: 0 0 auto;
-    margin-top: 12px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 11px;
-    background: var(--surface-2);
+    margin-top: 16px;
 }
 
-.preview-meta {
+.preview-empty {
+    height: auto;
+    min-height: 0;
+    flex: 1;
+    gap: 12px;
+}
+
+.preview-empty strong {
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.preview-empty>span:last-child {
+    max-width: 260px;
+    line-height: 1.8;
+}
+
+.preview-empty-icon {
     display: grid;
-    min-height: 46px;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 72px;
+    height: 80px;
+    place-items: center;
+    color: var(--text-subtle);
+    margin-bottom: 12px;
+}
+
+.back-to-list {
+    display: flex;
     align-items: center;
-    gap: 0;
-    margin: 0;
-    padding: 0 4px;
+    align-self: flex-start;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 6px 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
 }
 
-.preview-meta div {
+.clipboard-sidebar button small {
+    min-width: 12px;
+    background: transparent;
+    color: var(--text-subtle);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    opacity: .75;
+    font-variant-numeric: tabular-nums;
+}
+
+.clipboard-sidebar button.active small {
+    background: transparent;
+    color: var(--accent);
+    opacity: .9;
+}
+
+.workspace-state {
     display: grid;
-    gap: 3px;
-    padding: 0 10px;
-    border-right: 1px solid var(--border);
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    place-items: center;
+    padding: 40px 24px;
 }
 
-.preview-meta div:last-child { border-right: 0; }
-.preview-meta dt, .preview-meta dd { font-size: 10px; }
-.preview-meta dt { color: var(--text-subtle); }
-.preview-meta dd { color: var(--text); font-weight: 620; }
+.workspace-state-content {
+    display: flex;
+    width: 100%;
+    max-width: 340px;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-subtle);
+    text-align: center;
+}
 
-.preview-actions {
-    min-height: 48px;
-    justify-content: flex-end;
-    gap: 6px;
+.workspace-state-content strong {
+    margin-top: 4px;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.workspace-state-content p {
     margin: 0;
-    padding: 6px;
-    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.75;
+    overflow-wrap: anywhere;
+}
+
+.workspace-state-content .cn-button {
+    margin-top: 4px;
+}
+
+.state-loading {
+    animation: state-spin 1s linear infinite;
+}
+
+@keyframes state-spin {
+    to { transform: rotate(360deg); }
+}
+
+.capture-state.pending {
+    color: var(--text-muted);
+}
+
+.toolbar-actions .cn-button {
+    height: 34px;
+    font-size: 12px;
+}
+
+.clipboard-workspace kbd {
+    flex: none;
+    padding: 2px 5px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-muted);
     background: var(--surface);
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: nowrap;
 }
 
-.preview-actions .cn-button { height: 34px; padding: 0 11px; border-radius: 8px; font-size: 11px; }
-.preview-actions .delete-btn { width: 38px; margin-left: 0; border: 1px solid transparent; }
-.preview-actions .delete-btn svg { width: 18px; height: 18px; stroke-width: 2.2; }
-.preview-actions .delete-btn:hover { border-color: color-mix(in srgb, var(--u-crit) 25%, var(--border)); }
-
-@media (max-width: 1050px) {
-    .clipboard-toolbar { grid-template-columns: auto minmax(180px, 1fr) auto; }
-    .preview-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 5px 0; }
-    .preview-meta div:nth-child(2n) { border-right: 0; }
-    .preview-meta div:nth-child(n + 3) { padding-top: 5px; }
+.primary-copy kbd {
+    margin-left: 6px;
+    border-color: currentColor;
+    color: inherit;
+    background: transparent;
+    opacity: .65;
 }
 
+.keyboard-hints,
+.keyboard-hints>span,
+.panel-shortcut {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.keyboard-hints {
+    gap: 14px;
+}
+
+.panel-shortcut {
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.empty-state {
+    gap: 10px;
+}
+
+.empty-state .cn-button {
+    margin-top: 8px;
+}
+
+.empty-state p {
+    overflow-wrap: anywhere;
+}
+
+.history-skeleton {
+    padding: 0 16px;
+}
+
+.history-skeleton>div {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 82px;
+}
+
+.history-skeleton i,
+.history-skeleton b {
+    display: block;
+    border-radius: 6px;
+    background: var(--surface-3);
+    animation: skeleton-pulse 1.5s ease-in-out infinite alternate;
+}
+
+.history-skeleton i {
+    width: 38px;
+    height: 42px;
+}
+
+.history-skeleton span {
+    display: grid;
+    flex: 1;
+    gap: 10px;
+}
+
+.history-skeleton b {
+    height: 10px;
+    width: 85%;
+}
+
+.history-skeleton b:last-child {
+    width: 55%;
+}
+
+@keyframes skeleton-pulse {
+    to {
+        opacity: .4;
+    }
+}
+
+.clipboard-workspace button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.item-select:focus-visible {
+    outline-offset: -3px !important;
+}
+
+@container clipboard (max-width: 920px) {
+
+    .sidebar-foot,
+    .clipboard-statusbar .retention-note {
+        display: none;
+    }
+
+    .preview-meta {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        row-gap: 10px;
+    }
+
+    .preview-actions {
+        flex-wrap: wrap;
+    }
+
+    .preview-pane {
+        padding: 0 20px 16px;
+    }
+}
+
+@container clipboard (max-width: 680px) {
+    .clipboard-toolbar {
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        padding: 14px;
+    }
+
+    .search-field {
+        grid-column: 1 / -1;
+        grid-row: 1;
+    }
+
+    .toolbar-identity {
+        grid-column: 1;
+        grid-row: 2;
+        justify-self: start;
+    }
+
+    .toolbar-actions {
+        grid-column: 2;
+        grid-row: 2;
+    }
+
+    .clipboard-sidebar {
+        padding: 0 14px;
+        gap: 18px;
+        overflow-x: auto;
+    }
+
+    .clipboard-sidebar button {
+        padding: 0 0 2px;
+        flex-shrink: 0;
+    }
+
+    .clipboard-layout {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(180px, 42%) minmax(0, 1fr);
+    }
+
+    .history-pane {
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .preview-pane {
+        padding: 0 16px 12px;
+    }
+
+    .preview-label {
+        min-height: 36px;
+        margin-bottom: 8px;
+    }
+
+    .preview-head {
+        min-height: 36px;
+        margin-bottom: 10px;
+    }
+
+    .preview-meta {
+        display: none;
+    }
+
+    .preview-body {
+        padding: 14px;
+    }
+
+    .preview-detail-footer {
+        margin-top: 10px;
+    }
+
+    .preview-actions {
+        padding-top: 0;
+        border-top: 0;
+        gap: 6px;
+    }
+
+    .preview-actions .cn-button {
+        height: 32px;
+        padding: 0 9px;
+        font-size: 11px;
+    }
+
+    .clipboard-layout.preview-expanded {
+        grid-template-rows: minmax(0, 1fr);
+    }
+
+    .clipboard-layout.preview-expanded .preview-body {
+        padding: 16px;
+    }
+
+    .clipboard-statusbar {
+        padding: 8px 14px;
+    }
+
+    .keyboard-hints {
+        display: none;
+    }
+
+    .panel-shortcut {
+        margin-left: 0;
+    }
+
+    .file-preview.has-file-list {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .file-preview-list {
+        display: flex;
+        overflow-x: auto;
+        padding: 4px;
+    }
+
+    .file-preview-list button {
+        width: auto;
+        max-width: 160px;
+        flex-shrink: 0;
+    }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    .clipboard-workspace *,
+    .clipboard-workspace *::before {
+        animation: none !important;
+        transition: none !important;
+    }
+}
 </style>

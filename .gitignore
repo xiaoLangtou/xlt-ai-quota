@@ -38,6 +38,7 @@ yarn-error.log*
 .vercel
 next-env.d.ts
 /dist/
+/dist-diagnostic/
 /.wrangler/
 /outputs/
 /work/
@@ -45,3 +46,5 @@ next-env.d.ts
 # AOCI agent host integration (machine-bound; do not commit)
 opencode.json
 opencode.json.backup.*
+.codex/config.toml
+.codex/config.toml.backup.*

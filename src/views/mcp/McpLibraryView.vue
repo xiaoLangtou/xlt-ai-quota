@@ -265,14 +265,20 @@ const lastSyncLabel = computed(() => (lastSync.value ? formatDate(lastSync.value
         </template>
       </UDashboardNavbar>
 
-      <UDashboardToolbar>
+      <UDashboardToolbar
+        :ui="{
+          root: 'flex-wrap items-start gap-y-2 overflow-x-visible py-2',
+          left: 'w-full min-w-0 flex-1 flex-wrap gap-2 xl:w-auto',
+          right: 'w-full shrink-0 justify-end xl:ml-auto xl:w-auto',
+        }"
+      >
         <template #left>
-          <UInput v-model="search" icon="i-lucide-search" placeholder="搜索 MCP 服务…" class="w-60" />
-          <USelect v-model="sourceFilter" :items="sourceItems" icon="i-lucide-database" class="w-40" />
-          <USelect v-model="runtimeFilter" :items="runtimeItems" icon="i-lucide-cpu" class="w-36" />
-          <USelect v-model="sortFilter" :items="sortItems" icon="i-lucide-arrow-up-down" class="w-36" />
-          <UCheckbox v-model="favoritesOnly" label="收藏" />
-          <UCheckbox v-model="showClients" label="显示客户端类" />
+          <UInput v-model="search" icon="i-lucide-search" placeholder="搜索 MCP 服务…" class="w-full sm:w-60" />
+          <USelect v-model="sourceFilter" :items="sourceItems" icon="i-lucide-database" class="min-w-36 flex-1 sm:w-40 sm:flex-none" />
+          <USelect v-model="runtimeFilter" :items="runtimeItems" icon="i-lucide-cpu" class="min-w-32 flex-1 sm:w-36 sm:flex-none" />
+          <USelect v-model="sortFilter" :items="sortItems" icon="i-lucide-arrow-up-down" class="min-w-32 flex-1 sm:w-36 sm:flex-none" />
+          <UCheckbox v-model="favoritesOnly" label="收藏" class="shrink-0 whitespace-nowrap" />
+          <UCheckbox v-model="showClients" label="显示客户端类" class="shrink-0 whitespace-nowrap" />
         </template>
         <template #right>
           <span class="text-xs text-dimmed">上次同步 {{ lastSyncLabel }}</span>

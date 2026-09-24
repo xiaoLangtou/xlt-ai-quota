@@ -8,6 +8,8 @@ import { useSkillsStore } from "@/stores/skills";
 import { mcpApi, mcpErrorMessage } from "@/api/mcp";
 import { pushToast } from "@/composables/useToast";
 import { serverTargetText, statusMeta, transportLabel } from "@/utils/mcp";
+import { agentStyle } from "@/utils/skills-agents";
+import AgentAvatar from "@/components/skills/AgentAvatar.vue";
 import McpServerDrawer from "@/views/mcp/McpServerDrawer.vue";
 import McpPlanDialog from "@/views/mcp/McpPlanDialog.vue";
 
@@ -37,8 +39,12 @@ const probeResult = ref<ProbeResult | null>(null);
 const probing = ref(false);
 
 const agentItems = computed(() => [
-  { label: "全部 Agent", value: "all" },
-  ...agents.value.map((agent) => ({ label: agent.label, value: agent.id })),
+  { label: "全部 Agent", value: "all", icon: "i-lucide-bot" },
+  ...agents.value.map((agent) => ({
+    label: agent.label,
+    value: agent.id,
+    avatar: { src: agentStyle(agent.label).icon, alt: agent.label },
+  })),
 ]);
 const statusItems = [
   { label: "全部状态", value: "all" },
@@ -248,7 +254,7 @@ const scannedLabel = computed(() => {
       <UDashboardToolbar>
         <template #left>
           <UInput v-model="search" icon="i-lucide-search" placeholder="搜索名称 / 命令 / URL…" class="w-60" />
-          <USelect v-model="agentFilter" :items="agentItems" icon="i-lucide-bot" class="w-36" />
+          <USelect v-model="agentFilter" :items="agentItems" class="w-36" />
           <USelect v-model="statusFilter" :items="statusItems" icon="i-lucide-activity" class="w-32" />
           <USelect v-model="scopeFilter" :items="scopeItems" icon="i-lucide-layers" class="w-32" />
         </template>
@@ -326,6 +332,7 @@ const scannedLabel = computed(() => {
                   variant="outline"
                   size="sm"
                 >
+                  <AgentAvatar :agent="agentLabel(agent)" :size="16" />
                   {{ agentLabel(agent) }}
                 </UBadge>
                 <UBadge

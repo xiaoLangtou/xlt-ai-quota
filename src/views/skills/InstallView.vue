@@ -6,6 +6,7 @@ import type { AddSourceRequest, CatalogSkill, CommitPlanResponse, ConflictStrate
 import { useSkillsStore } from '@/stores/skills'
 import { skillsApi, pickDirectory, pickFile } from '@/api/skills'
 import { formatBytes } from '@/utils/skills-markdown'
+import AgentAvatar from '@/components/skills/AgentAvatar.vue'
 
 const store = useSkillsStore()
 const { roots, projects } = storeToRefs(store)
@@ -145,6 +146,9 @@ const selectedSkillIds = ref<string[]>([])
 const plan = ref<InstallPlan | null>(null)
 const ackCodes = ref<string[]>([])
 const commitResult = ref<CommitPlanResponse | null>(null)
+const installSteps = ['选择来源', '预览与目标', '确认安装', '安装结果']
+const currentStep = computed(() => commitResult.value ? 3 : plan.value ? 2 : prep.value ? 1 : 0)
+const catalogLimit = ref(12)
 const sourceItems = [
   { label: 'GitHub', value: 'github' },
   { label: 'skills.sh', value: 'skills-sh' },
@@ -178,6 +182,7 @@ function reset() {
 }
 
 function onTabChange() {
+  if (busy.value || prep.value) return
   reset()
   resetWizard()
 }
@@ -211,6 +216,7 @@ async function cancelWizard() {
 
 /** 统一封装来源准备请求；成功后默认选中全部可安装候选 */
 async function runPrepare(fn: () => Promise<PrepareSourceResponse>) {
+  if (busy.value || prep.value) return
   reset()
   resetWizard()
   busy.value = true
@@ -254,6 +260,9 @@ const filteredCatalog = computed(() => {
     || c.repo.toLowerCase().includes(q)
     || c.tags.some((t) => t.toLowerCase().includes(q)))
 })
+
+const visibleCatalog = computed(() => filteredCatalog.value.slice(0, catalogLimit.value))
+watch([catalogFilter, catalogGroup], () => { catalogLimit.value = 12 })
 
 function formatStars(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n)
@@ -346,6 +355,7 @@ async function handleRemoveSource(id: string) {
 
 /** 从目录一键填入 ref 并拉取预览，后续走统一的确认安装流程 */
 async function installFromCatalog(item: CatalogSkill) {
+  if (busy.value || prep.value) return
   remoteSource.value = 'github'
   remoteRef.value = item.installRef
   installingCatalogId.value = item.id
@@ -411,6 +421,7 @@ function formatInstalls(n?: number): string {
 
 /** 从 skills.sh 搜索结果一键填入 ref 并预览，后续走统一确认安装流程 */
 async function installFromSkillsSh(item: SkillsShSearchItem) {
+  if (busy.value || prep.value) return
   remoteSource.value = 'skills-sh'
   remoteRef.value = item.id
   installingShId.value = item.id
@@ -491,7 +502,7 @@ watch([selectedSkillIds, selectedRootIds, onConflict], () => {
 
 /** 生成不可变安装计划：冲突与动作固化，warning 需显式确认 */
 async function makePlan() {
-  if (!prep.value) return
+  if (busy.value || !prep.value) return
   if (!selectedSkillIds.value.length) {
     error.value = '请至少选择一个候选 Skill'
     return
@@ -541,7 +552,7 @@ const actionMeta: Record<string, { label: string; color: 'primary' | 'warning' |
 
 /** 提交计划：逐 Skill 逐目标事务安装，展示逐目标结果 */
 async function commitPlan() {
-  if (!plan.value) return
+  if (busy.value || !plan.value || !allWarningsAcked.value) return
   reset()
   busy.value = true
   try {
@@ -581,6 +592,7 @@ function retryPlan() {
 /** 完成向导（全部成功后 staging 已被服务端清理） */
 function finishWizard() {
   resetWizard()
+  reset()
 }
 
 function goList() {
@@ -610,52 +622,108 @@ onMounted(async () => {
 </script>
 
 <template>
-  <UDashboardPanel id="install">
+  <UDashboardPanel id="install" :ui="{ body: 'p-0 sm:p-0 gap-0' }">
     <template #header>
       <UDashboardNavbar title="安装" description="Skills">
         <template #leading>
           <UDashboardSidebarCollapse />
         </template>
+        <template #right>
+          <UButton to="/skills/library" icon="i-lucide-library" color="neutral" variant="ghost">技能库</UButton>
+        </template>
       </UDashboardNavbar>
     </template>
 
     <template #body>
-      <div class="max-w-3xl w-full mx-auto space-y-5">
-        <!-- Tab 切换（下划线风格） -->
-        <UTabs
-          v-model="tab"
-          :items="tabItems"
-          :content="false"
-          variant="link"
-          color="primary"
-          @update:model-value="onTabChange"
-        />
+      <div class="skills-install">
+        <header class="install-heading">
+          <h1>安装 Skills</h1>
+          <p>从远程仓库或本地文件导入，检查内容后再安装到指定目录。</p>
+        </header>
+        <ol class="install-steps" aria-label="安装进度">
+          <li v-for="(step, index) in installSteps" :key="step"
+            :class="{ active: currentStep === index, done: currentStep > index }"
+            :aria-current="currentStep === index ? 'step' : undefined">
+            <span class="step-number"><UIcon v-if="currentStep > index" name="i-lucide-check" class="size-3.5" /><template v-else>{{ index + 1 }}</template></span>
+            <span>{{ step }}</span>
+          </li>
+        </ol>
+
+        <div class="install-grid">
+        <fieldset class="source-section" :disabled="busy || !!prep">
+          <legend class="sr-only">选择安装来源</legend>
+          <!-- Tab 切换（下划线风格） -->
+          <UTabs v-model="tab" :items="tabItems.map((item) => ({ ...item, disabled: busy || !!prep }))"
+            :content="false" variant="link" color="primary" :ui="{ list: 'justify-start', trigger: 'flex-none px-4' }"
+            @update:model-value="onTabChange" />
+
+          <!-- 远程 -->
+          <section v-if="tab === 'remote'" class="source-form">
+            <div class="section-title"><h2>从链接导入</h2><p>支持 GitHub、skills.sh、技能市场与压缩包链接。</p></div>
+            <UFormField label="来源地址">
+              <div class="remote-address">
+                <USelect v-model="remoteSource" :items="sourceItems" aria-label="来源类型" class="source-type" />
+                <UInput v-model="remoteRef" icon="i-lucide-link-2" :placeholder="remotePlaceholder" class="source-input" @keyup.enter="remoteRef.trim() && previewRemote()" />
+              </div>
+            </UFormField>
+            <div class="source-actions">
+              <span><UIcon name="i-lucide-shield-check" class="size-3.5" />预览不会写入目标目录</span>
+              <UButton icon="i-lucide-arrow-right" trailing :loading="busy && !prep" :disabled="!remoteRef.trim() || !!prep" @click="previewRemote">获取预览</UButton>
+            </div>
+          </section>
+
+          <!-- 本地路径 -->
+          <section v-else-if="tab === 'local'" class="source-form">
+            <div class="section-title"><h2>从本机目录导入</h2><p>选择包含 SKILL.md 的技能目录，原始文件保持不变。</p></div>
+            <UFormField label="技能目录">
+              <div class="source-address">
+                <UInput v-model="sourcePath" icon="i-lucide-folder-input" placeholder="/path/to/my-skill" class="source-input" @keyup.enter="sourcePath.trim() && previewLocal()" />
+                <UButton icon="i-lucide-folder-search" color="neutral" variant="outline" :loading="pickingSource" @click="pickSourceDir">浏览</UButton>
+              </div>
+            </UFormField>
+            <div class="source-actions">
+              <span>先检查技能内容，再选择安装目标</span>
+              <UButton icon="i-lucide-arrow-right" trailing :loading="busy && !prep" :disabled="!sourcePath.trim() || !!prep" @click="previewLocal">获取预览</UButton>
+            </div>
+          </section>
+
+          <!-- 上传压缩包 -->
+          <section v-else class="source-form">
+            <div class="section-title"><h2>从压缩包导入</h2><p>选择本机归档文件，解压并检查其中的技能。</p></div>
+            <button type="button" class="archive-picker" :class="{ selected: uploadPath }" @click="chooseUpload">
+              <UIcon name="i-lucide-file-archive" class="size-6 shrink-0 text-dimmed" />
+              <span><strong>{{ uploadName || '选择压缩包' }}</strong><small>{{ uploadPath ? '点击更换文件' : '支持 .zip / .tar.gz / .tgz' }}</small></span>
+              <UIcon name="i-lucide-folder-open" class="size-4 shrink-0 text-dimmed" />
+            </button>
+            <div class="source-actions">
+              <span>压缩包中需包含 SKILL.md</span>
+              <UButton icon="i-lucide-arrow-right" trailing :loading="busy && !prep" :disabled="!uploadPath || !!prep" @click="previewUpload">获取预览</UButton>
+            </div>
+          </section>
+        </fieldset>
 
         <!-- 公共：安装目标（范围 + 多选 Agent 目录）+ 冲突策略 -->
-        <UCard :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex items-center gap-1.5 mb-4 text-[11px] font-semibold text-dimmed uppercase tracking-wider">
-            <UIcon name="i-lucide-settings-2" class="size-3.5" />
-            安装设置
-          </div>
-          <div class="space-y-4">
+        <aside class="target-section">
+          <fieldset :disabled="busy || !!commitResult" class="target-fields">
+          <legend class="target-title">安装目标 <span>已选 {{ selectedRootIds.length }}</span></legend>
+          <p class="target-caption">可同时安装到多个 Agent 目录</p>
+          <div class="space-y-5">
             <UFormField label="安装范围">
               <div class="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  class="rounded-full px-3 py-1.5 text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                  :class="targetScope === 'global'
-                    ? 'bg-primary/10 text-primary ring ring-primary/30 font-medium'
-                    : 'ring ring-default bg-elevated/40 hover:bg-elevated text-default'"
+                  class="scope-option"
+                  :class="{ selected: targetScope === 'global' }"
+                  :aria-pressed="targetScope === 'global'"
                   @click="targetScope = 'global'"
                 >
                   <UIcon name="i-lucide-globe" class="size-3.5" />全局（用户级）
                 </button>
                 <button
                   type="button"
-                  class="rounded-full px-3 py-1.5 text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                  :class="targetScope === 'project'
-                    ? 'bg-primary/10 text-primary ring ring-primary/30 font-medium'
-                    : 'ring ring-default bg-elevated/40 hover:bg-elevated text-default'"
+                  class="scope-option"
+                  :class="{ selected: targetScope === 'project' }"
+                  :aria-pressed="targetScope === 'project'"
                   @click="targetScope = 'project'"
                 >
                   <UIcon name="i-lucide-folder-git-2" class="size-3.5" />项目级
@@ -666,7 +734,8 @@ onMounted(async () => {
                   :items="projectOptions"
                   icon="i-lucide-folder"
                   size="sm"
-                  class="w-full sm:w-56"
+                  class="w-full"
+                  aria-label="目标项目"
                 />
                 <UButton
                   v-if="targetScope === 'project'"
@@ -689,27 +758,26 @@ onMounted(async () => {
               </div>
             </UFormField>
 
-            <UFormField v-else :label="`目标目录（可多选，已选 ${selectedRootIds.length}）`">
+            <UFormField v-else label="Agent 目录">
               <!-- 全局：已登记的可写根目录 -->
               <template v-if="targetScope === 'global'">
-                <div v-if="scopeRoots.length" class="flex flex-wrap items-center gap-2">
+                <div v-if="scopeRoots.length" class="target-grid">
                   <button
                     v-for="r in scopeRoots"
                     :key="r.id"
                     type="button"
                     :title="r.path"
-                    class="rounded-full px-3 py-1.5 text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                    :class="selectedRootIds.includes(r.id)
-                      ? 'bg-primary/10 text-primary ring ring-primary/30 font-medium'
-                      : 'ring ring-default bg-elevated/40 hover:bg-elevated text-default'"
+                    class="target-option"
+                    :class="{ selected: selectedRootIds.includes(r.id) }"
+                    :aria-pressed="selectedRootIds.includes(r.id)"
                     @click="toggleRoot(r.id)"
                   >
-                    <UIcon :name="selectedRootIds.includes(r.id) ? 'i-lucide-check' : 'i-lucide-folder-tree'" class="size-3.5" />
-                    {{ rootDisplay(r) }}
-                    <span class="text-[10px] text-dimmed tabular-nums">{{ r.skillCount ?? 0 }}</span>
+                    <AgentAvatar :agent="r.agent || rootDisplay(r)" :size="20" />
+                    <span>{{ rootDisplay(r) }}</span>
+                    <UIcon :name="selectedRootIds.includes(r.id) ? 'i-lucide-square-check' : 'i-lucide-square'" class="size-3.5 shrink-0" />
                   </button>
                 </div>
-                <div v-else class="text-xs text-dimmed">没有可写的全局根目录</div>
+                <div v-else class="text-xs text-dimmed">没有可写的全局目录。<UButton to="/skills/roots" variant="link" size="xs">添加目录</UButton></div>
               </template>
 
               <!-- 项目级：已知 Agent 候选目录，已存在的优先，其余折叠展开 -->
@@ -718,22 +786,21 @@ onMounted(async () => {
                   <UIcon name="i-lucide-loader-circle" class="size-3.5 animate-spin" />探测项目内的 Agent 目录…
                 </div>
                 <template v-else-if="projectAgentDirs.length">
-                  <div class="flex flex-wrap items-center gap-2">
+                  <div class="target-grid">
                     <button
                       v-for="d in existingAgentDirs"
                       :key="d.rootId"
                       type="button"
                       :title="d.path"
                       :disabled="!d.writable"
-                      class="rounded-full px-3 py-1.5 text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                      :class="selectedRootIds.includes(d.rootId)
-                        ? 'bg-primary/10 text-primary ring ring-primary/30 font-medium'
-                        : 'ring ring-default bg-elevated/40 hover:bg-elevated text-default'"
+                      class="target-option"
+                      :class="{ selected: selectedRootIds.includes(d.rootId) }"
+                      :aria-pressed="selectedRootIds.includes(d.rootId)"
                       @click="toggleRoot(d.rootId)"
                     >
-                      <UIcon :name="selectedRootIds.includes(d.rootId) ? 'i-lucide-check' : 'i-lucide-folder-tree'" class="size-3.5" />
-                      {{ agentDirDisplay(d) }}
-                      <span class="text-[10px] text-dimmed tabular-nums">{{ d.skillCount }}</span>
+                      <AgentAvatar :agent="agentDirDisplay(d)" :size="20" />
+                      <span>{{ agentDirDisplay(d) }}</span>
+                      <UIcon :name="selectedRootIds.includes(d.rootId) ? 'i-lucide-square-check' : 'i-lucide-square'" class="size-3.5 shrink-0" />
                     </button>
                     <template v-if="moreAgentsOpen">
                       <button
@@ -742,20 +809,21 @@ onMounted(async () => {
                         type="button"
                         :title="`安装时将创建：${d.path}`"
                         :disabled="!d.writable"
-                        class="rounded-full px-3 py-1.5 text-xs transition-colors cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                        :class="selectedRootIds.includes(d.rootId)
-                          ? 'bg-primary/10 text-primary ring ring-primary/30 ring-dashed font-medium'
-                          : 'ring ring-default ring-dashed bg-elevated/20 hover:bg-elevated text-dimmed hover:text-default'"
+                        class="target-option missing"
+                        :class="{ selected: selectedRootIds.includes(d.rootId) }"
+                        :aria-pressed="selectedRootIds.includes(d.rootId)"
                         @click="toggleRoot(d.rootId)"
                       >
-                        <UIcon :name="selectedRootIds.includes(d.rootId) ? 'i-lucide-check' : 'i-lucide-folder-plus'" class="size-3.5" />
-                        {{ agentDirDisplay(d) }}
+                        <AgentAvatar :agent="agentDirDisplay(d)" :size="20" />
+                        <span>{{ agentDirDisplay(d) }}</span>
+                        <UIcon :name="selectedRootIds.includes(d.rootId) ? 'i-lucide-square-check' : 'i-lucide-plus'" class="size-3.5 shrink-0" />
                       </button>
                     </template>
                     <button
                       v-if="missingAgentDirs.length && existingAgentDirs.length"
                       type="button"
-                      class="rounded-full px-3 py-1.5 text-xs cursor-pointer inline-flex items-center gap-1 text-dimmed hover:text-default transition-colors"
+                      class="more-agents"
+                      :aria-expanded="moreAgentsOpen"
                       @click="moreAgentsOpen = !moreAgentsOpen"
                     >
                       <UIcon :name="moreAgentsOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="size-3.5" />
@@ -763,134 +831,23 @@ onMounted(async () => {
                     </button>
                   </div>
                   <div v-if="moreAgentsOpen && missingAgentDirs.length" class="mt-1.5 text-[11px] text-dimmed">
-                    虚线胶囊为尚未创建的 Agent 目录，选中安装时会自动创建
+                    带「+」的目录尚未创建，选中后将在安装时创建
                   </div>
                 </template>
                 <div v-else class="text-xs text-dimmed">该项目不可用（目录不存在或无候选 Agent 目录）</div>
               </template>
             </UFormField>
 
-            <UFormField label="同名冲突策略" class="sm:w-64">
+            <UFormField label="同名技能处理">
               <USelect v-model="onConflict" :items="conflictOptions" icon="i-lucide-git-merge" class="w-full" />
             </UFormField>
           </div>
-        </UCard>
-
-        <!-- 远程 -->
-        <UCard v-if="tab === 'remote'" :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex items-start gap-3 mb-5">
-            <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15 ring-inset">
-              <UIcon name="i-lucide-globe" class="size-4.5" />
-            </span>
-            <div>
-              <div class="text-sm font-semibold text-highlighted">远程安装</div>
-              <div class="text-xs text-muted mt-0.5">从 GitHub、技能市场或任意 URL 拉取，先预览再确认安装。</div>
-            </div>
-          </div>
-
-          <UFormField label="来源类型" class="mb-4">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-xs text-dimmed mr-1">来源</span>
-              <button
-                v-for="opt in sourceItems"
-                :key="opt.value"
-                type="button"
-                class="rounded-full px-3 py-1.5 text-xs transition-colors cursor-pointer"
-                :class="remoteSource === opt.value
-                  ? 'bg-primary/10 text-primary ring ring-primary/30 font-medium'
-                  : 'ring ring-default bg-elevated/40 hover:bg-elevated text-default'"
-                @click="remoteSource = opt.value as RemoteSource"
-              >
-                {{ opt.label }}
-              </button>
-            </div>
-          </UFormField>
-          <UFormField label="来源地址">
-            <div class="flex gap-2">
-              <UInput
-                v-model="remoteRef"
-                icon="i-lucide-link-2"
-                :placeholder="remotePlaceholder"
-                class="flex-1 font-mono"
-                @keyup.enter="previewRemote"
-              />
-              <UButton icon="i-lucide-eye" color="neutral" variant="outline" :loading="busy && !prep" :disabled="!remoteRef.trim()" @click="previewRemote">
-                获取预览
-              </UButton>
-            </div>
-          </UFormField>
-        </UCard>
-
-        <!-- 本地路径 -->
-        <UCard v-else-if="tab === 'local'" :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex items-start gap-3 mb-5">
-            <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15 ring-inset">
-              <UIcon name="i-lucide-folder" class="size-4.5" />
-            </span>
-            <div>
-              <div class="text-sm font-semibold text-highlighted">从本机目录安装</div>
-              <div class="text-xs text-muted mt-0.5">复制本机某个 skill 目录（需包含 SKILL.md）到目标根目录，先预览再确认。</div>
-            </div>
-          </div>
-
-          <UFormField label="本机 skill 目录的绝对路径">
-            <div class="flex gap-2">
-              <UInput
-                v-model="sourcePath"
-                icon="i-lucide-folder-input"
-                placeholder="/path/to/my-skill"
-                class="flex-1 font-mono"
-                @keyup.enter="previewLocal"
-              />
-              <UButton icon="i-lucide-folder-search" color="neutral" variant="outline" :loading="pickingSource" @click="pickSourceDir">
-                浏览
-              </UButton>
-              <UButton icon="i-lucide-eye" color="neutral" variant="outline" :loading="busy && !prep" :disabled="!sourcePath.trim()" @click="previewLocal">
-                获取预览
-              </UButton>
-            </div>
-          </UFormField>
-        </UCard>
-
-        <!-- 上传压缩包 -->
-        <UCard v-else :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex items-start gap-3 mb-5">
-            <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15 ring-inset">
-              <UIcon name="i-lucide-upload" class="size-4.5" />
-            </span>
-            <div>
-              <div class="text-sm font-semibold text-highlighted">上传压缩包</div>
-              <div class="text-xs text-muted mt-0.5">上传包含 SKILL.md 的 .zip / .tar.gz 压缩包，先预览再确认安装。</div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            class="flex flex-col items-center justify-center gap-2 w-full rounded-lg border-2 border-dashed py-10 px-4 text-center transition-colors"
-            :class="uploadPath ? 'border-primary bg-primary/5' : 'border-accented hover:border-primary/50 hover:bg-elevated/50'"
-            @click="chooseUpload"
-          >
-            <UIcon :name="uploadPath ? 'i-lucide-file-archive' : 'i-lucide-cloud-upload'" class="size-8" :class="uploadPath ? 'text-primary' : 'text-dimmed'" />
-            <template v-if="uploadPath">
-              <span class="text-sm font-medium text-highlighted break-all">{{ uploadName }}</span>
-              <span class="text-xs text-dimmed">点击更换压缩包</span>
-            </template>
-            <template v-else>
-              <span class="text-sm text-default">点击选择压缩包</span>
-              <span class="text-xs text-dimmed">支持 .zip / .tar.gz / .tgz</span>
-            </template>
-          </button>
-
-          <div class="flex justify-end mt-4">
-            <UButton icon="i-lucide-eye" color="neutral" variant="outline" :loading="busy && !prep" :disabled="!uploadPath" @click="previewUpload">
-              获取预览
-            </UButton>
-          </div>
-        </UCard>
+          </fieldset>
+        </aside>
 
         <!-- 安装向导面板（三种来源统一）：候选选择 → 计划确认 → 逐目标结果 -->
-        <div v-if="prep" ref="previewPanel" class="rounded-lg ring ring-default overflow-hidden">
-          <div class="flex items-center gap-2 px-4 h-10 border-b border-default bg-elevated/50">
+        <div v-if="prep" ref="previewPanel" class="wizard-section" aria-live="polite">
+          <div class="wizard-heading">
             <UIcon name="i-lucide-package-search" class="size-4 text-dimmed" />
             <span class="font-semibold text-sm text-highlighted truncate">
               {{ commitResult ? '安装结果' : plan ? '确认安装计划' : '选择要安装的 Skill' }}
@@ -903,16 +860,19 @@ onMounted(async () => {
               取消
             </UButton>
           </div>
-          <div class="p-4 space-y-4">
+          <div class="py-4 space-y-4">
+            <p class="prepared-source" :title="prep.source.ref">来源：{{ prep.source.ref }}</p>
             <template v-if="!commitResult">
               <!-- ① 候选选择（error 级问题的候选不可选） -->
-              <div class="space-y-2">
+              <div v-if="!plan" class="space-y-2">
+                <p v-if="!prep.skills.length" class="text-sm text-muted py-4">没有找到可安装的技能，请检查来源后重试。</p>
                 <button
                   v-for="s in prep.skills"
                   :key="s.id"
                   type="button"
-                  :disabled="!s.installable"
-                  class="w-full text-left rounded-lg ring p-3 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="busy || !s.installable"
+                  :aria-pressed="selectedSkillIds.includes(s.id)"
+                  class="candidate-option w-full text-left rounded-md ring p-3 cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
                   :class="selectedSkillIds.includes(s.id) ? 'ring-primary/40 bg-primary/5' : 'ring-default hover:bg-elevated/50'"
                   @click="toggleSkill(s.id)"
                 >
@@ -946,15 +906,22 @@ onMounted(async () => {
               </div>
 
               <!-- ② 生成计划 -->
-              <div v-if="!plan" class="flex justify-end">
-                <UButton icon="i-lucide-clipboard-list" :loading="busy" :disabled="!selectedSkillIds.length" @click="makePlan">
+              <div v-if="!plan" class="wizard-actions">
+                <span>已选 {{ selectedSkillIds.length }} 个技能 · {{ selectedRootIds.length }} 个目标</span>
+                <UButton icon="i-lucide-clipboard-list" :loading="busy" :disabled="!selectedSkillIds.length || !selectedRootIds.length || agentDirsLoading" @click="makePlan">
                   生成安装计划
                 </UButton>
               </div>
 
               <!-- ③ 计划确认：逐 Skill 逐目标动作 + warning 显式确认 -->
               <div v-else class="space-y-3">
-                <div class="rounded-lg bg-elevated/50 p-3 space-y-2.5">
+                <div class="plan-targets">
+                  <div v-for="target in plan.targets" :key="target.rootId">
+                    <span>{{ target.label }}<small v-if="target.needsCreate"> · 将创建</small></span>
+                    <code>{{ target.path }}</code>
+                  </div>
+                </div>
+                <div class="rounded-md bg-elevated/30 p-3 space-y-2.5">
                   <div v-for="ps in plan.skills" :key="ps.skillId" class="space-y-1">
                     <div class="flex items-center gap-2 text-sm">
                       <UIcon name="i-lucide-package" class="size-4 text-dimmed shrink-0" />
@@ -985,7 +952,7 @@ onMounted(async () => {
                   >
                     <input
                       type="checkbox" class="mt-0.5 accent-warning"
-                      :checked="ackCodes.includes(w.code)" @change="toggleAck(w.code)"
+                      :checked="ackCodes.includes(w.code)" :disabled="busy" @change="toggleAck(w.code)"
                     />
                     <span>{{ w.message }}</span>
                   </label>
@@ -1036,6 +1003,7 @@ onMounted(async () => {
         </div>
 
         <!-- 反馈 -->
+        <div v-if="error || okMsg" class="install-feedback" aria-live="polite">
         <UAlert v-if="error" color="error" variant="soft" icon="i-lucide-triangle-alert" :title="error" />
         <UAlert v-if="okMsg" color="success" variant="soft" icon="i-lucide-circle-check" :title="okMsg">
           <template #description>
@@ -1044,27 +1012,28 @@ onMounted(async () => {
             </UButton>
           </template>
         </UAlert>
+        </div>
 
         <!-- 技能目录：内置精选 + 已接入数据源 + skills.sh 全网搜索（仅远程 tab；共用一个搜索框） -->
-        <UCard v-if="tab === 'remote'" :ui="{ body: 'p-4 sm:p-5' }">
-          <div class="flex flex-wrap items-center gap-3 mb-3">
-            <div class="flex items-center gap-1.5 text-[11px] font-semibold text-dimmed uppercase tracking-wider">
-              <UIcon name="i-lucide-flame" class="size-3.5 text-warning" />
-              技能目录
+        <section v-if="tab === 'remote' && !prep" class="catalog-section">
+          <div class="catalog-toolbar">
+            <div class="flex items-center gap-2 text-sm font-semibold text-highlighted">
+              发现技能
               <span v-if="!catalogLoading" class="font-normal normal-case tracking-normal">（{{ filteredCatalog.length }}）</span>
             </div>
             <div class="ml-auto flex items-center gap-2 w-full sm:w-auto">
               <UInput
                 v-model="catalogFilter"
                 icon="i-lucide-search"
-                placeholder="搜索目录 + 全网 60 万+ 技能"
+                placeholder="搜索技能名称、描述或仓库"
+                aria-label="搜索技能目录与 skills.sh"
                 size="sm"
                 class="flex-1 sm:w-64"
                 :loading="shLoading"
                 @keyup.enter="runShSearch"
               />
               <UButton size="sm" color="neutral" variant="outline" icon="i-lucide-database" @click="openSources">
-                源管理
+                数据源
               </UButton>
             </div>
           </div>
@@ -1075,10 +1044,9 @@ onMounted(async () => {
               v-for="g in catalogGroups"
               :key="g.value"
               type="button"
-              class="rounded-full px-3 py-1 text-xs transition-colors cursor-pointer"
-              :class="catalogGroup === g.value
-                ? 'bg-primary/10 text-primary ring ring-primary/30 font-medium'
-                : 'ring ring-default bg-elevated/40 hover:bg-elevated text-default'"
+              class="catalog-filter"
+              :class="{ selected: catalogGroup === g.value }"
+              :aria-pressed="catalogGroup === g.value"
               @click="catalogGroup = g.value"
             >
               {{ g.label }}
@@ -1092,11 +1060,11 @@ onMounted(async () => {
           <div v-else-if="!filteredCatalog.length" class="py-6 text-center text-xs text-dimmed">
             目录中没有匹配的 skill{{ catalogFilter.trim().length >= 2 ? '，下方可查看全网结果' : '' }}
           </div>
-          <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div v-else class="catalog-grid">
             <div
-              v-for="item in filteredCatalog"
+              v-for="item in visibleCatalog"
               :key="item.id"
-              class="group rounded-lg ring ring-default bg-elevated/30 hover:bg-elevated/60 hover:ring-primary/30 transition-colors p-3 flex flex-col gap-2"
+              class="catalog-item"
             >
               <div class="flex items-center gap-2 min-w-0">
                 <span class="font-mono text-sm font-semibold text-highlighted truncate">{{ item.name }}</span>
@@ -1104,7 +1072,9 @@ onMounted(async () => {
                   <UIcon name="i-lucide-star" class="size-3 text-warning" />{{ formatStars(item.stars) }}
                 </span>
                 <UBadge v-if="item.hasScripts" color="warning" variant="subtle" size="sm" icon="i-lucide-terminal" class="shrink-0">含脚本</UBadge>
-                <UBadge v-for="t in item.tags" :key="t" color="neutral" variant="subtle" size="sm" class="shrink-0 hidden sm:inline-flex">{{ t }}</UBadge>
+              </div>
+              <div v-if="item.tags.length" class="flex flex-wrap gap-1">
+                <UBadge v-for="t in item.tags" :key="t" color="neutral" variant="subtle" size="sm">{{ t }}</UBadge>
               </div>
               <p class="text-xs text-muted line-clamp-2 flex-1">{{ item.description }}</p>
               <div class="flex items-center gap-2">
@@ -1136,10 +1106,15 @@ onMounted(async () => {
                   :disabled="busy && installingCatalogId !== item.id"
                   @click="installFromCatalog(item)"
                 >
-                  安装
+                  预览安装
                 </UButton>
               </div>
             </div>
+          </div>
+
+          <div v-if="filteredCatalog.length > visibleCatalog.length" class="catalog-more">
+            <span>已展示 {{ visibleCatalog.length }} / {{ filteredCatalog.length }} 个技能</span>
+            <UButton color="neutral" variant="outline" size="sm" @click="catalogLimit += 12">加载更多</UButton>
           </div>
 
           <!-- 全网结果：搜索词 ≥ 2 字符时自动检索 skills.sh，无搜索时不占版面 -->
@@ -1161,7 +1136,7 @@ onMounted(async () => {
               <div
                 v-for="item in shResults"
                 :key="item.id"
-                class="group rounded-lg ring ring-default bg-elevated/30 hover:bg-elevated/60 hover:ring-primary/30 transition-colors p-3 flex items-center gap-3"
+                class="search-result"
               >
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2 min-w-0">
@@ -1198,12 +1173,14 @@ onMounted(async () => {
                   :disabled="busy && installingShId !== item.id"
                   @click="installFromSkillsSh(item)"
                 >
-                  安装
+                  预览安装
                 </UButton>
               </div>
             </div>
           </template>
-        </UCard>
+        </section>
+
+        </div>
 
         <!-- 数据源管理弹窗 -->
         <UModal v-model:open="sourcesOpen" title="数据源管理" description="接入 GitHub 仓库作为技能目录数据源，自动扫描其中含 SKILL.md 的目录">
@@ -1282,3 +1259,84 @@ onMounted(async () => {
     </template>
   </UDashboardPanel>
 </template>
+
+<style scoped>
+.skills-install { width: 100%; max-width: 1320px; margin: 0 auto; padding: 28px 32px 36px; container-type: inline-size; }
+.install-heading h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.035em; color: var(--text); }
+.install-heading p { margin: 6px 0 0; font-size: 13px; color: var(--text-muted); }
+.install-steps { display: flex; flex-wrap: wrap; gap: 12px 28px; list-style: none; padding: 20px 0; margin: 0 0 24px; border-bottom: 1px solid var(--border); }
+.install-steps li { display: flex; align-items: center; gap: 8px; color: var(--text-subtle); font-size: 12px; }
+.step-number { display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 50%; font: 11px var(--font-mono); }
+.install-steps .active { color: var(--text); font-weight: 600; }
+.active .step-number { border-color: var(--accent); background: var(--accent); color: var(--bg); }
+.done .step-number { color: var(--accent); }
+.install-grid { display: grid; grid-template-columns: minmax(0, 1fr) 284px; gap: 24px 32px; align-items: start; }
+.source-section, .target-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.source-section, .wizard-section, .install-feedback, .catalog-section { grid-column: 1; min-width: 0; }
+.source-form { padding: 20px 0 0; }
+.section-title { margin-bottom: 20px; }
+.section-title h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+.section-title p { margin: 6px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+.remote-address { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; }
+.source-type, .source-input { width: 100%; min-width: 0; }
+.source-address { display: flex; gap: 8px; }
+.source-address .source-input { flex: 1; }
+.source-actions, .wizard-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.source-actions > span, .wizard-actions > span { display: flex; align-items: center; gap: 6px; color: var(--text-subtle); font-size: 11px; }
+.archive-picker { display: flex; width: 100%; align-items: center; gap: 14px; padding: 20px; border: 1px dashed var(--border-strong); border-radius: 8px; text-align: left; cursor: pointer; background: transparent; }
+.archive-picker > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 6px; }
+.archive-picker strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 500; color: var(--text); }
+.archive-picker small { font-size: 11px; color: var(--text-subtle); }
+.archive-picker:hover, .archive-picker.selected { border-color: var(--accent); }
+.target-section { grid-column: 2; grid-row: 1 / span 4; border-left: 1px solid var(--border); padding: 6px 0 16px 24px; }
+.target-title { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 6px; color: var(--text); font-size: 13px; font-weight: 600; }
+.target-title span { font-size: 11px; font-weight: 400; color: var(--text-subtle); }
+.target-caption { font-size: 11px; line-height: 1.7; margin: 0 0 20px; color: var(--text-subtle); }
+.scope-option { display: inline-flex; flex: 1; justify-content: center; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.scope-option.selected { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
+.target-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; max-height: 360px; overflow-y: auto; padding: 2px; }
+.target-option { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px; border: 1px solid transparent; border-radius: 6px; color: var(--text-muted); cursor: pointer; }
+.target-option > span:not(:last-child) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; font-size: 12px; }
+.target-option:hover { background: var(--surface); }
+.target-option.selected { color: var(--accent); background: var(--accent-weak); }
+.target-option.missing { color: var(--text-subtle); }
+.target-option:disabled { opacity: .45; cursor: not-allowed; }
+.more-agents { display: flex; align-items: center; gap: 6px; padding: 8px; font-size: 11px; color: var(--text-muted); cursor: pointer; }
+.wizard-section { scroll-margin-top: 20px; border-top: 1px solid var(--border); }
+.wizard-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 48px; border-bottom: 1px solid var(--border); }
+.prepared-source { font: 11px/1.6 var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; }
+.candidate-option > div:first-child { flex-wrap: wrap; }
+.plan-targets { display: grid; gap: 10px; padding: 12px 0; }
+.plan-targets span { font-size: 12px; color: var(--text); }
+.plan-targets code { display: block; font: 11px/1.6 var(--font-mono); color: var(--text-muted); overflow-wrap: anywhere; }
+.install-feedback { display: grid; gap: 12px; }
+.catalog-section { padding-top: 24px; border-top: 1px solid var(--border); }
+.catalog-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+.catalog-filter { padding: 5px 10px; border-radius: 5px; color: var(--text-muted); font-size: 11px; cursor: pointer; }
+.catalog-filter:hover { color: var(--text); }
+.catalog-filter.selected { color: var(--accent); background: var(--accent-weak); }
+.catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.catalog-item { min-width: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.catalog-item:hover { border-color: var(--border-strong); }
+.catalog-item > div:last-child { flex-wrap: wrap; }
+.catalog-item > div:last-child > a { max-width: 100%; }
+.catalog-more { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; padding-top: 20px; color: var(--text-subtle); font-size: 11px; }
+.search-result { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.skills-install button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@container (max-width: 940px) { .catalog-grid { grid-template-columns: minmax(0, 1fr); } }
+@container (max-width: 760px) {
+  .install-grid { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .target-section { grid-column: 1; grid-row: auto; border-left: 0; padding: 20px 0 0; border-top: 1px solid var(--border); }
+  .target-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 260px; }
+  .target-caption { margin-bottom: 16px; }
+}
+@container (max-width: 440px) {
+  .install-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .remote-address { grid-template-columns: minmax(0, 1fr); }
+  .source-actions { align-items: flex-start; }
+  .source-actions > span { flex-basis: 100%; }
+  .target-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) { .skills-install { padding: 20px 16px; } }
+@media (prefers-reduced-motion: reduce) { .skills-install :deep(*) { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+</style>

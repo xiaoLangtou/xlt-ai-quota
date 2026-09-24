@@ -20,9 +20,11 @@ const ICON_BASE = `${import.meta.env.BASE_URL}agent-icons/`;
 const AGENT_ICON_FILE: Record<string, string> = {
   Qoder: "qoder.svg",
   Claude: "claude_code.svg",
+  "Claude Code": "claude_code.svg",
   Codex: "codex.svg",
   Cursor: "cursor.png",
   Gemini: "gemini_cli.svg",
+  "Gemini CLI": "gemini_cli.svg",
   Windsurf: "windsurf.svg",
   Trae: "trae.svg",
   Augment: "augment.svg",
@@ -39,9 +41,11 @@ const AGENT_ICON_FILE: Record<string, string> = {
 const AGENT_STYLES: Record<string, AgentStyle> = {
   Qoder: { color: "#22c55e", label: "Qoder" },
   Claude: { color: "#D97757", label: "Claude" },
+  "Claude Code": { color: "#D97757", label: "Claude Code" },
   Codex: { color: "#000000", label: "Codex" },
   Cursor: { color: "#000000", label: "Cursor" },
   Gemini: { color: "#1C69FF", label: "Gemini" },
+  "Gemini CLI": { color: "#1C69FF", label: "Gemini CLI" },
   Windsurf: { color: "#09B6A2", label: "Windsurf" },
   Codeium: { color: "#09B6A2", label: "Codeium" },
   Augment: { color: "#7c3aed", label: "Augment" },

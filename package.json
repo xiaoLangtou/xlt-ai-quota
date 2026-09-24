@@ -7,9 +7,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "build:diagnostic": "vue-tsc --noEmit && vite build --mode diagnostic",
+    "test:diagnostic": "pnpm exec tsx scripts/smoke-diagnostic.mts",
+    "tauri:build:diagnostic": "node scripts/build-diagnostic.mjs",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "test:unit": "pnpm exec tsx scripts/smoke-data.mts && pnpm exec tsx scripts/smoke-ark-mapping.mts && pnpm exec tsx scripts/smoke-subscriptions.mts && pnpm exec tsx scripts/smoke-token-estimate.mts && pnpm exec tsx scripts/smoke-pricing.mts && pnpm exec tsx scripts/smoke-vault-crypto.mts && pnpm exec tsx scripts/smoke-oil.mts && pnpm exec tsx scripts/smoke-clipboard-content.mts",
+    "test:unit": "pnpm exec tsx scripts/smoke-data.mts && pnpm exec tsx scripts/smoke-ark-mapping.mts && pnpm exec tsx scripts/smoke-subscriptions.mts && pnpm exec tsx scripts/smoke-token-estimate.mts && pnpm exec tsx scripts/smoke-pricing.mts && pnpm exec tsx scripts/smoke-vault-crypto.mts && pnpm exec tsx scripts/smoke-oil.mts && pnpm exec tsx scripts/smoke-clipboard-content.mts && pnpm exec tsx scripts/smoke-feature-gates.mts",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test": "pnpm typecheck && pnpm test:unit && pnpm test:e2e",
     "tauri": "tauri",

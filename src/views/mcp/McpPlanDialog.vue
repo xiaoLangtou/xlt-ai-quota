@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { McpPlan } from "@/types/mcp";
+import AgentAvatar from "@/components/skills/AgentAvatar.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -66,7 +67,10 @@ function close() {
         >
           <div class="flex items-center justify-between gap-2 border-b border-default bg-elevated/40 px-3 py-2">
             <div class="flex min-w-0 items-center gap-2">
-              <UBadge color="primary" variant="subtle" size="sm">{{ target.agentLabel }}</UBadge>
+              <UBadge color="primary" variant="subtle" size="sm">
+                <AgentAvatar :agent="target.agentLabel" :size="16" />
+                {{ target.agentLabel }}
+              </UBadge>
               <UBadge color="neutral" variant="soft" size="sm">
                 {{ target.scope === "global" ? "全局" : target.projectPath }}
               </UBadge>

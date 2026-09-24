@@ -189,7 +189,8 @@
     ]
   },
   "installed_agents": [
-    "opencode"
+    "opencode",
+    "codex"
   ],
   "automation": {
     "mode": "auto"

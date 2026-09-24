@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { skillsMcp as skillsMcpEnabled } from "@/config/features.json";
 import type {
   AddSourceRequest,
   ApplyUpdateRequest,
@@ -46,6 +47,7 @@ export function skillsErrorMessage(error: unknown): string {
 
 /** 调用 Skills 命令并把错误统一转为 Error（便于上层 `(e as Error).message` 沿用）。 */
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (!skillsMcpEnabled) throw new Error("排查期间 Skills 功能已暂时停用");
   try {
     return await invoke<T>(command, args);
   } catch (error) {

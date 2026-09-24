@@ -1,6 +1,21 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+/* 主题色对齐改版原型：终端绿品牌色阶（Nuxt UI primary = brand）。 */
+@theme static {
+  --color-brand-50: #f0f7f2;
+  --color-brand-100: #dcefe3;
+  --color-brand-200: #badfc8;
+  --color-brand-300: #8fc7a6;
+  --color-brand-400: #63c183;
+  --color-brand-500: #4f9d69;
+  --color-brand-600: #3d8156;
+  --color-brand-700: #336847;
+  --color-brand-800: #2b533b;
+  --color-brand-900: #244532;
+  --color-brand-950: #12251b;
+}
+
 /* Billing workspace design tokens: restrained surfaces, clear totals and dense ledgers. */
 :root,
 [data-theme="light"] {
@@ -14,14 +29,14 @@
   --text: #1a1d26;
   --text-muted: #4f5565;
   --text-subtle: #7b8194;
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
+  --accent: #3d8156;
+  --accent-hover: #336847;
   --accent-contrast: #ffffff;
-  --accent-weak: rgba(79, 70, 229, 0.08);
-  --accent-ring: rgba(79, 70, 229, 0.2);
-  --u-ok: #059669;
-  --u-warn: #d97706;
-  --u-crit: #dc2626;
+  --accent-weak: rgba(79, 157, 105, 0.12);
+  --accent-ring: rgba(79, 157, 105, 0.2);
+  --u-ok: #3d8156;
+  --u-warn: #9c7a2e;
+  --u-crit: #b64444;
   --brand-ark: #ea580c;
   --brand-codex: #2563eb;
   --brand-kiro: #7c3aed;
@@ -30,11 +45,11 @@
   --brand-open: #059669;
   --brand-gemini: #2563eb;
   --brand-copilot: #6b7280;
-  --heatmap-0: #eef0f6;
-  --heatmap-1: #c7d2fe;
-  --heatmap-2: #a5b4fc;
-  --heatmap-3: #818cf8;
-  --heatmap-4: var(--accent);
+  --heatmap-0: #ececec;
+  --heatmap-1: rgba(61, 129, 86, 0.2);
+  --heatmap-2: rgba(61, 129, 86, 0.4);
+  --heatmap-3: rgba(61, 129, 86, 0.65);
+  --heatmap-4: #3d8156;
   --r-sm: 7px;
   --r-md: 10px;
   --r-lg: 14px;
@@ -47,7 +62,7 @@
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --scroll-thumb: #b6bcc9;
   --scroll-thumb-hover: #8f96a6;
-  --scroll-thumb-active: #4f46e5;
+  --scroll-thumb-active: #3d8156;
   --track: #eef0f6;
   --segment-bg: #f1f2f7;
   --popover: #ffffff;
@@ -63,23 +78,24 @@
 [data-theme="dark"],
 .dark {
   color-scheme: dark;
-  --bg: #0f1118;
-  --surface: #161824;
-  --surface-2: #1c1f2e;
-  --surface-3: #242839;
-  --border: #272c3f;
-  --border-strong: #3a4059;
-  --text: #eceef6;
-  --text-muted: #a9aec1;
-  --text-subtle: #757b90;
-  --accent: #818cf8;
-  --accent-hover: #a5b4fc;
-  --accent-contrast: #1e1b4b;
-  --accent-weak: rgba(129, 140, 248, 0.14);
-  --accent-ring: rgba(129, 140, 248, 0.32);
-  --u-ok: #34d399;
-  --u-warn: #fbbf24;
-  --u-crit: #f87171;
+  /* 背景取 macOS 深色窗口灰，卡片在灰底上提亮以保持层次。 */
+  --bg: #1e1e1e;
+  --surface: #2a2a2a;
+  --surface-2: #232323;
+  --surface-3: #343434;
+  --border: #3a3a3a;
+  --border-strong: #4d4d4d;
+  --text: #ececec;
+  --text-muted: #a8a8a8;
+  --text-subtle: #767676;
+  --accent: #63c183;
+  --accent-hover: #7bc496;
+  --accent-contrast: #06130b;
+  --accent-weak: rgba(99, 193, 131, 0.13);
+  --accent-ring: rgba(99, 193, 131, 0.32);
+  --u-ok: #7bc496;
+  --u-warn: #dbb566;
+  --u-crit: #e38080;
   --brand-ark: #fb923c;
   --brand-codex: #60a5fa;
   --brand-kiro: #a78bfa;
@@ -88,22 +104,22 @@
   --brand-open: #34d399;
   --brand-gemini: #60a5fa;
   --brand-copilot: #9ca3af;
-  --heatmap-0: #232739;
-  --heatmap-1: #31386b;
-  --heatmap-2: #3f4894;
-  --heatmap-3: #5560c4;
-  --heatmap-4: var(--accent);
+  --heatmap-0: #2a2a2a;
+  --heatmap-1: rgba(99, 193, 131, 0.22);
+  --heatmap-2: rgba(99, 193, 131, 0.42);
+  --heatmap-3: rgba(99, 193, 131, 0.68);
+  --heatmap-4: #63c183;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
   --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.22);
   --shadow-pop: 0 20px 52px rgba(0, 0, 0, 0.48);
-  --scroll-thumb: #454b63;
-  --scroll-thumb-hover: #5d6480;
-  --scroll-thumb-active: #818cf8;
-  --track: #242839;
-  --segment-bg: #1c1f2e;
-  --popover: #1a1c2a;
-  --tooltip-bg: #1a1c2a;
-  --editor-dialog-bg: #161824;
+  --scroll-thumb: #4a4a4a;
+  --scroll-thumb-hover: #616161;
+  --scroll-thumb-active: #63c183;
+  --track: #343434;
+  --segment-bg: #232323;
+  --popover: #2a2a2a;
+  --tooltip-bg: #2a2a2a;
+  --editor-dialog-bg: #2a2a2a;
 }
 
 /*
@@ -1045,4 +1061,9 @@ textarea {
 }
 .md-editor.md-editor .md-editor-toolbar-item:hover {
   color: var(--ui-text-highlighted);
+}
+
+/* 小屏不再使用抽屉：隐藏导航栏里的侧栏切换按钮（侧栏改为常驻图标态）。 */
+[data-slot="toggle"] {
+  display: none !important;
 }

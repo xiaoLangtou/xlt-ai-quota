@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, Table
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Menu } from "@/components/ui/menu";
 import ToolLogo from "@/components/ToolLogo.vue";
+import QuotaCard from "@/components/QuotaCard.vue";
 import {
   BILL_CATEGORY_LABEL,
   BILL_CATEGORY_OPTIONS,
@@ -18,6 +19,7 @@ import {
   BILL_PAYMENT_OPTIONS,
   BILL_SOURCE_LABEL,
   type AiSubscription,
+  type PlatformQuotaView,
   type BillCategory,
   type BillEntry,
   type BillPaymentMethod,
@@ -25,8 +27,25 @@ import {
   type SubscriptionBillingCycle,
 } from "@/types/usage";
 
-const props = defineProps<{ open?: boolean; embedded?: boolean; createSignal?: number }>();
-const emit = defineEmits<{ (e: "update:open", value: boolean): void }>();
+const props = defineProps<{
+  open?: boolean;
+  embedded?: boolean;
+  createSignal?: number;
+  /** 费用中心：套餐额度页面并入统一页签，由外层注入额度视图。 */
+  quotaViews?: PlatformQuotaView[];
+  /** 嵌入费用中心时由外层渲染账单摘要，避免重复。 */
+  hideOverview?: boolean;
+  /** 嵌入费用中心时隐藏内层标题，避免与外层页头重复。 */
+  hideHeader?: boolean;
+}>();
+const emit = defineEmits<{
+  (e: "update:open", value: boolean): void;
+  (e: "open-settings"): void;
+}>();
+
+const quotaPlatformCount = computed(
+  () => new Set((props.quotaViews ?? []).map((view) => view.platform)).size,
+);
 
 const COMMON_PROVIDERS = [
   "ChatGPT",
@@ -89,7 +108,7 @@ const {
   setUsdToCnyRate,
 } = useSubscriptions();
 
-const activeView = ref<"subscriptions" | "bills">("subscriptions");
+const activeView = ref<"quota" | "subscriptions" | "bills">("quota");
 const exchangeRate = ref(usdToCnyRate.value);
 
 // ---- 账单流水筛选 ----
@@ -399,17 +418,17 @@ watch(usdToCnyRate, (value) => {
 <template>
   <Dialog :open="Boolean(open)" :static="embedded" content-class="subscription-dialog" @update:open="close">
         <section v-if="embedded || open" class="panel" :class="{ embedded }" aria-label="AI 订阅与账单管理">
-          <header class="panel-head">
+          <header v-if="!hideHeader" class="panel-head">
             <div>
-              <span class="eyebrow">SUBSCRIPTIONS &amp; BILLING</span>
-              <h2>订阅与账单</h2>
-              <p>分开跟踪订阅计划与实际账单，让每笔 AI 支出都可对账。</p>
+              <span class="eyebrow">BILLING</span>
+              <h2>费用中心</h2>
+              <p>套餐额度、订阅计划与账单流水统一对账。</p>
             </div>
             <Button v-if="!embedded" variant="ghost" size="icon" aria-label="关闭" @click="close">×</Button>
           </header>
 
           <div class="manager-workspace">
-            <section class="billing-overview" aria-label="订阅账单摘要">
+            <section v-if="!hideOverview" class="billing-overview" aria-label="订阅账单摘要">
               <div>
                 <span>计划月支出</span>
                 <strong>{{ formatMoney(monthlyCny, "CNY") }}</strong>
@@ -429,7 +448,8 @@ watch(usdToCnyRate, (value) => {
 
             <Tabs v-model="activeView" class="workspace-tabs">
               <div class="ws-bar">
-                <TabsList aria-label="订阅工作区">
+                <TabsList aria-label="费用中心工作区">
+                  <TabsTrigger value="quota">套餐额度</TabsTrigger>
                   <TabsTrigger value="subscriptions">订阅列表</TabsTrigger>
                   <TabsTrigger value="bills">账单流水</TabsTrigger>
                 </TabsList>
@@ -446,6 +466,23 @@ watch(usdToCnyRate, (value) => {
                 <Select v-model="selectedCategory" :options="categoryFilterOptions" aria-label="按分类筛选" />
                 <Button variant="outline" @click="openBillCreate">＋ 手动记账</Button>
               </div>
+
+              <TabsContent value="quota" class="quota-workspace" aria-label="套餐额度">
+                <div class="quota-head">
+                  <p>
+                    {{ quotaPlatformCount }} 个平台 · {{ quotaViews?.length ?? 0 }} 个套餐的可用额度与重置时间
+                  </p>
+                  <Button variant="outline" size="sm" @click="emit('open-settings')">显示设置</Button>
+                </div>
+                <div v-if="quotaViews?.length" class="quota-grid">
+                  <QuotaCard v-for="view in quotaViews" :key="view.id" :view="view" />
+                </div>
+                <div v-else class="empty-state">
+                  <div>＋</div>
+                  <strong>暂无套餐额度</strong>
+                  <p>同步后展示各平台的可用额度与重置时间。</p>
+                </div>
+              </TabsContent>
 
               <TabsContent value="subscriptions" class="directory" aria-label="我的订阅">
                 <div v-if="subscriptions.length" class="table-wrap">
@@ -919,8 +956,30 @@ watch(usdToCnyRate, (value) => {
 
 .directory,
 .bill-workspace,
+.quota-workspace,
 .table-wrap {
   width: 100%;
+}
+
+.quota-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.quota-head p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.quota-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: stretch;
 }
 
 .table-wrap {

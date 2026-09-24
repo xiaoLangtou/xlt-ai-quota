@@ -21,7 +21,7 @@
         "minHeight": 640,
         "center": true,
         "visible": false,
-        "titleBarStyle": "Transparent",
+        "titleBarStyle": "Overlay",
         "hiddenTitle": true
       },
       {

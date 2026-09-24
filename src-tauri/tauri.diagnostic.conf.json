@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AI 用量看板诊断版",
+  "identifier": "com.xlt.workbench.diagnostic",
+  "build": {
+    "frontendDist": "../dist-diagnostic",
+    "beforeBuildCommand": "pnpm build:diagnostic",
+    "features": ["diagnostic"]
+  },
+  "app": {
+    "macOSPrivateApi": false,
+    "windows": [
+      {
+        "label": "main",
+        "url": "diagnostic.html",
+        "title": "AI 用量看板 · 最小诊断模式",
+        "width": 760,
+        "height": 600,
+        "minWidth": 560,
+        "minHeight": 480,
+        "center": true,
+        "visible": true,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "titleBarStyle": "Visible"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost",
+      "capabilities": [
+        {
+          "identifier": "diagnostic-main",
+          "windows": ["main"],
+          "permissions": []
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}

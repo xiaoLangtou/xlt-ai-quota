@@ -5,7 +5,9 @@ import type { McpServer, McpService, McpTransport, ParsedServer, PlanRequest, Wr
 import { useMcpStore } from "@/stores/mcp";
 import { useSkillsStore } from "@/stores/skills";
 import { mcpApi, mcpErrorMessage } from "@/api/mcp";
+import { pickDirectory, skillsApi } from "@/api/skills";
 import { formatKeyValues, parseKeyValues, splitArgs } from "@/utils/mcp";
+import AgentAvatar from "@/components/skills/AgentAvatar.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -43,6 +45,10 @@ const form = reactive({
 });
 
 const selected = ref<Set<string>>(new Set());
+const targetScope = ref<"global" | "project">("global");
+const targetProjectId = ref("");
+const pickingProject = ref(false);
+const targetError = ref("");
 
 const transportItems = [
   { label: "stdio（本地命令）", value: "stdio" },
@@ -79,6 +85,57 @@ const projectTargets = computed(() =>
   ),
 );
 
+const projectItems = computed(() =>
+  projects.value.map((project) => ({
+    label: project.label,
+    value: project.id,
+    icon: "i-lucide-folder-git-2",
+  })),
+);
+const selectedProject = computed(() =>
+  projects.value.find((project) => project.id === targetProjectId.value),
+);
+const availableTargetAgents = computed(() =>
+  targetScope.value === "project"
+    ? agents.value.filter((agent) => agent.supportsProject)
+    : agents.value,
+);
+
+function setTargetScope(scope: "global" | "project") {
+  if (targetScope.value === scope) return;
+  targetScope.value = scope;
+  targetProjectId.value = "";
+  selected.value = new Set();
+  targetError.value = "";
+}
+
+function setTargetProject(id: string) {
+  targetProjectId.value = id;
+  selected.value = new Set();
+  targetError.value = "";
+}
+
+function newTargetKey(agent: string): string {
+  if (targetScope.value === "global") return globalKey(agent);
+  return selectedProject.value ? projectKey(agent, selectedProject.value.path) : "";
+}
+
+async function pickProject() {
+  pickingProject.value = true;
+  targetError.value = "";
+  try {
+    const path = await pickDirectory("选择项目根目录");
+    if (!path) return;
+    const project = await skillsApi.addProject(path);
+    await skillsStore.refresh();
+    setTargetProject(project.id);
+  } catch (caught) {
+    targetError.value = mcpErrorMessage(caught);
+  } finally {
+    pickingProject.value = false;
+  }
+}
+
 function reset() {
   tab.value = "paste";
   pasteText.value = "";
@@ -92,6 +149,9 @@ function reset() {
   form.envText = "";
   form.url = "";
   form.headersText = "";
+  targetScope.value = "global";
+  targetProjectId.value = "";
+  targetError.value = "";
   const next = new Set<string>();
   if (props.editing) {
     for (const instance of props.editing.instances) {
@@ -100,6 +160,14 @@ function reset() {
       } else {
         next.add(globalKey(instance.agent));
       }
+    }
+    const firstProjectInstance = props.editing.instances.find(
+      (instance) => instance.scope === "project" && instance.projectPath,
+    );
+    if (firstProjectInstance && !props.editing.instances.some((instance) => instance.scope === "global")) {
+      targetScope.value = "project";
+      targetProjectId.value =
+        projects.value.find((project) => project.path === firstProjectInstance.projectPath)?.id ?? "";
     }
   } else if (props.initialServer) {
     form.transport = props.initialServer.transport;
@@ -130,7 +198,10 @@ watch(
   () => props.open,
   async (open) => {
     if (!open) return;
-    await mcpStore.loadAgents();
+    await Promise.all([
+      mcpStore.loadAgents(),
+      projects.value.length ? Promise.resolve() : skillsStore.refresh(),
+    ]);
     reset();
     if (props.editing) {
       tab.value = "manual";
@@ -190,6 +261,13 @@ const targets = computed<WriteTarget[]>(() => {
   for (const key of selected.value) {
     const [kind, agent, projectPath] = key.split("|");
     if (!agent) continue;
+    if (!isEditing.value) {
+      if (targetScope.value === "global" && kind !== "g") continue;
+      if (
+        targetScope.value === "project" &&
+        (kind !== "p" || projectPath !== selectedProject.value?.path)
+      ) continue;
+    }
     if (kind === "g") list.push({ agent, scope: "global" });
     else list.push({ agent, scope: "project", projectPath });
   }
@@ -202,6 +280,7 @@ const validationError = computed(() => {
   if (!server.name.trim()) return "服务名不能为空";
   if (server.transport === "stdio" && !server.command?.trim()) return "stdio 服务必须填写命令";
   if (server.transport !== "stdio" && !server.url?.trim()) return "远程服务必须填写 URL";
+  if (!isEditing.value && targetScope.value === "project" && !selectedProject.value) return "请先选择项目";
   if (!targets.value.length) return "至少选择一个安装目标";
   return "";
 });
@@ -334,15 +413,110 @@ function submit() {
 
         <div class="space-y-3">
           <p class="text-xs font-semibold text-highlighted">安装目标</p>
-          <div class="space-y-1.5">
+          <template v-if="!isEditing">
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                class="flex items-center gap-2 rounded-lg px-3 py-2.5 text-left ring ring-default transition-colors cursor-pointer"
+                :class="targetScope === 'global' ? 'bg-primary/10 ring-primary/40' : 'bg-elevated/30 hover:bg-elevated/60'"
+                @click="setTargetScope('global')"
+              >
+                <UIcon name="i-lucide-user-round" class="size-4 shrink-0" />
+                <span>
+                  <span class="block text-sm font-medium text-highlighted">全局</span>
+                  <span class="block text-[11px] text-dimmed">写入用户级配置</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="flex items-center gap-2 rounded-lg px-3 py-2.5 text-left ring ring-default transition-colors cursor-pointer"
+                :class="targetScope === 'project' ? 'bg-primary/10 ring-primary/40' : 'bg-elevated/30 hover:bg-elevated/60'"
+                @click="setTargetScope('project')"
+              >
+                <UIcon name="i-lucide-folder-git-2" class="size-4 shrink-0" />
+                <span>
+                  <span class="block text-sm font-medium text-highlighted">项目级</span>
+                  <span class="block text-[11px] text-dimmed">写入指定项目</span>
+                </span>
+              </button>
+            </div>
+
+            <div v-if="targetScope === 'project'" class="space-y-2 rounded-lg bg-elevated/25 p-3 ring ring-default">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-medium text-highlighted">1. 选择项目</p>
+                <span class="text-[11px] text-dimmed">也可从访达添加</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <USelect
+                  :model-value="targetProjectId"
+                  :items="projectItems"
+                  placeholder="选择已登记项目"
+                  class="min-w-0 flex-1"
+                  @update:model-value="setTargetProject(String($event ?? ''))"
+                />
+                <UButton
+                  icon="i-lucide-folder-open"
+                  color="neutral"
+                  variant="soft"
+                  :loading="pickingProject"
+                  class="shrink-0"
+                  @click="pickProject"
+                >
+                  浏览选择
+                </UButton>
+              </div>
+              <p v-if="selectedProject" class="truncate font-mono text-[11px] text-dimmed" :title="selectedProject.path">
+                {{ selectedProject.path }}
+              </p>
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-medium text-highlighted">
+                  {{ targetScope === 'project' ? '2.' : '1.' }} 选择 AI 工具
+                </p>
+                <span class="text-[11px] text-dimmed">可多选</span>
+              </div>
+              <div
+                v-if="targetScope === 'project' && !selectedProject"
+                class="rounded-lg border border-dashed border-default px-3 py-5 text-center text-xs text-dimmed"
+              >
+                选择项目后即可选择支持项目级配置的 AI 工具
+              </div>
+              <div v-else class="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                <label
+                  v-for="agent in availableTargetAgents"
+                  :key="agent.id"
+                  class="flex items-center gap-2.5 rounded-lg px-3 py-2 ring ring-default cursor-pointer"
+                >
+                  <AgentAvatar :agent="agent.label" :size="24" />
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate text-sm text-highlighted">{{ agent.label }}</span>
+                    <span class="block truncate text-[11px] text-dimmed">
+                      {{ targetScope === 'global' ? agent.globalPath : '项目级配置' }}
+                    </span>
+                  </span>
+                  <UCheckbox
+                    :model-value="isSelected(newTargetKey(agent.id))"
+                    @update:model-value="toggle(newTargetKey(agent.id), Boolean($event))"
+                  />
+                </label>
+              </div>
+            </div>
+          </template>
+
+          <div v-else class="space-y-1.5">
             <label
               v-for="agent in agents"
               :key="agent.id"
               class="flex items-center justify-between gap-3 rounded-lg px-3 py-2 ring ring-default"
             >
-              <span class="flex min-w-0 flex-col">
-                <span class="text-sm text-highlighted">{{ agent.label }}</span>
-                <span class="truncate font-mono text-[11px] text-dimmed">{{ agent.globalPath }}</span>
+              <span class="flex min-w-0 items-center gap-2.5">
+                <AgentAvatar :agent="agent.label" :size="24" />
+                <span class="min-w-0">
+                  <span class="block text-sm text-highlighted">{{ agent.label }}</span>
+                  <span class="block truncate font-mono text-[11px] text-dimmed">{{ agent.globalPath }}</span>
+                </span>
               </span>
               <UCheckbox
                 :model-value="isSelected(globalKey(agent.id))"
@@ -352,7 +526,7 @@ function submit() {
             </label>
           </div>
 
-          <UCollapsible v-if="projectTargets.length">
+          <UCollapsible v-if="isEditing && projectTargets.length">
             <UButton label="项目级目标" color="neutral" variant="ghost" size="xs" trailing-icon="i-lucide-chevron-down" />
             <template #content>
               <div class="mt-2 grid grid-cols-2 gap-1.5">
@@ -365,11 +539,13 @@ function submit() {
                     :model-value="isSelected(target.key)"
                     @update:model-value="toggle(target.key, Boolean($event))"
                   />
+                  <AgentAvatar :agent="target.agentLabel" :size="18" />
                   <span class="truncate">{{ target.agentLabel }} · {{ target.projectLabel }}</span>
                 </label>
               </div>
             </template>
           </UCollapsible>
+          <UAlert v-if="targetError" color="error" variant="soft" icon="i-lucide-triangle-alert" :title="targetError" />
         </div>
 
         <UAlert
@@ -391,7 +567,7 @@ function submit() {
       <div class="flex w-full justify-end gap-2">
         <UButton color="neutral" variant="ghost" @click="close">取消</UButton>
         <UButton icon="i-lucide-file-diff" :disabled="Boolean(validationError)" @click="submit">
-          预览变更
+          生成变更预览
         </UButton>
       </div>
     </template>

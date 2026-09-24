@@ -2,7 +2,7 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import ui from "@nuxt/ui/vue-plugin";
 import App from "./App.vue";
-import { router } from "./router";
+import { createAppRouter } from "./router";
 import { initTheme } from "./composables/useTheme";
 import "./style.css";
 
@@ -11,6 +11,6 @@ initTheme();
 
 createApp(App)
   .use(createPinia())
-  .use(router)
+  .use(createAppRouter())
   .use(ui)
   .mount("#app");

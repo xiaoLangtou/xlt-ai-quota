@@ -6,7 +6,7 @@ use super::catalog;
 use super::error::McpError;
 use super::metadata;
 use super::parse;
-use super::plan::{self, StoredPlan};
+use super::plan;
 use super::probe;
 use super::scan::{self, ScanOptions};
 use super::state::McpState;
@@ -56,7 +56,13 @@ pub fn mcp_scan(
     projects: Option<Vec<String>>,
 ) -> Result<McpScanResult, McpError> {
     let projects = projects.unwrap_or_default();
-    scan::scan(&app, &state.paths, &ScanOptions { projects: &projects })
+    scan::scan(
+        &app,
+        &state.paths,
+        &ScanOptions {
+            projects: &projects,
+        },
+    )
 }
 
 /// 生成变更计划（不落盘）。
@@ -67,14 +73,8 @@ pub fn mcp_plan(state: State<'_, McpState>, request: PlanRequest) -> Result<McpP
         .plans
         .lock()
         .map_err(|_| McpError::internal("计划表锁定失败"))?;
-    registry.insert(
-        plan.id.clone(),
-        StoredPlan {
-            request: stored.request,
-            mtimes: stored.mtimes,
-            stage_actions: stored.stage_actions,
-        },
-    );
+    plan::make_room_for_plan(&mut registry);
+    registry.insert(plan.id.clone(), stored);
     Ok(plan)
 }
 
@@ -147,7 +147,13 @@ pub fn mcp_catalog_list(
     projects: Option<Vec<String>>,
 ) -> Result<Vec<McpPackage>, McpError> {
     let projects = projects.unwrap_or_default();
-    let scan = scan::scan(&app, &state.paths, &ScanOptions { projects: &projects })?;
+    let scan = scan::scan(
+        &app,
+        &state.paths,
+        &ScanOptions {
+            projects: &projects,
+        },
+    )?;
     catalog::list_packages(&app, &filter, &scan.services)
 }
 

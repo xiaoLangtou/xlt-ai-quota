@@ -1,5 +1,6 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -9,6 +10,28 @@ use super::error::McpError;
 use super::types::{McpServer, McpTransport, ProbeResult, ProbeTool};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_STDIO_WORKERS: usize = 2;
+static ACTIVE_STDIO_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+struct ProbePermit;
+
+impl ProbePermit {
+    fn acquire() -> Result<Self, McpError> {
+        ACTIVE_STDIO_WORKERS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < MAX_STDIO_WORKERS).then_some(count + 1)
+            })
+            .map_err(|_| McpError::upstream("连接测试已达到并发上限"))?;
+        Ok(Self)
+    }
+}
+
+impl Drop for ProbePermit {
+    fn drop(&mut self) {
+        ACTIVE_STDIO_WORKERS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 fn initialize_request() -> Value {
     json!({
@@ -57,7 +80,10 @@ fn parse_server_info(response: &Value) -> Option<String> {
 fn read_response(reader: &mut impl BufRead, id: i64) -> Result<Value, McpError> {
     loop {
         let mut line = String::new();
-        let read = reader.read_line(&mut line)?;
+        let read = reader.take(MAX_RESPONSE_BYTES + 1).read_line(&mut line)?;
+        if read as u64 > MAX_RESPONSE_BYTES || (read > 0 && !line.ends_with('\n')) {
+            return Err(McpError::upstream("服务响应超过 1 MB"));
+        }
         if read == 0 {
             return Err(McpError::upstream("进程提前退出，未返回响应"));
         }
@@ -83,10 +109,7 @@ fn stdio_handshake(
     let mut reader = BufReader::new(stdout);
     let init = read_response(&mut reader, 1)?;
     if let Some(error) = init.get("error") {
-        return Err(McpError::upstream(format!(
-            "initialize 失败：{}",
-            error
-        )));
+        return Err(McpError::upstream(format!("initialize 失败：{}", error)));
     }
     let server_info = parse_server_info(&init);
 
@@ -102,12 +125,18 @@ fn stdio_handshake(
 }
 
 fn probe_stdio(server: &McpServer) -> Result<(Vec<ProbeTool>, Option<String>), McpError> {
+    let permit = ProbePermit::acquire()?;
     let command = server
         .command
         .as_ref()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| McpError::bad_request("stdio 服务缺少 command"))?;
     let mut process = Command::new(command);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        process.process_group(0);
+    }
     process.args(&server.args);
     for (key, value) in &server.env {
         process.env(key, value);
@@ -120,7 +149,9 @@ fn probe_stdio(server: &McpServer) -> Result<(Vec<ProbeTool>, Option<String>), M
         .map_err(|error| McpError::bad_request(format!("启动进程失败：{error}")))?;
     let child = Arc::new(Mutex::new(child));
     let (mut stdin, stdout) = {
-        let mut guard = child.lock().map_err(|_| McpError::internal("进程锁定失败"))?;
+        let mut guard = child
+            .lock()
+            .map_err(|_| McpError::internal("进程锁定失败"))?;
         let stdin = guard
             .stdin
             .take()
@@ -133,7 +164,8 @@ fn probe_stdio(server: &McpServer) -> Result<(Vec<ProbeTool>, Option<String>), M
     };
 
     let (sender, receiver) = mpsc::channel();
-    std::thread::spawn(move || {
+    let worker = std::thread::spawn(move || {
+        let _permit = permit;
         let _ = sender.send(stdio_handshake(&mut stdin, stdout));
     });
 
@@ -141,9 +173,16 @@ fn probe_stdio(server: &McpServer) -> Result<(Vec<ProbeTool>, Option<String>), M
         Ok(result) => result,
         Err(_) => Err(McpError::upstream("测试连接超时（10 秒）")),
     };
+    #[cfg(unix)]
+    if let Ok(guard) = child.lock() {
+        unsafe { libc::killpg(guard.id() as i32, libc::SIGKILL) };
+    }
     if let Ok(mut guard) = child.lock() {
         let _ = guard.kill();
         let _ = guard.wait();
+    }
+    if worker.is_finished() || receiver.recv_timeout(Duration::from_millis(200)).is_ok() {
+        let _ = worker.join();
     }
     result
 }
@@ -165,6 +204,18 @@ fn extract_json(text: &str) -> Option<Value> {
         }
     }
     None
+}
+
+fn read_http_body(response: reqwest::blocking::Response) -> Result<String, McpError> {
+    let mut bytes = Vec::new();
+    response
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| McpError::upstream(format!("读取响应失败：{error}")))?;
+    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(McpError::upstream("服务响应超过 1 MB"));
+    }
+    String::from_utf8(bytes).map_err(|error| McpError::upstream(format!("响应不是 UTF-8：{error}")))
 }
 
 fn probe_http(server: &McpServer) -> Result<(Vec<ProbeTool>, Option<String>), McpError> {
@@ -195,9 +246,7 @@ fn probe_http(server: &McpServer) -> Result<(Vec<ProbeTool>, Option<String>), Mc
         .get("mcp-session-id")
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    let body = response
-        .text()
-        .map_err(|error| McpError::upstream(format!("读取响应失败：{error}")))?;
+    let body = read_http_body(response)?;
     if !status.is_success() {
         return Err(McpError::upstream(format!(
             "HTTP {}：{}",
@@ -225,9 +274,7 @@ fn probe_http(server: &McpServer) -> Result<(Vec<ProbeTool>, Option<String>), Mc
         .json(&tools_list_request())
         .send()
         .map_err(|error| McpError::upstream(format!("tools/list 失败：{error}")))?;
-    let body = tools_response
-        .text()
-        .map_err(|error| McpError::upstream(format!("读取响应失败：{error}")))?;
+    let body = read_http_body(tools_response)?;
     let tools_value =
         extract_json(&body).ok_or_else(|| McpError::upstream("tools/list 响应非法"))?;
     Ok((parse_tools(&tools_value), server_info))

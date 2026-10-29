@@ -24,6 +24,21 @@ export const settings = {
     storage.saveConnectorConfig({ ...full, ark: { baseUrl } });
   },
 
+  // DeepSeek：账户余额经官方 /user/balance 查询，需要 API Key（仅本机保存）。
+  getDeepseekConfig(): { apiKey: string } {
+    const cfg = storage.getConnectorConfig().deepseek ?? {};
+    return { apiKey: cfg.apiKey?.trim() ?? "" };
+  },
+
+  saveDeepseekApiKey(apiKey: string): void {
+    const full = storage.getConnectorConfig();
+    const trimmed = apiKey.trim();
+    storage.saveConnectorConfig({
+      ...full,
+      deepseek: trimmed ? { apiKey: trimmed } : {},
+    });
+  },
+
   getOilConfig(): { province: string; apiKey: string; grade: OilGrade } {
     const cfg = storage.getConnectorConfig().oil ?? {};
     const grade = OIL_GRADES.includes(cfg.grade as OilGrade) ? (cfg.grade as OilGrade) : "92";
@@ -34,8 +49,7 @@ export const settings = {
     };
   },
 
-  saveOilConfig(config: { province: string; apiKey: string; grade?: OilGrade }): void {
-    const full = storage.getConnectorConfig();
+  saveOilConfig(config: { province: string; apiKey: string; grade?: OilGrade }): void {    const full = storage.getConnectorConfig();
     const province = config.province.trim();
     const apiKey = config.apiKey.trim();
     const grade = config.grade ?? full.oil?.grade;

@@ -28,6 +28,10 @@ export interface DailyReportPreferences {
   authors: string[];
   ai?: AiProviderPreference;
   aiApiKeys?: Partial<Record<AiProvider, string>>;
+  /** 按服务商保存用户新增的模型 ID。 */
+  aiCustomModels?: Partial<Record<AiProvider, string[]>>;
+  /** 切换服务商时恢复各自上次选择的模型。 */
+  aiSelectedModels?: Partial<Record<AiProvider, string>>;
 }
 
 export interface GitReportImport {

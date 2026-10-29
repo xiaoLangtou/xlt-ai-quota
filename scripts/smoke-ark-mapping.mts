@@ -1,4 +1,4 @@
-// 验证 ArkConnector 对 arkcli JSON 的映射（mock fetch，不依赖 dev 中间件）
+// 验证 ArkConnector 对 arkcli JSON 的映射（注入 connector mock，不依赖 Tauri 运行时）
 
 const _store = new Map<string, string>();
 (globalThis as unknown as { localStorage: Storage }).localStorage = {
@@ -46,12 +46,12 @@ const statsJson = {
   data_count: 2,
 };
 
-(globalThis as unknown as { fetch: typeof fetch }).fetch = ((url: string | URL | Request) => {
-  const u = String(url);
-  if (u.includes("/plan")) return Promise.resolve(new Response(JSON.stringify(planJson), { status: 200 }));
-  if (u.includes("/stats")) return Promise.resolve(new Response(JSON.stringify(statsJson), { status: 200 }));
-  return Promise.resolve(new Response("not found", { status: 404 }));
-}) as typeof fetch;
+(globalThis as unknown as { __XLT_CONNECTOR_MOCK__: (opts: { path: string }) => Promise<unknown> })
+  .__XLT_CONNECTOR_MOCK__ = async (opts) => {
+    if (opts.path === "/plan") return planJson;
+    if (opts.path === "/stats") return statsJson;
+    throw new Error("not found");
+  };
 
 import { ArkConnector } from "@/connectors/ark";
 

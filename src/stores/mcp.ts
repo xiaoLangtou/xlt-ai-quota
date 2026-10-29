@@ -12,6 +12,7 @@ export const useMcpStore = defineStore("mcp", () => {
   const agentsLoaded = ref(false);
   const scannedAt = ref("");
   const error = ref("");
+  let scanRequest = 0;
 
   /** 配置层异常数：文件级问题 + 配置错误 + 命令不存在。 */
   const errorCount = computed(
@@ -33,18 +34,21 @@ export const useMcpStore = defineStore("mcp", () => {
   }
 
   async function refresh(projects: string[] = []): Promise<void> {
+    const request = ++scanRequest;
     loading.value = true;
     error.value = "";
     try {
       const result = await mcpApi.scan(projects);
+      if (request !== scanRequest) return;
       services.value = result.services;
       issues.value = result.issues;
       scannedFiles.value = result.scannedFiles;
       scannedAt.value = new Date().toISOString();
     } catch (caught) {
+      if (request !== scanRequest) return;
       error.value = mcpErrorMessage(caught);
     } finally {
-      loading.value = false;
+      if (request === scanRequest) loading.value = false;
     }
   }
 

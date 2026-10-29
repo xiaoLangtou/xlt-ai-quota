@@ -27,6 +27,7 @@ interface DashboardState {
   modelUsage: ModelUsage[];
   heatmap: HeatmapDay[];
   todayHourly: TodayHourly;
+  earliestUsageDate: string | null;
   sync: SyncInfo;
   loading: boolean;
   syncError: string | null;
@@ -42,6 +43,7 @@ const state = reactive<DashboardState>({
   modelUsage: [],
   heatmap: [],
   todayHourly: { labels: [], trend: [], platform: [] },
+  earliestUsageDate: null,
   sync: { lastSyncAt: null, syncing: false },
   loading: false,
   syncError: null,
@@ -59,12 +61,14 @@ function readAll(): void {
   state.toolUsage = usageService.getToolBreakdown(state.range);
   state.modelUsage = usageService.getModelBreakdown(state.range);
   state.heatmap = usageService.getDailyHeatmap();
+  state.earliestUsageDate = usageService.getEarliestTokenDate();
   state.sync = usageService.getSyncInfo();
   state.syncError = state.sync.error ?? null;
 }
 
+let bootstrapStarted = false;
+
 export function useUsageDashboard() {
-  usageService.ensureSeeded();
   readAll();
 
   function updateTray(): void {
@@ -172,6 +176,7 @@ export function useUsageDashboard() {
   function loadSettings() {
     return {
       ark: usageService.getArkConfigView(),
+      deepseek: usageService.getDeepseekConfigView(),
       oil: usageService.getOilConfigView(),
       quotaDisplay: usageService.getQuotaDisplayConfigView(),
       preferences: usageService.getPreferencesView(),
@@ -181,11 +186,13 @@ export function useUsageDashboard() {
 
   function saveSettings(patch: {
     ark?: { baseUrl?: string };
+    deepseek?: { apiKey: string };
     oil?: { province: string; apiKey: string; grade?: OilGrade };
     quotaDisplay?: { hiddenPlatforms: QuotaDisplayTarget[] };
     preferences?: { timezone?: string; statsSince?: string | null };
   }): void {
     if (patch.ark) usageService.saveArkBaseUrl(patch.ark.baseUrl ?? "");
+    if (patch.deepseek) usageService.saveDeepseekApiKey(patch.deepseek.apiKey ?? "");
     if (patch.oil) usageService.saveOilConfig(patch.oil);
     if (patch.quotaDisplay) {
       usageService.saveQuotaDisplayConfig(patch.quotaDisplay);
@@ -195,22 +202,39 @@ export function useUsageDashboard() {
     if (patch.preferences) usageService.savePreferences(patch.preferences);
   }
 
-  if (!autoSyncStarted) {
-    autoSyncStarted = true;
-    void setupUsageTray(sync).then(updateTray).catch(() => undefined);
-    void (isTauriDesktop() ? syncSubscriptionQuotas() : sync());
+  if (!bootstrapStarted) {
+    bootstrapStarted = true;
+    state.loading = true;
+    void usageService
+      .init()
+      .then(() => {
+        readAll();
+        state.loading = false;
+        if (!autoSyncStarted) {
+          autoSyncStarted = true;
+          void setupUsageTray(sync).then(updateTray).catch(() => undefined);
+          // 采集器只在桌面端可用；浏览器模式仅展示已有本地数据。
+          if (isTauriDesktop()) void syncSubscriptionQuotas();
+        }
+      })
+      .catch((error) => {
+        state.loading = false;
+        state.syncError = error instanceof Error ? error.message : String(error);
+      });
   }
 
   // 自动刷新「今天」：每 60s + 窗口可见/聚焦时，静默更新本地用量，实现近实时。
   if (!autoRefreshStarted && typeof window !== "undefined") {
     autoRefreshStarted = true;
-    window.setInterval(() => {
-      if (document.visibilityState === "visible") void syncToday();
-    }, 60_000);
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") void syncToday();
-    });
-    window.addEventListener("focus", () => void syncToday());
+    if (isTauriDesktop()) {
+      window.setInterval(() => {
+        if (document.visibilityState === "visible") void syncToday();
+      }, 60_000);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") void syncToday();
+      });
+      window.addEventListener("focus", () => void syncToday());
+    }
   }
 
   return {
@@ -224,6 +248,7 @@ export function useUsageDashboard() {
     modelUsage: computed(() => state.modelUsage),
     heatmap: computed(() => state.heatmap),
     todayHourly: computed(() => state.todayHourly),
+    earliestUsageDate: computed(() => state.earliestUsageDate),
     loading: computed(() => state.loading),
     syncError: computed(() => state.syncError),
     setRange,

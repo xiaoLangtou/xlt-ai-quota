@@ -2,11 +2,9 @@ import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type UserConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import ui from "@nuxt/ui/vite";
-import { localConnectorsDevPlugin } from "./vite-local-connectors";
 
-// 在 dev 模式下，浏览器无法直接调用火山方舟控制面 usage API（需 Volc AK/SK 签名，
-// 且 ark- 开头的 Bearer Key 只能用于数据面推理，无 usage 端点）。
-// 故通过 Vite 中间件 spawn 本机 arkcli 复用其 SSO->签名调用链。
+// 所有本地连接器统一走 Tauri command（src-tauri/src/connectors.rs）；
+// 浏览器开发模式不再内置中间件，用量页仅展示已有本地数据。
 export default defineConfig(({ mode }): UserConfig => ({
   publicDir: mode === "diagnostic" ? false : "public",
   plugins: mode === "diagnostic" ? [] : [
@@ -18,14 +16,21 @@ export default defineConfig(({ mode }): UserConfig => ({
           neutral: "slate",
         },
         // 页头去分隔线，并让出顶部自绘标题栏（36px），使内容不与窗口控制按钮重叠。
+        // 页头不透明，滚动内容在其下方齐边裁切；渐隐由 .is-scrolled 的遮罩处理。
         dashboardNavbar: {
           slots: {
-            root: "border-b-0 h-auto pt-[15px] pb-2",
+            root: "relative z-10 h-auto pt-[15px] pb-3 bg-muted",
+          },
+        },
+        // 右侧内容区做成圆角内嵌框（原型 frame）：外边距 + 描边 + 圆角，框内独立滚动。
+        dashboardPanel: {
+          slots: {
+            root: "relative flex flex-col min-w-0 min-h-0 flex-1 my-3 me-3 ms-0 rounded-[10px] border border-default bg-muted overflow-hidden",
+            body: "flex flex-col gap-4 sm:gap-6 flex-1 overflow-y-auto px-4 sm:px-6 pt-2 sm:pt-2 pb-6 sm:pb-6",
           },
         },
       },
     }),
-    localConnectorsDevPlugin(),
   ],
   resolve: {
     alias: {
@@ -43,6 +48,7 @@ export default defineConfig(({ mode }): UserConfig => ({
           main: fileURLToPath(new URL("./index.html", import.meta.url)),
           "tray-panel": fileURLToPath(new URL("./tray-panel.html", import.meta.url)),
           "clipboard-panel": fileURLToPath(new URL("./clipboard-panel.html", import.meta.url)),
+          "translate-panel": fileURLToPath(new URL("./translate-panel.html", import.meta.url)),
         },
       output: {
         manualChunks: mode === "diagnostic" ? undefined : {

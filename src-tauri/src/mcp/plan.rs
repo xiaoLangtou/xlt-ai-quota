@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use super::adapters::{adapter_by_id, McpAdapter};
 use super::error::McpError;
@@ -13,6 +13,7 @@ use super::types::{
 /// 已生成、等待确认的计划及其写前状态。
 #[derive(Debug, Clone)]
 pub struct StoredPlan {
+    pub created_at: Instant,
     pub request: PlanRequest,
     /// 生成计划时的目标文件 mtime（毫秒）；写前比对，变化即中止。
     pub mtimes: HashMap<String, i64>,
@@ -21,6 +22,27 @@ pub struct StoredPlan {
 
 /// 内存中的待确认计划表。
 pub type PlanRegistry = std::sync::Mutex<HashMap<String, StoredPlan>>;
+
+const PLAN_TTL: Duration = Duration::from_secs(15 * 60);
+const MAX_PENDING_PLANS: usize = 32;
+
+pub fn prune_expired_plans(plans: &mut HashMap<String, StoredPlan>) {
+    plans.retain(|_, plan| plan.created_at.elapsed() < PLAN_TTL);
+}
+
+pub fn make_room_for_plan(plans: &mut HashMap<String, StoredPlan>) {
+    prune_expired_plans(plans);
+    while plans.len() >= MAX_PENDING_PLANS {
+        let Some(oldest) = plans
+            .iter()
+            .min_by_key(|(_, plan)| plan.created_at)
+            .map(|(id, _)| id.clone())
+        else {
+            break;
+        };
+        plans.remove(&oldest);
+    }
+}
 
 pub fn file_mtime(path: &Path) -> i64 {
     fs::metadata(path)
@@ -237,9 +259,47 @@ pub fn build_plan(
         warnings: warnings.clone(),
     };
     let stored = StoredPlan {
+        created_at: Instant::now(),
         request: request.clone(),
         mtimes,
         stage_actions,
     };
     Ok((plan, stored))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::types::PlanKind;
+    use super::*;
+
+    fn stored(age: Duration) -> StoredPlan {
+        StoredPlan {
+            created_at: Instant::now() - age,
+            request: PlanRequest {
+                kind: PlanKind::Remove,
+                server: None,
+                name: "test".into(),
+                targets: Vec::new(),
+            },
+            mtimes: HashMap::new(),
+            stage_actions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn pending_plans_expire_and_stay_bounded() {
+        let mut plans = HashMap::new();
+        plans.insert("expired".into(), stored(PLAN_TTL + Duration::from_secs(1)));
+        for index in 0..MAX_PENDING_PLANS {
+            plans.insert(index.to_string(), stored(Duration::from_secs(index as u64)));
+        }
+        make_room_for_plan(&mut plans);
+        assert_eq!(plans.len(), MAX_PENDING_PLANS - 1);
+        assert!(!plans.contains_key("expired"));
+        plans.insert("new".into(), stored(Duration::ZERO));
+        assert_eq!(plans.len(), MAX_PENDING_PLANS);
+        make_room_for_plan(&mut plans);
+        assert_eq!(plans.len(), MAX_PENDING_PLANS - 1);
+        assert!(!plans.contains_key(&(MAX_PENDING_PLANS - 1).to_string()));
+    }
 }

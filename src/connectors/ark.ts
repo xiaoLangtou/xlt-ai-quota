@@ -21,7 +21,7 @@ import {
  *
  * 数据来源：
  * - 套餐额度：arkcli usage plan（OpenAPI GetAFPUsage / GetCodingPlanUsage 等）
- * - Token 用量：arkcli usage stats --mine（BFF 聚合管道，5-30 分钟延迟）
+ * - Token 用量：arkcli usage stats（账号全量，BFF 聚合管道，5-30 分钟延迟）
  *
  * 认证由 arkcli 的 SSO profile 负责，无需在应用内保存 Ark 凭证。
  */

@@ -41,7 +41,7 @@
         "windowEffects": {
           "effects": ["popover"],
           "state": "active",
-          "radius": 14
+          "radius": 20
         }
       },
       {
@@ -59,6 +59,22 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": true,
+        "shadow": false,
+        "focus": true
+      },
+      {
+        "label": "translate-panel",
+        "url": "translate-panel.html",
+        "title": "翻译",
+        "width": 480,
+        "height": 470,
+        "center": true,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
         "shadow": false,
         "focus": true
       }

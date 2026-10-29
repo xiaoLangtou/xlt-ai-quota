@@ -8,6 +8,21 @@ import { skillsApi } from "../src/api/skills";
 import { mcpApi } from "../src/api/mcp";
 
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+function bracedBlock(source: string, marker: string): string {
+  const markerAt = source.indexOf(marker);
+  assert.notEqual(markerAt, -1, `缺少代码标记：${marker}`);
+  const openAt = source.indexOf("{", markerAt);
+  assert.notEqual(openAt, -1, `代码标记后缺少块：${marker}`);
+  let depth = 0;
+  for (let index = openAt; index < source.length; index++) {
+    if (source[index] === "{") depth++;
+    if (source[index] === "}") depth--;
+    if (depth === 0) return source.slice(openAt + 1, index);
+  }
+  assert.fail(`代码块未闭合：${marker}`);
+}
+
 assert.equal(skillsMcp, false, "本轮排查必须关闭 Skills/MCP");
 assert.deepEqual(NAV_GROUPS.map((group) => group.title), ["洞察", "工作", "工具箱"]);
 assert.equal(skillsErrorCount(), 0);
@@ -56,7 +71,16 @@ assert.ok(commands.length > 0);
 for (const command of commands) {
   assert.ok(native.slice(0, command.index).trimEnd().endsWith("#[cfg(skills_mcp)]"), command[0]);
 }
-assert.match(native, /#\[cfg\(skills_mcp\)\]\s+\{\s+app\.manage\(skills::SkillsState::new\(\)\);\s+app\.manage\(mcp::McpState::new\(\)\);\s+\}/);
+const gatedSetup = bracedBlock(native, "#[cfg(skills_mcp)]\n            {");
+for (const required of [
+  "app.manage(skills::SkillsState::new());",
+  "app.manage(mcp::McpState::new());",
+  "tauri::async_runtime::spawn",
+  "skills::install::planner::prune_expired_plans",
+  "mcp::plan::prune_expired_plans",
+]) {
+  assert.ok(gatedSetup.includes(required), `${required} 必须保留在 skills_mcp 启动块内`);
+}
 for (const required of ["clipboard_history::start_listener", "clipboard_history::register_shortcut", "connectors::connector_get", "snippets::snippet_list", "vault::vault_read"]) {
   assert.ok(native.includes(required), `${required} 不应在本轮屏蔽`);
 }

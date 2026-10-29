@@ -3,33 +3,47 @@ import type {
   BillEntry,
   QuotaDisplayTarget,
   QuotaSnapshot,
+  QuotaStateSnapshot,
   SubscriptionPreferences,
   SyncInfo,
   TokenDailyUsage,
+  UsageCacheStats,
+  UsageConfig,
 } from "@/types/usage";
 
 /**
- * 本地业务存储抽象，当前由 Web Storage（localStorage）持久化。
+ * 本地业务存储抽象。
+ *
+ * 当前实现分两类：
+ * - Tauri 桌面：用量桶 / 额度状态 / 缓存统计走 `~/.xlt-workbench`（Rust command）。
+ * - 浏览器 / 测试：回退到 localStorage 的旧实现。
  */
 export interface UsageStorage {
-  // 订阅额度快照
+  /** 初始化远端/文件存储；浏览器实现为空操作。 */
+  init?(): Promise<void>;
+
+  // 订阅额度快照（connector 原始读数，旧路径）
   listQuotas(): QuotaSnapshot[];
   listQuotasByPlatform(platform: string): QuotaSnapshot[];
-  saveQuotas(snapshots: QuotaSnapshot[]): void;
+  saveQuotas(snapshots: QuotaSnapshot[]): void | Promise<void>;
+
+  /** 归一化额度状态快照（新模型）。旧实现可省略。 */
+  listQuotaStates?(): QuotaStateSnapshot[];
+  saveQuotaStates?(snapshots: QuotaStateSnapshot[]): void | Promise<void>;
 
   // Token 日统计
   listTokens(): TokenDailyUsage[];
   /** 按 [start, end] 区间（含）返回，date 格式 YYYY-MM-DD */
   listTokensByRange(start: string, end: string): TokenDailyUsage[];
   /** 写入（按 platform + date + model 去重 upsert） */
-  saveTokens(records: TokenDailyUsage[]): void;
+  saveTokens(records: TokenDailyUsage[]): void | Promise<void>;
   /** 删除某平台在 [start, end] 区间内的记录（用于真实拉取覆盖种子） */
   replaceTokensForPlatform(
     platform: string,
     start: string,
     end: string,
     records: TokenDailyUsage[],
-  ): void;
+  ): void | Promise<void>;
 
   // 同步状态
   getSyncInfo(): SyncInfo;
@@ -51,6 +65,19 @@ export interface UsageStorage {
   // 配置（API Key 等敏感信息；本机保存，不入库不入 git）
   getConnectorConfig(): ConnectorConfigPersist;
   saveConnectorConfig(config: ConnectorConfigPersist): void;
+
+  /** 本地用量缓存统计（新存储）。 */
+  cacheStats?(): UsageCacheStats;
+  /** 按保留天数清理过期月份。 */
+  cleanup?(retentionDays?: number): Promise<UsageCacheStats>;
+  /** 清空全部用量缓存（保留配置）。 */
+  clearCache?(): Promise<UsageCacheStats>;
+  /** 从磁盘重新加载用量桶（Rust 采集器自行落盘后使用）。 */
+  reloadBuckets?(): Promise<void>;
+
+  /** 用量数据目录配置（时区 / 起始日 / 保留天数 / 定价地址）。 */
+  getUsageConfig?(): UsageConfig;
+  saveUsageConfig?(patch: Partial<UsageConfig>): void;
 }
 
 export interface UsagePreferences {
@@ -68,4 +95,6 @@ export interface ConnectorConfigPersist {
   oil?: { province?: string; apiKey?: string; grade?: string };
   /** 套餐额度区域中由用户隐藏的平台或方舟套餐。 */
   quotaDisplay?: { hiddenPlatforms?: QuotaDisplayTarget[] };
+  /** DeepSeek 账户余额查询用的 API Key（仅本机保存，可选）。 */
+  deepseek?: { apiKey?: string };
 }

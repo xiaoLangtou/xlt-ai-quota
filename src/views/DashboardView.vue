@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -9,10 +9,10 @@ import QuotaCard from "@/components/QuotaCard.vue";
 import OverviewStatCard from "@/components/OverviewStatCard.vue";
 import ClipboardWidget from "@/components/ClipboardWidget.vue";
 import ToolBreakdown from "@/components/ToolBreakdown.vue";
-import ToolDonutChart from "@/components/ToolDonutChart.vue";
+import ToolDistributionChart from "@/components/ToolDistributionChart.vue";
 import ModelBreakdown from "@/components/ModelBreakdown.vue";
 import CalendarHeatmap from "@/components/CalendarHeatmap.vue";
-import TokenSummaryCard from "@/components/TokenSummaryCard.vue";
+import TokenSummaryPanel from "@/components/TokenSummaryPanel.vue";
 import SettingsPanel from "@/components/SettingsPanel.vue";
 import SubscriptionManager from "@/components/SubscriptionManager.vue";
 import SkeletonBlock from "@/components/SkeletonBlock.vue";
@@ -21,6 +21,7 @@ import OilPriceCard from "@/components/OilPriceCard.vue";
 import { useOilMonitor } from "@/composables/useOilMonitor";
 import { isTauriDesktop } from "@/connectors/types";
 import { USAGE_PAGE_META } from "@/config/navigation";
+import { formatTokens, formatUsd } from "@/utils/format";
 import type { RangePreset } from "@/types/usage";
 
 const {
@@ -33,6 +34,7 @@ const {
   modelUsage,
   heatmap,
   todayHourly,
+  earliestUsageDate,
   loading,
   setRange,
   sync: syncNow,
@@ -73,6 +75,23 @@ function go(name: "analytics" | "subscriptions" | "settings" | "daily-report" | 
 }
 const subscriptionCreateSignal = ref(0);
 const settingsSyncSignal = ref(0);
+
+// 详情区默认收起，避免首屏信息过载；展开态与页签在同一 session 内记忆。
+const DETAILS_KEY = "analytics:detailsOpen";
+const detailsOpen = ref(false);
+try {
+  detailsOpen.value = sessionStorage.getItem(DETAILS_KEY) === "1";
+} catch {
+  /* 存储不可用时保持默认收起 */
+}
+watch(detailsOpen, (value) => {
+  try {
+    sessionStorage.setItem(DETAILS_KEY, value ? "1" : "0");
+  } catch {
+    /* 忽略存储失败 */
+  }
+});
+const detailTab = ref<"tool" | "model">("tool");
 const exchangeRate = ref(usdToCnyRate.value);
 const chartsReady = ref(!isTauriDesktop());
 let unlistenFocus: UnlistenFn | undefined;
@@ -102,9 +121,6 @@ const RANGES: { preset: RangePreset; label: string }[] = [
 ];
 
 const sparkTotal = computed(() => trend.value.map((p) => p.total));
-const sparkInput = computed(() => trend.value.map((p) => p.input));
-const sparkOutput = computed(() => trend.value.map((p) => p.output));
-const sparkRequests = computed(() => trend.value.map((p) => p.requests));
 
 const activeSubs = computed(() =>
   subscriptions.value.filter((item) => item.status === "active"),
@@ -132,19 +148,42 @@ const syncText = computed(() => {
   return isPartialSync.value ? `${relative} · 部分` : relative;
 });
 
-const inputPct = computed(() =>
-  summary.value.total > 0
-    ? Math.round((summary.value.input / summary.value.total) * 100)
-    : 0,
-);
-const outputPct = computed(() =>
-  summary.value.total > 0
-    ? Math.round((summary.value.output / summary.value.total) * 100)
-    : 0,
-);
 const rangeLabel = computed(
   () => RANGES.find((r) => r.preset === state.range)?.label ?? "",
 );
+
+/** 历史数据不足 60 天时，年度热力图会大面积空白，改为不展示该模块。 */
+const historyDays = computed(() => {
+  if (!earliestUsageDate.value) return 0;
+  const start = new Date(`${earliestUsageDate.value}T00:00:00`).getTime();
+  if (Number.isNaN(start)) return 0;
+  return Math.max(0, Math.floor((Date.now() - start) / 86_400_000));
+});
+const showHeatmap = computed(() => historyDays.value >= 60);
+
+/** 费用最高的模型，用于洞察文案的归因。 */
+const topCostModel = computed(
+  () => [...modelUsage.value].sort((a, b) => b.costUsd - a.costUsd)[0],
+);
+
+/** 首屏洞察：一句话给出「花了多少、环比涨跌、主因」。 */
+const insightText = computed(() => {
+  const s = summary.value;
+  if (s.total <= 0 && s.costUsd <= 0) return "";
+  const dir = (v: number) => (v >= 0 ? "升" : "降");
+  const tokenDelta = s.deltaPct == null ? "" : `，环比${dir(s.deltaPct)} ${Math.abs(s.deltaPct)}%`;
+  const costDelta =
+    s.costDeltaPct == null ? "" : `，环比${dir(s.costDeltaPct)} ${Math.abs(s.costDeltaPct)}%`;
+  const top = topCostModel.value;
+  const share = top && s.costUsd > 0 ? Math.round((top.costUsd / s.costUsd) * 100) : null;
+  const cause =
+    top && top.costUsd > 0 && share != null
+      ? `，主要来自 ${top.model}（占费用 ${share}%）`
+      : "";
+  return `${rangeLabel.value}总 Token ${formatTokens(s.total)}${tokenDelta}；预估费用 ${formatUsd(
+    s.costUsd,
+  )}${costDelta}${cause}。`;
+});
 
 /** 概览统计卡把数值与单位拆开展示，沿用原型 stat-value/unit 结构。 */
 const tokenParts = computed(() => {
@@ -302,27 +341,30 @@ function formatCny(value: number): string {
         </template>
 
         <template v-else-if="activeWorkspace === 'analytics'">
-          <section v-if="firstLoading" class="stats stats-5" aria-label="加载中">
-            <div v-for="i in 5" :key="i" class="skeleton-card">
-              <SkeletonBlock width="40%" height="11px" />
-              <SkeletonBlock width="66%" height="26px" radius="10px" />
-              <SkeletonBlock width="50%" height="11px" />
-            </div>
-          </section>
-          <section v-else class="stats stats-5" aria-label="Token 概要">
-            <TokenSummaryCard label="总 TOKEN" :value="summary.total" :delta-pct="summary.deltaPct"
-              :spark="sparkTotal" />
-            <TokenSummaryCard label="输入 TOKEN" :value="summary.input" :delta-pct="summary.inputDeltaPct"
-              :hint="`占总量 ${inputPct}%`" :spark="sparkInput" />
-            <TokenSummaryCard label="输出 TOKEN" :value="summary.output" :delta-pct="summary.outputDeltaPct"
-              :hint="`占总量 ${outputPct}%`" :spark="sparkOutput" />
-            <TokenSummaryCard label="请求数" :value="summary.requests" :delta-pct="summary.requestsDeltaPct"
-              :spark="sparkRequests" />
-            <TokenSummaryCard label="预估费用" :value="summary.costUsd" format="usd" :delta-pct="summary.costDeltaPct"
-              hint="按模型单价估算" />
-          </section>
+          <div v-if="firstLoading" class="summary-skeleton" aria-label="加载中">
+            <SkeletonBlock v-for="i in 5" :key="i" width="70%" height="34px" radius="8px" />
+          </div>
+          <TokenSummaryPanel
+            v-else
+            :total="summary.total"
+            :input="summary.input"
+            :output="summary.output"
+            :requests="summary.requests"
+            :cost-usd="summary.costUsd"
+            :delta-pct="summary.deltaPct"
+            :input-delta-pct="summary.inputDeltaPct"
+            :output-delta-pct="summary.outputDeltaPct"
+            :requests-delta-pct="summary.requestsDeltaPct"
+            :cost-delta-pct="summary.costDeltaPct"
+            :spark="sparkTotal"
+          />
 
-          <section class="block">
+          <p v-if="insightText" class="insight">
+            <UIcon name="i-lucide-sparkles" class="insight-icon" />
+            {{ insightText }}
+          </p>
+
+          <section v-if="showHeatmap" class="block">
             <div class="block-head">
               <div>
                 <h2>活跃热力图</h2>
@@ -346,15 +388,54 @@ function formatCny(value: number): string {
             </div>
           </section>
 
-          <section class="block">
-            <div class="analytics-grid">
-              <ToolBreakdown :tools="toolUsage" :range-label="rangeLabel" />
-              <ToolDonutChart :tools="toolUsage" />
-            </div>
-          </section>
+          <section class="block detail-block">
+            <button
+              class="detail-toggle"
+              type="button"
+              :aria-expanded="detailsOpen"
+              @click="detailsOpen = !detailsOpen"
+            >
+              <span class="detail-toggle-main">
+                <span class="detail-title">用量明细</span>
+                <span class="detail-sub">
+                  {{ toolUsage.length }} 个工具 · {{ modelUsage.length }} 个模型的分布与费用
+                </span>
+              </span>
+              <UIcon
+                name="i-lucide-chevron-down"
+                class="detail-chevron"
+                :class="{ open: detailsOpen }"
+              />
+            </button>
 
-          <section class="block">
-            <ModelBreakdown :models="modelUsage" :range-label="rangeLabel" />
+            <div v-show="detailsOpen" class="detail-body">
+              <div class="detail-tabs" role="tablist" aria-label="明细维度">
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="detailTab === 'tool'"
+                  :class="{ on: detailTab === 'tool' }"
+                  @click="detailTab = 'tool'"
+                >
+                  按工具
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="detailTab === 'model'"
+                  :class="{ on: detailTab === 'model' }"
+                  @click="detailTab = 'model'"
+                >
+                  按模型
+                </button>
+              </div>
+
+              <div v-if="detailTab === 'tool'" class="analytics-grid">
+                <ToolBreakdown :tools="toolUsage" :range-label="rangeLabel" />
+                <ToolDistributionChart :tools="toolUsage" />
+              </div>
+              <ModelBreakdown v-else :models="modelUsage" :range-label="rangeLabel" />
+            </div>
           </section>
         </template>
 
@@ -484,7 +565,7 @@ function formatCny(value: number): string {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
-.stat-grid-3 {
+.stat-grid.stat-grid-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .widget-grid {
@@ -526,25 +607,105 @@ function formatCny(value: number): string {
   color: var(--text-subtle);
   font-size: 11.5px;
 }
+.insight {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.insight-icon {
+  margin-top: 1px;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.detail-block {
+  margin-top: 16px;
+}
+.detail-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  text-align: left;
+  cursor: pointer;
+}
+.detail-toggle-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.detail-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+}
+.detail-sub {
+  color: var(--text-subtle);
+  font-size: 11.5px;
+}
+.detail-chevron {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  transition: transform 0.2s ease;
+}
+.detail-chevron.open {
+  transform: rotate(180deg);
+}
+.detail-body {
+  margin-top: 12px;
+}
+.detail-tabs {
+  display: inline-flex;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+.detail-tabs button {
+  padding: 5px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.detail-tabs button.on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
 .quota-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
 }
-.stats {
+.summary-skeleton {
   display: grid;
-  gap: 12px;
-}
-.stats-5 {
   grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-.skeleton-card {
-  display: flex;
-  min-height: 106px;
-  flex-direction: column;
-  gap: 12px;
-  padding: 18px;
+  gap: 20px;
+  padding: 18px 20px;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
@@ -595,8 +756,7 @@ function formatCny(value: number): string {
 }
 
 @media (max-width: 1180px) {
-.stat-grid,
-.stats-5 {
+.stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 .span-3,
@@ -627,7 +787,6 @@ function formatCny(value: number): string {
     flex: 1;
   }
 .stat-grid,
-.stats-5,
 .quota-grid {
     grid-template-columns: 1fr;
   }

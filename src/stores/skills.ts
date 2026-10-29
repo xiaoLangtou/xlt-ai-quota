@@ -9,8 +9,10 @@ export const useSkillsStore = defineStore("skills", () => {
   const skills = ref<SkillSummary[]>([]);
   const loading = ref(false);
   const error = ref("");
+  let refreshRequest = 0;
 
   async function refresh() {
+    const request = ++refreshRequest;
     loading.value = true;
     error.value = "";
     try {
@@ -19,13 +21,15 @@ export const useSkillsStore = defineStore("skills", () => {
         skillsApi.listProjects(),
         skillsApi.listSkills(),
       ]);
+      if (request !== refreshRequest) return;
       roots.value = rootList;
       projects.value = projectList;
       skills.value = skillList;
     } catch (caught) {
+      if (request !== refreshRequest) return;
       error.value = skillsErrorMessage(caught);
     } finally {
-      loading.value = false;
+      if (request === refreshRequest) loading.value = false;
     }
   }
 

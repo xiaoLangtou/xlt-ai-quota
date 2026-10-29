@@ -9,7 +9,7 @@ import {
 /**
  * OpenCode Go Token Connector
  *
- * 数据来源：本机 opencode 的 SQLite（`opencode db`），聚合 assistant 消息的
+ * 数据来源：本机 opencode 的 SQLite（只读查询），聚合 assistant 消息的
  * usage 字段（input/output/cache tokens），按本地日分组。
  *
  * 这对应产品方案中"请求返回的 usage 字段"数据源。
@@ -32,7 +32,7 @@ export class OpenCodeConnector implements Connector, TokenConnector {
     const payload = (await httpGet({
       baseUrl: this.baseUrl,
       path: "/stats",
-      query: { tz: range.tz },
+      query: { start: range.start, end: range.end, tz: range.tz },
     }).catch((e: unknown) => {
       throw new ConnectorError(this.id, "拉取 OpenCode Token 用量失败", e);
     })) as OpenCodeRow[];

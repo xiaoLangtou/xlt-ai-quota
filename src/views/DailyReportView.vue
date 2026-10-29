@@ -18,8 +18,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Popover } from "@/components/ui/popover";
-import { Textarea } from "@/components/ui/textarea";
 import { pushToast } from "@/composables/useToast";
+import { renderMarkdown } from "@/utils/skills-markdown";
 import type { AiProvider, GitProjectCommits, ReportKind } from "@/types/daily-report";
 
 type DatePreset = "today" | "yesterday" | "week" | "lastweek" | "custom";
@@ -70,6 +70,7 @@ const activePopover = ref<ReportPopover | null>(null);
 const workspaceTab = ref<WorkspaceTab>("report");
 const commits = ref<GitProjectCommits[]>([]);
 const generatedReport = ref("");
+const renderedReport = computed(() => renderMarkdown(generatedReport.value));
 const hasLoaded = ref(false);
 const readingCommits = ref(false);
 const generatingReport = ref(false);
@@ -96,7 +97,10 @@ const dateRange = computed(() => {
 const rangeLabel = computed(() => dateRange.value.startDate === dateRange.value.endDate
     ? dateRange.value.startDate
     : `${ dateRange.value.startDate } ～ ${ dateRange.value.endDate }`);
-const datePresetLabel = computed(() => DATE_PRESETS.find(([ value ]) => value === datePreset.value)?.[1] ?? "自定义");
+const datePresetLabel = computed(() => {
+    if (datePreset.value === "custom") return rangeLabel.value;
+    return DATE_PRESETS.find(([ value ]) => value === datePreset.value)?.[1] ?? "自定义";
+});
 const totalCommitCount = computed(() => commits.value.reduce((total, item) => total + item.commits.length, 0));
 const flatCommits = computed(() => commits.value.flatMap((group) => group.commits.map((commit) => ( {
     ...commit,
@@ -480,8 +484,8 @@ async function copyReport(): Promise<void> {
                             {{ copied ? "已复制" : "复制" }}
                         </button>
                     </header>
-                    <Textarea v-model="generatedReport" :placeholder="`点击上方“生成${reportLabel}”后，内容会显示在这里。`"
-                              class="report-editor"/>
+                    <!-- Markdown 渲染展示（禁用原始 HTML 防 XSS） -->
+                    <div class="report-rendered" v-html="renderedReport"/>
                     <footer>由 {{ AI_PROVIDERS[aiProvider].label }} · {{ aiModel }} 生成 · {{ selectedProjects.length }}
                         个仓库 · {{ totalCommitCount }} 条提交
                     </footer>
@@ -829,25 +833,75 @@ async function copyReport(): Promise<void> {
     cursor: not-allowed;
     opacity: .4;
 }
-.report-editor {
-    width: 100%;
-    min-height: 390px;
+.report-rendered {
     flex: 1;
+    min-height: 390px;
     margin-top: 15px;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    outline: 0;
-    background: transparent;
-    box-shadow: none;
     color: var(--report-ink);
-    font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.85;
-    resize: vertical;
 }
-.report-editor:focus {
-    box-shadow: none;
+.report-rendered :deep(h1),
+.report-rendered :deep(h2),
+.report-rendered :deep(h3),
+.report-rendered :deep(h4) {
+    margin: 18px 0 8px;
+    font-weight: 700;
+    line-height: 1.4;
+}
+.report-rendered :deep(h1) { font-size: 19px; }
+.report-rendered :deep(h2) { font-size: 16px; }
+.report-rendered :deep(h3) { font-size: 14px; }
+.report-rendered :deep(h1:first-child),
+.report-rendered :deep(h2:first-child),
+.report-rendered :deep(h3:first-child) { margin-top: 0; }
+.report-rendered :deep(p) { margin: 8px 0; }
+.report-rendered :deep(ul),
+.report-rendered :deep(ol) {
+    margin: 8px 0;
+    padding-left: 22px;
+}
+.report-rendered :deep(li) { margin: 3px 0; }
+.report-rendered :deep(strong) { font-weight: 700; }
+.report-rendered :deep(blockquote) {
+    margin: 10px 0;
+    padding: 4px 14px;
+    border-left: 3px solid var(--report-line-strong);
+    color: var(--report-muted);
+}
+.report-rendered :deep(code) {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--surface-3);
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+.report-rendered :deep(pre) {
+    overflow-x: auto;
+    margin: 10px 0;
+    padding: 12px;
+    border-radius: 8px;
+    background: var(--surface-3);
+}
+.report-rendered :deep(pre code) { padding: 0; background: transparent; }
+.report-rendered :deep(table) {
+    border-collapse: collapse;
+    margin: 10px 0;
+    width: 100%;
+    font-size: 12.5px;
+}
+.report-rendered :deep(th),
+.report-rendered :deep(td) {
+    border: 1px solid var(--report-line-strong);
+    padding: 6px 10px;
+    text-align: left;
+}
+.report-rendered :deep(th) { background: var(--surface-2); font-weight: 650; }
+.report-rendered :deep(hr) {
+    border: 0;
+    border-top: 1px solid var(--report-line);
+    margin: 16px 0;
 }
 .report-document footer {
     padding-top: 13px;

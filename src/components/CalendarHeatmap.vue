@@ -18,6 +18,7 @@ const TOOL_LABEL: Record<string, string> = {
   kiro: "Kiro",
   qoder: "Qoder",
   "opencode-go": "OpenCode Go",
+  deepseek: "DeepSeek",
 };
 
 interface Cell extends HeatmapDay {

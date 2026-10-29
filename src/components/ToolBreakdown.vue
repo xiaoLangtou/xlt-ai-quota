@@ -14,6 +14,7 @@ const TOOL_LABEL: Record<string, string> = {
   "opencode-go": "OpenCode Go",
   gemini: "Gemini CLI",
   copilot: "GitHub Copilot",
+  deepseek: "DeepSeek",
 };
 const TOOL_BRAND: Record<string, string> = {
   ark: "--brand-ark",
@@ -24,6 +25,7 @@ const TOOL_BRAND: Record<string, string> = {
   "opencode-go": "--brand-open",
   gemini: "--brand-gemini",
   copilot: "--brand-copilot",
+  deepseek: "--brand-deepseek",
 };
 
 function label(platform: string): string {
@@ -54,9 +56,9 @@ function brandVar(platform: string): string {
       <div v-for="t in tools" :key="t.platform" class="tb-row" role="row">
         <span class="tb-name">
           <ToolLogo :platform="t.platform" :size="20" />
-          {{ label(t.platform) }}
+          <span class="tb-label">{{ label(t.platform) }}</span>
         </span>
-        <span class="tb-share">
+        <span class="tb-share" :data-pct="`${t.pct}%`">
           <span class="tb-bar">
             <span :style="{ width: `${t.pct}%`, background: `var(${brandVar(t.platform)})` }" />
           </span>
@@ -79,6 +81,7 @@ function brandVar(platform: string): string {
   border-radius: var(--r-lg);
   background: var(--surface);
   box-shadow: var(--shadow-card);
+  container-type: inline-size;
 }
 .tb-head {
   padding: 18px 20px 4px;
@@ -126,6 +129,12 @@ function brandVar(platform: string): string {
   color: var(--text);
   font-size: 13px;
   font-weight: 550;
+}
+.tb-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tb-share {
   display: flex;
@@ -182,26 +191,57 @@ function brandVar(platform: string): string {
   color: var(--text-subtle);
   font-size: 13px;
 }
-@media (max-width: 820px) {
+@container (max-width: 680px) {
   .tb-row {
-    grid-template-columns: 1fr auto;
-    gap: 6px 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(48px, 1.3fr) auto auto;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 11px 0;
   }
   .tb-header {
     display: none;
   }
+  .tb-name {
+    grid-column: 1;
+  }
   .tb-share {
-    grid-column: 1 / -1;
-    order: 3;
+    position: relative;
+    grid-column: 2;
+  }
+  .tb-share b {
+    display: none;
   }
   .tb-total {
-    text-align: right;
+    grid-column: 3;
   }
   .tb-cost {
-    text-align: right;
+    grid-column: 4;
   }
   .tb-req {
     display: none;
+  }
+  .tb-share::after {
+    position: absolute;
+    bottom: calc(100% + 7px);
+    left: 50%;
+    z-index: 5;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: var(--text);
+    color: var(--surface);
+    content: attr(data-pct);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, 2px);
+    transition: opacity 0.12s ease, transform 0.12s ease;
+  }
+  .tb-share:hover::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 }
 

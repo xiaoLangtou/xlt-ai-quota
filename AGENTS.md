@@ -6,7 +6,7 @@
 
 ```bash
 pnpm install      # 安装依赖
-pnpm dev          # 启动 Vite 前端开发服务器 (http://localhost:1420)
+pnpm dev          # 启动 Vite 前端开发服务器 (http://localhost:1420)；用量采集需改用 pnpm tauri dev
 pnpm typecheck    # vue-tsc 类型检查
 pnpm build        # 类型检查 + 构建 dist/
 pnpm preview      # 预览生产构建
@@ -37,24 +37,27 @@ cd src-tauri && cargo check   # Rust 编译检查
 
 ## 配置本机连接器
 
-- 火山方舟：运行 `arkcli auth login volc-sso` 后，由本机 arkcli 读取套餐与用量。
+- 火山方舟：在设置页点击「登录方舟」完成浏览器授权，由本机 arkcli 读取套餐与用量；CLI 查询串行执行，授权失效时需重新授权。
 - 各连接器的登录态只保存在本机 CLI；应用不要求配置第三方 API Key。
 
 ## 架构
 
 - 界面：Vue 3 + TypeScript + Vite，Composition API / script setup
 - 图表：Apache ECharts（vue-echarts）
-- 存储：`UsageStorage` 抽象，当前为 localStorage 实现（本期不迁 SQLite）；Skills 元数据在 `~/.local-skills-manager/`
-- 采集器：`src/connectors/` 下各平台独立 Connector
+- 存储：`UsageStorage` 抽象。桌面端走 `~/.xlt-workbench/`（`queue/YYYY-MM.jsonl` + `cursors.json` + `manifest.json` + `quotas.json` + `config.json`）；浏览器/测试回退 localStorage。Skills 元数据仍在 `~/.local-skills-manager/`
+- 采集器：所有本地连接器统一经 Tauri command（`src-tauri/src/connectors.rs`），**不再有 Vite dev 中间件**；`src/connectors/*.ts` 只负责把 command 结果映射成前端模型
+- 新增采集器（Rust 侧增量）：`src-tauri/src/usage/collectors/` 下 qwen / amp / roocode / kilocode / openclaw / cline / codebuddy / workbuddy；游标、去重、半小时桶落盘都在 Rust 完成
   - `ark.ts`：火山方舟，经本机 `arkcli`（dev 由 `vite-local-connectors.ts` 的 `/api/ark/*` 中间件转发；需 `arkcli auth login volc-sso`）。套餐额度 + Token 用量
   - `kiro.ts`：Kiro Credits，经 `kiro-cli chat /usage --no-interactive`（`/api/kiro/usage`）。需 `kiro-cli login`
   - `qoder.ts`：Qoder 套餐与加购 Credits，经官方 Agent SDK 复用本机 qodercli 登录态（`/api/qoder/usage`）；需 `qodercli login`。
   - `codex.ts`：Codex 账户信息，经 `codex login status` + `~/.codex/auth.json` JWT（`/api/codex/status`）。5h/weekly 额度仅在 TUI /status 可见，需浏览器连接器
   - `kimi.ts`：Kimi Code 会员额度（5h 滚动窗口 / 月 Code 额度 / 月总额度），经 `~/.kimi-code/credentials` OAuth token 调 `api.kimi.com/coding/v1/usages`（`/api/kimi/usage`）；access_token 900 秒过期，中间件会自动刷新并把轮换后的凭据写回。需 `kimi login`。Token 用量读 `~/.kimi-code/sessions` 的 wire.jsonl `usage.record` 事件（真实计数，旧版 `~/.kimi` 仅在其为空时回退）
-  - `opencode.ts`：OpenCode Go Token 用量，查本机 `opencode db` SQLite（`/api/opencode/stats`）。订阅额度无 CLI/API，仍待浏览器连接器
+  - `opencode.ts`：OpenCode Go Token 用量，只读查询本机 OpenCode SQLite（`/api/opencode/stats`）。订阅额度无 CLI/API，仍待浏览器连接器
+  - `deepseek.ts`：DeepSeek 账户余额 + DSH 客户端 Token。余额经官方 `GET /user/balance`（`/api/deepseek/balance`，需 API Key，仅本机保存、可选）；Token 读 DeepSeek Harness 客户端 `~/.dsh/sessions` 下多帧 zstd 会话的 `assistant/message` `usage`（`/api/deepseek/stats`，真实计数，旧版无 usage 时用官方 `deepseek_v4_tokenizer` 估算，词表见 `assets/deepseek-tokenizer.json.gz`）
+  - 说明：Zstd 会话统一在 Rust 侧用 `zstd` crate 的 `decode_all`（原生 zstd 只解首帧）
 
 > 注：`ark-` Bearer Key 只能用于数据面推理，无法查询用量；Ark 用量需 Volc 签名（SSO），由 arkcli 承担。
-> CLI 在无 TTY 时常把输出写到 stderr，中间件已合并 stdout+stderr 解析。
+> CLI 在无 TTY 时常把输出写到 stderr，Rust 侧已合并 stdout+stderr 解析。
 > 看板不含任何种子/默认数据；首次启动为空，点「同步」从本机 CLI 拉取真实数据。
 
 ## 目录
@@ -63,22 +66,57 @@ cd src-tauri && cargo check   # Rust 编译检查
 src/
 ├─ layouts/AppLayout.vue        # 统一 Nuxt UI 侧边栏 + RouterView
 ├─ views/DashboardView.vue      # 用量工作区（按 route.name 渲染 overview/analytics/subscriptions/工具页）
+├─ views/CalendarTodoView.vue   # 日历页：待办的时间线视图（日/周/月，无右侧栏）
+├─ views/TodoView.vue           # 待办任务库：看板/列表 + 筛选（待办唯一管理入口）
+├─ views/DocumentDecompositionView.vue + views/tools/DocumentDecompositionPage.vue  # 文档拆解 → 批量生成待办
 ├─ views/skills/  SkillsDashboardView / SkillListView / SkillDetailView / IssuesView / TrashView / InstallView / RemoteSkillView / RootsView（桌面模式）
 ├─ components/  QuotaCard / TokenSummaryCard / TokenTrendChart / PlatformDailyChart
 ├─ components/skills/  AgentAvatar / FileTree / CodeEditor / MarkdownEditor
 ├─ composables/useUsageDashboard.ts
-├─ services/usage-service.ts
-├─ connectors/  ark / kiro / qoder / codex / opencode / *-browser
+├─ services/usage-service.ts   # 聚合、额度视图、同步编排
+├─ connectors/  ark / kiro / qoder / codex / opencode / rust-collector（Rust 增量采集器包装）
 ├─ api/skills.ts + stores/skills.ts + types/skills.ts（Skills 领域）
-├─ utils/skills-agents.ts + utils/skills-markdown.ts
-├─ storage/     storage.ts(接口) + web-storage.ts(实现)
+├─ utils/skills-agents.ts + utils/skills-markdown.ts + utils/quota.ts + utils/usage-time.ts
+├─ storage/     storage.ts(接口) + web-storage.ts(localStorage) + usage-storage.ts(Tauri 文件存储)
 ├─ config/settings.ts
-├─ data/seed.ts
+├─ data/seed.ts + data/pricing.json（内置定价底表）
 ├─ types/usage.ts
 ├─ utils/format.ts
 └─ echarts.ts
 
+src-tauri/src/usage/   # 用量数据层
+├─ paths.rs / types.rs / config.rs
+├─ queue.rs             # queue/YYYY-MM.jsonl + manifest + replace/cleanup
+├─ cursors.rs           # 每采集源增量游标
+├─ pricing.rs           # exact/alias/fuzzy/sourceAlias + 远程 overlay + 四档费率
+├─ quota.rs             # 状态机 + limits[] + stale 降级
+├─ cleanup.rs           # 保留天数清理 + 缓存统计
+├─ commands.rs          # usage_* Tauri commands
+└─ collectors/          # qwen / amp / roocode / kilocode / openclaw / cline / codebuddy / workbuddy
+
 public/agent-icons/     # Skills Agent 品牌图标
+
+## 翻译（translate）
+
+- 两个入口：`/translate` 长文翻译页（粘贴文章 → 按空行分段 → 左右段落对照，工具栏可直接切换内置服务）；`Alt+Space` 唤起的独立置顶面板（短文本按 Enter 翻译，不做停顿自动翻译）。
+- 内置服务二选一，配置统一在**设置页「翻译」分类**（`/settings?tab=translate`，组件 `components/translate/TranslateSettings.vue`），翻译页不放配置弹窗：
+  - `youdao`：有道智云文本翻译 v3（`https://openapi.youdao.com/api`）。`sign = sha256(appKey + input + salt + curtime + appSecret)`，`salt` 用 UUID，`curtime` 为 UTC 秒；`input` 在 q ≤ 20 字符时取原文，否则取「前 10 + q 长度 + 后 10」。
+  - `deepseek`：OpenAI 兼容 chat completions（基础 URL 自动补 `/chat/completions`），提示词支持 `{source_language}` / `{target_language}` / `{detected_source_language}` / `{text}`；思考模式关闭时不传 `thinking` 字段。
+- 配置结构是嵌套的 `{ engine, timeoutMs, shortcut, youdao: {...}, deepseek: {...} }`，新增引擎时在 `Engine` 加分支 + 设置页加一块表单；旧版扁平配置由 `migrate_legacy` 自动迁移。
+- 后端 `src-tauri/src/translate/`：`mod.rs` 负责配置、快捷键、分块与引擎分发，`youdao.rs` / `deepseek.rs` 各自实现 `translate_chunk`。按空行分段、每段独立签名后按序号回填保证对照不错位；单段超 4500 字符按句末标点再切（有道上限 5000，超出报 103）。
+- 并发按引擎区分：有道顺序发送（1 路，并发会触发 411 访问频率受限），DeepSeek 3 路；411 / 412 / HTTP 429 归类为可重试，退避 900ms、1800ms 各重试一次。
+- 有道一次请求只翻一段、不返回句级偏移，所以对照粒度是**段落**而不是句子；`strict` 开启时不能配 `auto` 源语言，Rust 侧会提前报错。
+- 面板窗口 `translate-panel.html` + `src/translate-panel/`；全局快捷键与剪贴板面板共用一套注册，`main.rs` 的 handler 用 `translate::owns_shortcut` 分流（剪贴板注册时 `unregister_all`，翻译必须在它之后注册）。快捷键在设置页用 `components/ui/shortcut-recorder/` 录制，保存时由 Rust 侧校验占用；`translate_shortcut_status` 把「是否真的注册到系统」回传给设置页，注册失败不再静默。
+- 面板「在翻译页打开」经 `emitTo("main", "translate:open", { text })` 交接，主窗口 `App.vue` 监听后跳路由，页面用 `useTranslateRequest` 取走文本；未配置时发 `translate:settings` 直接进设置页。新窗口必须写进 `capabilities/default.json` 的 `windows`。
+
+## 日历 / 待办 / 文档拆解（productivity 领域）
+
+- 概念模型：**日历 = 待办的时间线视图，不存在独立的“事件”编辑路径**。`calendar_event.task_id` 是待办的镜像（保存待办自动同步、拖事件回写计划时间、删待办级联删事件）；点事件弹出的是待办详情浮层（`TodoDetailPopover`），改时间直接写回待办。
+- 页面分工：`/calendar` 只做时间线（单击空白快速创建、拖画时间块开完整表单）；`/todos` 是任务库唯一管理入口（看板/列表/筛选）。
+- 创建流只有三种：单击空白 → 快速创建浮层（UPopover 虚拟锚点）；拖画时间块 → `TodoEditModal` 预填时间+估时；自然语言快速文本（`parseQuickEvent`）。
+- 状态：`useCalendarTodo` 模块级单例（`events` + `allTasks`），勾选本地乐观更新失败回滚；UI 偏好存 localStorage（`xlt.calendar.hidden-categories` / `xlt.todo.view`）。
+- 后端：`src-tauri/src/productivity/`（SQLite，业务数据全在本机）；文档拆解复用 Git 日报的 AI 配置（设置页「高级」）。
+- 禅道同步：`src-tauri/src/productivity/zentao.rs` 经禅道 REST API v2 拉取指派给我的 task/bug → 幂等 upsert 为待办（`source_type='zentao'`，幂等键 `external_id`，禅道状态为准；描述取 task `desc` / bug `steps` 转纯文本，客户端再按登录账号二次过滤 assignedTo）。登录态在 `~/.zentao-token.json`（设置页登录写入），密码不落应用存储；待办页手动同步 + 15 分钟静默轮询（`useZentaoSync`）；只读请求最多 3 路并发，已处理历史每 30 分钟复查，未完成和已转交条目每次核实，同步结果提供耗时和请求数。详情支持 Bug 指派/解决、任务开始/完成，经 REST API v1 显式提交并回读核实；未确认生效不更新本地状态。列表缺失条目逐项读详情核实，转交不等于完成；原始状态与指派人保存在 external_status/external_assigned_to/external_transferred。
 
 src-tauri/src/skills/   # Skills 后端（Rust 移植）
 ├─ error.rs / paths.rs / config.rs / state.rs / commands.rs

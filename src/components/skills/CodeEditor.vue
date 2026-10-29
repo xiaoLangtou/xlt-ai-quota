@@ -5,7 +5,7 @@ import { EditorView, keymap, lineNumbers, highlightActiveLine } from "@codemirro
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 
-const props = defineProps<{ modelValue: string; language?: "markdown" | "text" }>();
+const props = defineProps<{ modelValue: string; language?: "markdown" | "text"; scrollToLine?: number }>();
 const emit = defineEmits<{ (e: "update:modelValue", value: string): void }>();
 
 const host = ref<HTMLDivElement>();
@@ -36,6 +36,21 @@ watch(
     if (view && value !== view.state.doc.toString()) {
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
     }
+  },
+);
+
+// 可选：滚动到指定行并选中（用于从表格跳转到源码对应行）
+watch(
+  () => props.scrollToLine,
+  (line) => {
+    if (!view || !line) return;
+    const clamped = Math.min(Math.max(1, line), view.state.doc.lines);
+    const target = view.state.doc.line(clamped);
+    view.dispatch({
+      selection: { anchor: target.from },
+      effects: EditorView.scrollIntoView(target.from, { y: "center" }),
+    });
+    view.focus();
   },
 );
 

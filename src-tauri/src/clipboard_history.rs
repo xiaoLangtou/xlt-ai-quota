@@ -606,7 +606,7 @@ fn replace_shortcut(app: &AppHandle, current: &str, next: &str) -> Result<(), St
     Ok(())
 }
 
-fn validate_shortcut(shortcut: &str) -> Result<(), String> {
+pub(crate) fn validate_shortcut(shortcut: &str) -> Result<(), String> {
     Shortcut::from_str(shortcut).map_err(|_| "快捷键格式无效".to_owned())?;
     let parts = shortcut.split('+').collect::<Vec<_>>();
     if parts.len() == 1 {

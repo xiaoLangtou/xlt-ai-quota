@@ -16,6 +16,7 @@ const TOOLS: { key: string; name: string; hint: string; login?: string }[] = [
   { key: "opencode-go", name: "OpenCode", hint: "读取本机 OpenCode 数据库" },
   { key: "gemini", name: "Gemini CLI", hint: "读取 ~/.gemini/tmp 会话" },
   { key: "copilot", name: "GitHub Copilot", hint: "读取 ~/.copilot 会话" },
+  { key: "deepseek", name: "DeepSeek", hint: "账户余额 + DSH 客户端会话 Token" },
 ];
 
 function close() {

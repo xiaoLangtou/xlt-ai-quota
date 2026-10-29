@@ -22,6 +22,28 @@ function compactReset(value?: string): string | undefined {
 function usedCredits(view: PlatformQuotaView): number {
   return view.credits ? Math.max(0, view.credits.total - view.credits.remaining) : 0;
 }
+
+function money(value: number, currency: string): string {
+  const symbol = currency === "USD" ? "$" : "¥";
+  return `${symbol}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+const STATUS_TEXT: Record<string, string> = {
+  "not-installed": "未检测到本地工具",
+  "not-signed-in": "请先在原工具中登录",
+  expired: "登录已过期，请重新登录",
+  "access-denied": "当前账户无权读取额度",
+  "custom-provider": "检测到自定义服务地址，已停止默认请求",
+  "unsupported-account": "当前账户类型不提供订阅额度",
+  "unsupported-plan": "当前套餐不提供可读取额度",
+  "unsupported-version": "本地工具版本不兼容",
+  "temporarily-unavailable": "暂时无法获取额度",
+  unavailable: "暂无数据",
+};
+
+function statusText(status?: string): string {
+  return status ? STATUS_TEXT[status] ?? "暂无数据" : "暂无数据";
+}
 </script>
 
 <template>
@@ -32,9 +54,24 @@ function usedCredits(view: PlatformQuotaView): number {
         {{ view.name }}
       </span>
       <span class="tag">{{ view.planTag }}</span>
+      <span v-if="view.stale" class="tag tag-stale" title="正在展示上次成功读数">陈旧</span>
     </div>
 
-    <div v-if="view.credits" class="plan-meters">
+    <div v-if="view.balance" class="plan-meters">
+      <div class="plan-meter balance-total" :class="{ 'is-exhausted': !view.balance.available }">
+        <div class="plan-meter-header">
+          <span class="plan-meter-label">账户余额</span>
+          <span class="plan-meter-reset">{{ view.balance.currency }}</span>
+          <strong>{{ money(view.balance.total, view.balance.currency) }}</strong>
+        </div>
+        <div class="meter-top">
+          <span>赠金 {{ money(view.balance.granted, view.balance.currency) }}</span>
+          <span>充值 {{ money(view.balance.toppedUp, view.balance.currency) }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div v-else-if="view.credits" class="plan-meters">
       <div class="plan-meter credit-total">
         <div class="plan-meter-header">
           <span class="plan-meter-label">总额度</span>
@@ -93,10 +130,13 @@ function usedCredits(view: PlatformQuotaView): number {
       </div>
     </div>
 
-    <div v-if="!view.credits && view.windows.length === 0" class="empty">
+    <div v-if="!view.balance && !view.credits && view.windows.length === 0" class="empty">
       <template v-if="view.account">
         <span class="account-label">{{ view.account.label }}</span>
         <span class="account-note">已登录 · 额度详情需浏览器连接器</span>
+      </template>
+      <template v-else-if="view.status && view.status !== 'ready'">
+        <span class="account-note">{{ view.message || statusText(view.status) }}</span>
       </template>
       <template v-else>暂无数据</template>
     </div>
@@ -109,11 +149,11 @@ function usedCredits(view: PlatformQuotaView): number {
   height: 100%;
   min-height: 176px;
   flex-direction: column;
-  padding: 17px;
+  padding: 17px 19px;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--shadow-card);
+  box-shadow: none;
   transition: border-color 0.15s ease, transform 0.15s ease;
 }
 
@@ -140,6 +180,13 @@ function usedCredits(view: PlatformQuotaView): number {
   font-weight: 680;
 }
 
+.tag-stale {
+  margin-left: 6px;
+  border-color: color-mix(in srgb, var(--u-warn) 30%, var(--border));
+  background: color-mix(in srgb, var(--u-warn) 12%, transparent);
+  color: var(--u-warn);
+}
+
 .tag {
   max-width: 46%;
   overflow: hidden;
@@ -160,19 +207,19 @@ function usedCredits(view: PlatformQuotaView): number {
   gap: 9px;
 }
 
+/* 额度行不再各自描边，去掉卡片内的层层边框；仅保留极淡的耗尽底色。 */
 .plan-meter {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 10px 11px;
-  border: 1px solid var(--border);
+  padding: 4px 1px;
+  border: 0;
   border-radius: var(--r-md);
-  background: var(--surface-2);
+  background: transparent;
 }
 
 .plan-meter.is-exhausted {
-  border-color: color-mix(in srgb, var(--u-crit) 36%, var(--border));
-  background: color-mix(in srgb, var(--u-crit) 7%, var(--surface-2));
+  background: color-mix(in srgb, var(--u-crit) 8%, transparent);
 }
 
 .plan-meter-header {
@@ -211,6 +258,11 @@ function usedCredits(view: PlatformQuotaView): number {
 
 .credit-total .plan-meter-header strong {
   color: var(--accent);
+  font-size: 20px;
+}
+
+.balance-total .plan-meter-header strong {
+  color: var(--brand-deepseek);
   font-size: 20px;
 }
 

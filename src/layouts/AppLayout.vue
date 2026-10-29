@@ -7,7 +7,7 @@ import { useSkillsStore } from "@/stores/skills";
 import { useMcpStore } from "@/stores/mcp";
 import { useTheme } from "@/composables/useTheme";
 import { isTauriDesktop } from "@/connectors/types";
-import { NAV_GROUPS } from "@/config/navigation";
+import { useSidebarNavigation } from "@/composables/useSidebarNavigation";
 import { skillsMcp as skillsMcpEnabled } from "@/config/features.json";
 import AboutDialog from "@/components/AboutDialog.vue";
 
@@ -16,6 +16,7 @@ const router = useRouter();
 const colorMode = useColorMode();
 const { pref: themePref, cycle: cycleTheme } = useTheme();
 const aboutOpen = ref(false);
+const { visibleGroups } = useSidebarNavigation();
 
 // 只迁移侧栏旧宽度一次，保留折叠状态及之后的手动拖拽设置。
 if (isDesktop) {
@@ -64,7 +65,7 @@ function iconOnly(collapsed: boolean): boolean {
 
 /** 导航分组来自 src/config/navigation.ts，侧栏只负责渲染。 */
 const groups = computed(() =>
-  NAV_GROUPS.map((group) => ({
+  visibleGroups.value.map((group) => ({
     title: group.title,
     items: group.items.map((item) => ({
       ...item,
@@ -91,12 +92,21 @@ function syncNarrow(event?: MediaQueryListEvent): void {
   isNarrow.value = event ? event.matches : narrowQuery?.matches ?? false;
 }
 
+/** 监听滚动容器：滚离顶部时打上 .is-scrolled，用于内容顶部渐隐。 */
+function handleScroll(event: Event): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (!target.matches(".page-scroll, [data-slot='body']")) return;
+  target.classList.toggle("is-scrolled", target.scrollTop > 2);
+}
+
 onMounted(() => {
   if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
     narrowQuery = window.matchMedia(NARROW_QUERY);
     syncNarrow();
     narrowQuery.addEventListener("change", syncNarrow);
   }
+  document.addEventListener("scroll", handleScroll, true);
 
   // 排查期间连 store 初始化也跳过，避免隐藏入口后仍进行后台扫描。
   if (!isDesktop || !skillsMcpEnabled) return;
@@ -106,6 +116,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   narrowQuery?.removeEventListener("change", syncNarrow);
+  document.removeEventListener("scroll", handleScroll, true);
 });
 </script>
 
@@ -131,7 +142,7 @@ onUnmounted(() => {
       :default-size="14.5"
       :max-size="18"
       :ui="{
-        root: 'min-w-20 flex max-lg:w-20 max-lg:min-w-20',
+        root: 'min-w-20 flex max-lg:w-20 max-lg:min-w-20 border-e-0',
         header: 'h-auto px-3 pt-9 pb-3 max-lg:px-2',
         body: 'min-h-0 px-3 max-lg:px-2',
         footer: 'px-3 py-3 max-lg:px-2',

@@ -763,8 +763,10 @@ watch(usdToCnyRate, (value) => {
   max-height: none;
   padding: 0;
   overflow: visible;
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-card);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .panel-head {
@@ -885,9 +887,7 @@ watch(usdToCnyRate, (value) => {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
 }
 
 .ws-badge {
@@ -966,7 +966,7 @@ watch(usdToCnyRate, (value) => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .quota-head p {
@@ -978,7 +978,7 @@ watch(usdToCnyRate, (value) => {
 .quota-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
   align-items: stretch;
 }
 

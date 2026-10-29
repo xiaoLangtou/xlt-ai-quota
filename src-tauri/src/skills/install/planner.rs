@@ -6,17 +6,20 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-use super::inspector::{hash_dir, inspect_staging_content};
-use super::records::{upsert_install_record, SourceMetadata, UpsertRecordInput};
-use super::staging::{get_staging, remove_staging, set_staging_status, staging_content_dir, StagingRegistry};
-use super::transaction::{install_skill_to_target, InstallTargetOptions, TargetInstallResult};
 use super::super::config::{find_target_root, SkillsPaths};
 use super::super::error::SkillsError;
 use super::super::paths::safe_join;
 use super::super::validation::ValidationIssue;
+use super::inspector::{hash_dir, inspect_staging_content};
+use super::records::{upsert_install_record, SourceMetadata, UpsertRecordInput};
+use super::staging::{
+    get_staging, remove_staging, set_staging_status, staging_content_dir, StagingRegistry,
+};
+use super::transaction::{install_skill_to_target, InstallTargetOptions, TargetInstallResult};
 
 /// 计划存活时长（同时受 staging 过期约束）。
 const PLAN_TTL_SECS: i64 = 15 * 60;
+const MAX_PENDING_PLANS: usize = 32;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -107,6 +110,30 @@ pub struct PlanEntry {
 
 pub type PlanRegistry = Mutex<HashMap<String, PlanEntry>>;
 
+fn plan_expired(entry: &PlanEntry) -> bool {
+    chrono::DateTime::parse_from_rfc3339(&entry.plan.expires_at)
+        .map(|expires| chrono::Utc::now() > expires.with_timezone(&chrono::Utc))
+        .unwrap_or(true)
+}
+
+pub fn prune_expired_plans(plans: &mut HashMap<String, PlanEntry>) {
+    plans.retain(|_, entry| !plan_expired(entry));
+}
+
+fn make_room_for_plan(plans: &mut HashMap<String, PlanEntry>) {
+    prune_expired_plans(plans);
+    while plans.len() >= MAX_PENDING_PLANS {
+        let Some(oldest) = plans
+            .iter()
+            .min_by_key(|(_, entry)| &entry.plan.created_at)
+            .map(|(id, _)| id.clone())
+        else {
+            break;
+        };
+        plans.remove(&oldest);
+    }
+}
+
 fn read_existing(root_path: &std::path::Path, name: &str) -> Option<(Option<String>, String)> {
     let dir = root_path.join(name);
     if !dir.exists() {
@@ -163,7 +190,10 @@ pub fn create_install_plan(
         let root = find_target_root(paths, id)
             .ok_or_else(|| SkillsError::not_found(format!("根目录不存在：{id}")))?;
         if !root.writable {
-            return Err(SkillsError::forbidden(format!("该根目录不可写：{}", root.label)));
+            return Err(SkillsError::forbidden(format!(
+                "该根目录不可写：{}",
+                root.label
+            )));
         }
         roots.push(root);
     }
@@ -194,7 +224,8 @@ pub fn create_install_plan(
         let mut targets = Vec::new();
         for root in &roots {
             let taken = used_names.entry(root.id.clone()).or_default();
-            let conflict = PathBuf::from(&root.path).join(&skill.name).exists() || taken.contains(&skill.name);
+            let conflict =
+                PathBuf::from(&root.path).join(&skill.name).exists() || taken.contains(&skill.name);
             let mut final_name = skill.name.clone();
             let action = if conflict {
                 match request.on_conflict.as_str() {
@@ -297,29 +328,30 @@ pub fn create_install_plan(
         .collect();
 
     if let Ok(mut plans) = plan_registry.lock() {
-        plans.insert(plan.id.clone(), PlanEntry { plan: plan.clone(), skill_dirs });
+        make_room_for_plan(&mut plans);
+        plans.insert(
+            plan.id.clone(),
+            PlanEntry {
+                plan: plan.clone(),
+                skill_dirs,
+            },
+        );
     }
     Ok(plan)
 }
 
 /// 查找计划；不存在或已过期时报错。
-pub fn get_install_plan(plan_registry: &PlanRegistry, id: &str) -> Result<InstallPlan, SkillsError> {
-    let plans = plan_registry
+pub fn get_install_plan(
+    plan_registry: &PlanRegistry,
+    id: &str,
+) -> Result<InstallPlan, SkillsError> {
+    let mut plans = plan_registry
         .lock()
         .map_err(|error| SkillsError::internal(error.to_string()))?;
+    prune_expired_plans(&mut plans);
     let entry = plans
         .get(id)
         .ok_or_else(|| SkillsError::not_found("安装计划不存在或已过期"))?;
-    let expires = chrono::DateTime::parse_from_rfc3339(&entry.plan.expires_at)
-        .map(|value| value.with_timezone(&chrono::Utc))
-        .unwrap_or_else(|_| chrono::Utc::now());
-    if chrono::Utc::now() > expires {
-        drop(plans);
-        if let Ok(mut guard) = plan_registry.lock() {
-            guard.remove(id);
-        }
-        return Err(SkillsError::not_found("安装计划已过期，请重新生成"));
-    }
     Ok(entry.plan.clone())
 }
 
@@ -340,16 +372,19 @@ pub fn commit_install_plan(
     request: &CommitPlanRequest,
 ) -> Result<CommitPlanResponse, SkillsError> {
     let (plan, skill_dirs) = {
-        let plans = plan_registry
+        let mut plans = plan_registry
             .lock()
             .map_err(|error| SkillsError::internal(error.to_string()))?;
+        prune_expired_plans(&mut plans);
         let entry = plans
             .get(plan_id)
             .ok_or_else(|| SkillsError::not_found("安装计划不存在或已过期"))?;
         (entry.plan.clone(), entry.skill_dirs.clone())
     };
     if request.confirmation_hash != plan.confirmation_hash {
-        return Err(SkillsError::conflict("计划内容已变化（确认指纹不匹配），请重新生成计划"));
+        return Err(SkillsError::conflict(
+            "计划内容已变化（确认指纹不匹配），请重新生成计划",
+        ));
     }
     let acknowledged: HashSet<&String> = request.acknowledged_issue_codes.iter().collect();
     let pending: Vec<&ValidationIssue> = plan
@@ -475,9 +510,12 @@ pub fn commit_install_plan(
     if let Ok(mut plans) = plan_registry.lock() {
         plans.remove(plan_id);
     }
-    let any_failed = outcomes
-        .iter()
-        .any(|outcome| outcome.targets.iter().any(|target| target.status == "failed"));
+    let any_failed = outcomes.iter().any(|outcome| {
+        outcome
+            .targets
+            .iter()
+            .any(|target| target.status == "failed")
+    });
     if any_failed {
         let _ = set_staging_status(paths, staging_registry, &staging.id, "ready");
     } else {
@@ -487,4 +525,65 @@ pub fn commit_install_plan(
         plan_id: plan_id.to_owned(),
         outcomes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(
+        created_at: chrono::DateTime<chrono::Utc>,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> PlanEntry {
+        PlanEntry {
+            plan: InstallPlan {
+                id: uuid::Uuid::new_v4().to_string(),
+                staging_id: "staging".into(),
+                created_at: created_at.to_rfc3339(),
+                expires_at: expires_at.to_rfc3339(),
+                source: SourceMetadata {
+                    source_type: "local".into(),
+                    reference: "test".into(),
+                    repository: None,
+                    revision: None,
+                    branch: None,
+                    subpath: None,
+                },
+                skills: Vec::new(),
+                targets: Vec::new(),
+                issues: Vec::new(),
+                confirmation_hash: String::new(),
+            },
+            skill_dirs: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn pending_install_plans_expire_and_stay_bounded() {
+        let now = chrono::Utc::now();
+        let mut plans = HashMap::new();
+        plans.insert(
+            "expired".into(),
+            entry(
+                now - chrono::Duration::hours(1),
+                now - chrono::Duration::minutes(1),
+            ),
+        );
+        for index in 0..MAX_PENDING_PLANS {
+            plans.insert(
+                index.to_string(),
+                entry(
+                    now - chrono::Duration::seconds(index as i64),
+                    now + chrono::Duration::minutes(5),
+                ),
+            );
+        }
+        make_room_for_plan(&mut plans);
+        assert_eq!(plans.len(), MAX_PENDING_PLANS - 1);
+        assert!(!plans.contains_key("expired"));
+        plans.insert("new".into(), entry(now, now + chrono::Duration::minutes(5)));
+        make_room_for_plan(&mut plans);
+        assert_eq!(plans.len(), MAX_PENDING_PLANS - 1);
+        assert!(!plans.contains_key(&(MAX_PENDING_PLANS - 1).to_string()));
+    }
 }

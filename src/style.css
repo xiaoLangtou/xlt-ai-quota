@@ -24,8 +24,8 @@
   --surface: #ffffff;
   --surface-2: #f8f9fc;
   --surface-3: #eef0f6;
-  --border: #dfe2ea;
-  --border-strong: #c3c9d6;
+  --border: rgba(26, 29, 38, 0.08);
+  --border-strong: rgba(26, 29, 38, 0.16);
   --text: #1a1d26;
   --text-muted: #4f5565;
   --text-subtle: #7b8194;
@@ -45,6 +45,7 @@
   --brand-open: #059669;
   --brand-gemini: #2563eb;
   --brand-copilot: #6b7280;
+  --brand-deepseek: #4d6bfe;
   --heatmap-0: #ececec;
   --heatmap-1: rgba(61, 129, 86, 0.2);
   --heatmap-2: rgba(61, 129, 86, 0.4);
@@ -54,9 +55,9 @@
   --r-md: 10px;
   --r-lg: 14px;
   --r-xl: 18px;
-  --shadow-sm: 0 1px 2px rgba(26, 29, 38, 0.06);
-  --shadow-card: 0 6px 18px rgba(26, 29, 38, 0.05);
-  --shadow-pop: 0 18px 48px rgba(26, 29, 38, 0.16);
+  --shadow-sm: 0 1px 2px rgba(26, 29, 38, 0.04);
+  --shadow-card: none;
+  --shadow-pop: 0 22px 56px rgba(26, 29, 38, 0.14);
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
@@ -83,11 +84,11 @@
   --surface: #2a2a2a;
   --surface-2: #232323;
   --surface-3: #343434;
-  --border: #3a3a3a;
-  --border-strong: #4d4d4d;
-  --text: #ececec;
-  --text-muted: #a8a8a8;
-  --text-subtle: #767676;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --text: #e8e8e8;
+  --text-muted: #a6a6a6;
+  --text-subtle: #787878;
   --accent: #63c183;
   --accent-hover: #7bc496;
   --accent-contrast: #06130b;
@@ -104,14 +105,15 @@
   --brand-open: #34d399;
   --brand-gemini: #60a5fa;
   --brand-copilot: #9ca3af;
-  --heatmap-0: #2a2a2a;
+  --brand-deepseek: #6d8bff;
+  --heatmap-0: #343434;
   --heatmap-1: rgba(99, 193, 131, 0.22);
   --heatmap-2: rgba(99, 193, 131, 0.42);
   --heatmap-3: rgba(99, 193, 131, 0.68);
   --heatmap-4: #63c183;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
-  --shadow-card: 0 8px 24px rgba(0, 0, 0, 0.22);
-  --shadow-pop: 0 20px 52px rgba(0, 0, 0, 0.48);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-card: none;
+  --shadow-pop: 0 24px 64px rgba(0, 0, 0, 0.5);
   --scroll-thumb: #4a4a4a;
   --scroll-thumb-hover: #616161;
   --scroll-thumb-active: #63c183;
@@ -1066,4 +1068,31 @@ textarea {
 /* 小屏不再使用抽屉：隐藏导航栏里的侧栏切换按钮（侧栏改为常驻图标态）。 */
 [data-slot="toggle"] {
   display: none !important;
+}
+
+/* 内容区滚动时顶部渐隐：仅在滚离顶部（.is-scrolled）后生效，避免被页头硬切。 */
+.page-scroll.is-scrolled,
+[id^="dashboard-panel-"] [data-slot="body"].is-scrolled {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22px);
+}
+
+/* 看板拖拽浮层：跟随光标，给出拖动过程的视觉反馈。 */
+.drag-ghost {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: var(--shadow-pop);
+  pointer-events: none;
+  transform: translate(12px, 12px) rotate(-2deg);
 }

@@ -1,13 +1,13 @@
 // 数据模型 - 与产品方案一致
 
-export type Platform = "ark" | "codex" | "kimi" | "kiro" | "qoder" | "opencode-go";
+export type Platform = "ark" | "codex" | "kimi" | "kiro" | "qoder" | "opencode-go" | "deepseek";
 
 /** 会在「套餐额度」区域展示的平台。 */
-export const QUOTA_PLATFORMS = ["codex", "ark", "kiro", "qoder", "kimi"] as const;
+export const QUOTA_PLATFORMS = ["codex", "ark", "kiro", "qoder", "kimi", "deepseek"] as const;
 export type QuotaPlatform = (typeof QUOTA_PLATFORMS)[number];
 
 /** 套餐额度视图的显示开关；方舟的两种套餐可独立控制。 */
-export const QUOTA_DISPLAY_TARGETS = ["codex", "ark-coding", "ark-agent", "kiro", "qoder", "kimi"] as const;
+export const QUOTA_DISPLAY_TARGETS = ["codex", "ark-coding", "ark-agent", "kiro", "qoder", "kimi", "deepseek"] as const;
 export type QuotaDisplayTarget = (typeof QUOTA_DISPLAY_TARGETS)[number];
 
 export type QuotaMetric =
@@ -18,11 +18,22 @@ export type QuotaMetric =
   | "session"
   | "credits"
   | "addon_credits"
-  | "account";
+  | "account"
+  | "balance";
 
-export type QuotaUnit = "percent" | "usd_value" | "credits";
+export type QuotaUnit = "percent" | "usd_value" | "credits" | "currency";
 
-/** 订阅额度快照，保存当前与历史订阅状态 */
+/** DeepSeek 账户余额（赠送 + 充值），来自 /user/balance。 */
+export interface QuotaBalance {
+  total: number;
+  currency: "CNY" | "USD";
+  granted: number;
+  toppedUp: number;
+  /** 账户当前是否有余额可供调用 */
+  available: boolean;
+}
+
+/** 订阅额度快照（connector 原始读数）。保存当前与历史订阅状态 */
 export interface QuotaSnapshot {
   platform: Platform;
   accountName: string;
@@ -34,6 +45,81 @@ export interface QuotaSnapshot {
   resetsAt?: string;
   /** ISO 时间字符串，采集时间 */
   collectedAt: string;
+  /** DeepSeek 等账户余额（metric=balance 时携带） */
+  balance?: QuotaBalance;
+}
+
+/** 额度读取状态机；决定卡片展示额度、空态还是操作提示。 */
+export type QuotaStatus =
+  | "ready"
+  | "not-installed"
+  | "not-signed-in"
+  | "expired"
+  | "access-denied"
+  | "custom-provider"
+  | "unsupported-account"
+  | "unsupported-plan"
+  | "unsupported-version"
+  | "temporarily-unavailable"
+  | "unavailable";
+
+/** 一个可展示的额度窗口（对应 juejin 的 limits[]）。 */
+export interface QuotaWindow {
+  id: string;
+  label: string;
+  usedPercent: number;
+  resetsAt?: string | null;
+  description?: string | null;
+  remaining?: number | null;
+  total?: number | null;
+}
+
+/**
+ * 归一化后的额度快照（三类结构共用）：
+ * - 命名窗口：fiveHour / weekly / sevenDay
+ * - 模型池窗口：primaryModels / otherModels / plan
+ * - 额度列表：limits[]
+ */
+export interface QuotaStateSnapshot {
+  channel: Platform;
+  account?: string | null;
+  status: QuotaStatus;
+  planLabel?: string | null;
+  region?: "global" | "mainland" | null;
+  limits: QuotaWindow[];
+  fiveHour?: QuotaWindow;
+  weekly?: QuotaWindow;
+  sevenDay?: QuotaWindow;
+  primaryModels?: QuotaWindow;
+  otherModels?: QuotaWindow;
+  plan?: QuotaWindow;
+  fetchedAt?: string | null;
+  stale: boolean;
+  message?: string | null;
+  balance?: QuotaBalance;
+}
+
+/** 本地半小时用量桶，落盘在 ~/.xlt-workbench/queue/YYYY-MM.jsonl。 */
+export interface QueueBucket {
+  hourStart: string;
+  source: string;
+  collector?: string;
+  project: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheCreationInputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  conversationCount: number;
+  reportedCostUsd?: number;
+  localMetrics?: {
+    requestCount: number;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    requestCountComplete: boolean;
+  };
 }
 
 /** 按天聚合后的 Token 使用量 */
@@ -45,6 +131,9 @@ export interface TokenDailyUsage {
   inputTokens: number;
   outputTokens: number;
   cachedTokens?: number;
+  /** 缓存写入（Claude cache_creation 等），单独计价 */
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
   requestCount?: number;
   collectedAt: string;
 }
@@ -251,6 +340,12 @@ export interface PlatformQuotaView {
   planTag: string;
   logoChar: string;
   logoClass: string;
+  /** 读取状态；缺省视为 ready（旧数据兼容）。 */
+  status?: QuotaStatus;
+  /** true 表示正在展示上一次成功读数。 */
+  stale?: boolean;
+  /** 面向用户的状态说明。 */
+  message?: string | null;
   /** 当展示 Credits 时使用 */
   credits?: {
     remaining: number;
@@ -261,6 +356,8 @@ export interface PlatformQuotaView {
   };
   /** 登录/账户信息（无额度数值时仍可展示，如 Codex 经 CLI） */
   account?: { label: string };
+  /** 账户余额（DeepSeek），与 windows / credits 互斥展示 */
+  balance?: QuotaBalance;
   /** 时间窗口额度（5h / weekly / monthly / session） */
   windows: QuotaWindowView[];
   collectedAt: string;
@@ -288,10 +385,41 @@ export const PLATFORM_META: Record<
   qoder: { name: "Qoder", logoChar: "Q", logoClass: "qoder" },
   kimi: { name: "Kimi", logoChar: "K", logoClass: "kimi" },
   "opencode-go": { name: "OpenCode Go", logoChar: "O", logoClass: "open" },
+  deepseek: { name: "DeepSeek", logoChar: "D", logoClass: "deepseek" },
 };
 
 /** 用于存储 connector 配置（API Key 等），仅保存在本机 */
 export interface ConnectorConfig {
   /** Ark 走本机 arkcli，仅可覆盖 base URL */
   ark?: { baseUrl?: string };
+  /** DeepSeek 账户余额查询需要 API Key（仅本机保存，可选） */
+  deepseek?: { apiKey?: string };
+}
+
+/** 本地用量缓存统计（设置页「缓存」区块）。 */
+export interface UsageCacheMonthStats {
+  month: string;
+  rows: number;
+  bytes: number;
+  firstHour?: string | null;
+  lastHour?: string | null;
+}
+
+export interface UsageCacheStats {
+  dataDir: string;
+  totalRows: number;
+  totalBytes: number;
+  oldestHour?: string | null;
+  newestHour?: string | null;
+  months: UsageCacheMonthStats[];
+  cursorSources: string[];
+}
+
+/** 用量数据目录配置。 */
+export interface UsageConfig {
+  timezone?: string | null;
+  statsSince?: string | null;
+  retentionDays: number;
+  pricingUrl?: string | null;
+  lastCleanupAt?: string | null;
 }

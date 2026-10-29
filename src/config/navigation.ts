@@ -68,15 +68,19 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     title: "工作",
     items: [
+      { label: "日历", icon: "i-lucide-calendar-days", to: "/calendar" },
+      { label: "待办", icon: "i-lucide-kanban", to: "/todos" },
       { label: "Git 报告", icon: "i-lucide-git-branch", to: "/daily-report", kbd: "⌘4" },
     ],
   },
   {
     title: "工具箱",
     items: [
+      { label: "翻译", icon: "i-lucide-languages", to: "/translate" },
       { label: "剪贴板历史", icon: "i-lucide-clipboard-list", to: "/clipboard", kbd: "⌘5" },
       { label: "代码片段", icon: "i-lucide-code", to: "/snippets", kbd: "⌘6" },
       { label: "密钥库", icon: "i-lucide-lock", to: "/vault", kbd: "⌘7" },
+      { label: "Shell 环境", icon: "i-lucide-terminal", to: "/shell-env" },
     ],
   },
 ];

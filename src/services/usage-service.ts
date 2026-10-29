@@ -1,6 +1,6 @@
 import { settings } from "@/config/settings";
 import type { OilGrade } from "@/types/oil";
-import { createStorage } from "@/storage/web-storage";
+import { createUsageStorage } from "@/storage/usage-storage";
 import type { UsageStorage } from "@/storage/storage";
 import {
   type Platform,
@@ -10,6 +10,8 @@ import {
   type PlatformQuotaView,
   type QuotaMetric,
   type QuotaSnapshot,
+  type QuotaStateSnapshot,
+  type QuotaWindow,
   type RangePreset,
   type SyncInfo,
   type TokenSummary,
@@ -19,7 +21,10 @@ import {
   type ModelUsage,
   type HeatmapDay,
   type QuotaWindowView,
+  type UsageCacheStats,
+  type UsageConfig,
 } from "@/types/usage";
+import { flatToStateSnapshots, failureSnapshot } from "@/utils/quota";
 import { ArkConnector } from "@/connectors/ark";
 import { CodexConnector } from "@/connectors/codex";
 import { KimiConnector } from "@/connectors/kimi";
@@ -29,7 +34,9 @@ import { OpenCodeConnector } from "@/connectors/opencode";
 import { ClaudeConnector } from "@/connectors/claude";
 import { GeminiConnector } from "@/connectors/gemini";
 import { CopilotConnector } from "@/connectors/copilot";
-import { computeCostUsd, isModelPriced } from "@/pricing";
+import { DeepSeekConnector } from "@/connectors/deepseek";
+import { RustCollectorConnector } from "@/connectors/rust-collector";
+import { computeCostUsd, isModelPriced, loadPricingOverlay, refreshPricingOverlay } from "@/pricing";
 import {
   ConnectorError,
   httpGet,
@@ -67,6 +74,7 @@ const WINDOW_SPEC: Record<
     { metric: "five_hour", label: "5 小时额度", tone: "green" },
     { metric: "weekly", label: "周额度", tone: "green" },
   ],
+  deepseek: [], // 动态：账户余额走 balance 区块，不渲染进度条
 };
 
 /** 各周期的展示元数据与规范排序。 */
@@ -82,6 +90,7 @@ const METRIC_META: Record<
   credits: { label: "本周期已消耗", tone: "purple", order: 4 },
   addon_credits: { label: "加购已消耗", tone: "purple", order: 5 },
   account: { label: "账户", tone: "blue", order: 6 },
+  balance: { label: "账户余额", tone: "green", order: 7 },
 };
 
 /** 火山方舟套餐页使用的周期名称，与控制台保持一致。 */
@@ -103,7 +112,7 @@ export class UsageService {
   /** 数据版本：变更时清空本地旧数据（含历史种子默认值） */
   static readonly DATA_VERSION = "v2-no-seed";
 
-  constructor(storage: UsageStorage = createStorage()) {
+  constructor(storage: UsageStorage = createUsageStorage()) {
     this.storage = storage;
     const ark = new ArkConnector();
     const codex = new CodexConnector();
@@ -114,11 +123,32 @@ export class UsageService {
     const claude = new ClaudeConnector();
     const gemini = new GeminiConnector();
     const copilot = new CopilotConnector();
+    const deepseek = new DeepSeekConnector();
     // Kiro 仅 Credits；Codex、OpenCode 与 Claude Code 的 Token 来自本机会话记录。
-    this.quotaConnectors = [ark, codex, kiro, qoder, kimi];
+    this.quotaConnectors = [ark, codex, kiro, qoder, kimi, deepseek];
     // Kiro CLI 本地会话经 estimateTokens 估算；Qoder 读本地 SQLite 的真实 token。
     // Gemini CLI / GitHub Copilot CLI 读本机会话文件的真实 token；Kimi 读 wire.jsonl 的 usage.record。
-    this.tokenConnectors = [ark, codex, opencode, claude, kiro, qoder, gemini, copilot, kimi];
+    // DeepSeek 读 DSH 客户端会话的 usage（余额走官方 /user/balance）。
+    // 以下为 Rust 侧增量采集器（游标 + 去重 + 落盘统一在 ~/.xlt-workbench）。
+    const rustCollectors = [
+      new RustCollectorConnector("qwen", "qwen"),
+      new RustCollectorConnector("amp", "amp"),
+      new RustCollectorConnector("roocode", "roocode"),
+      new RustCollectorConnector("kilocode", "kilocode"),
+      new RustCollectorConnector("openclaw", "openclaw"),
+      new RustCollectorConnector("cline", "cline"),
+      new RustCollectorConnector("codebuddy", "codebuddy"),
+      new RustCollectorConnector("workbuddy", "workbuddy"),
+    ];
+    this.tokenConnectors = [ark, codex, opencode, claude, kiro, qoder, gemini, copilot, kimi, deepseek, ...rustCollectors];
+  }
+
+  /** 初始化存储（Tauri 文件存储 / 旧 localStorage 迁移）后再清空过期版本数据。 */
+  async init(): Promise<void> {
+    await this.storage.init?.();
+    await loadPricingOverlay();
+    void refreshPricingOverlay();
+    this.ensureSeeded();
   }
 
   /** 数据版本变更时清空旧数据（含历史种子）；不再注入任何默认值 */
@@ -129,10 +159,15 @@ export class UsageService {
   // ---- 读：订阅额度 ----
 
   getPlatformQuotaViews(): PlatformQuotaView[] {
-    const all = this.storage.listQuotas();
     const hidden = new Set(
       this.storage.getConnectorConfig().quotaDisplay?.hiddenPlatforms ?? [],
     );
+    const states = this.storage.listQuotaStates?.() ?? [];
+    if (states.length > 0) {
+      return this.buildViewsFromStates(states, hidden);
+    }
+    // 旧实现（localStorage / 测试夹具）：直接从扁平读数构建。
+    const all = this.storage.listQuotas();
     return QUOTA_PLATFORMS
       .filter((platform) => platform === "ark" || !hidden.has(platform))
       .flatMap((platform) => {
@@ -147,6 +182,141 @@ export class UsageService {
               .map((plan) => this.buildPlatformView(platform, all, plan))
           : [this.buildPlatformView(platform, all)];
       });
+  }
+
+  /** 新模型：每个 (channel, account) 一张卡，状态机 + limits[] + stale。 */
+  private buildViewsFromStates(
+    states: QuotaStateSnapshot[],
+    hidden: Set<QuotaDisplayTarget>,
+  ): PlatformQuotaView[] {
+    const views: PlatformQuotaView[] = [];
+    for (const platform of QUOTA_PLATFORMS) {
+      const items = states
+        .filter((state) => state.channel === platform)
+        .sort(
+          (a, b) =>
+            arkPlanOrder(a.account ?? "") - arkPlanOrder(b.account ?? "") ||
+            (a.account ?? "").localeCompare(b.account ?? ""),
+        );
+      if (items.length === 0) {
+        if (!hidden.has(platform as QuotaDisplayTarget)) {
+          views.push(this.buildStateView(platform));
+        }
+        continue;
+      }
+      for (const state of items) {
+        const target =
+          platform === "ark" ? arkQuotaDisplayTarget(state.account ?? "") : undefined;
+        if (hidden.has(platform as QuotaDisplayTarget) || (target && hidden.has(target))) {
+          continue;
+        }
+        views.push(this.buildStateView(platform, state));
+      }
+    }
+    return views;
+  }
+
+  private buildStateView(
+    platform: Platform,
+    state?: QuotaStateSnapshot,
+  ): PlatformQuotaView {
+    const meta = PLATFORM_META[platform];
+    const limits = this.stateWindows(state);
+    const view: PlatformQuotaView = {
+      id: state?.account ? `${platform}:${state.account}` : platform,
+      platform,
+      name: meta.name,
+      planTag: PLAN_TAG[platform],
+      logoChar: meta.logoChar,
+      logoClass: meta.logoClass,
+      status: state?.status ?? "unavailable",
+      stale: state?.stale ?? false,
+      message: state?.message ?? null,
+      windows: [],
+      collectedAt: state?.fetchedAt ?? new Date(0).toISOString(),
+    };
+
+    if (platform === "ark") {
+      view.planTag = arkPlanTag(state?.account ?? state?.planLabel ?? undefined);
+    } else if (state?.planLabel) {
+      view.planTag = state.planLabel;
+    }
+
+    const credit = limits.find((item) => item.id === "credits");
+    if (credit) {
+      const addon = limits.find((item) => item.id === "addon_credits");
+      view.credits = {
+        remaining: Math.max(0, credit.remaining ?? 0),
+        total: credit.total ?? 0,
+        refreshIn: platform === "kiro" ? formatRelative(credit.resetsAt ?? undefined, "刷新") : undefined,
+        expiresIn: platform === "qoder" ? formatRelative(credit.resetsAt ?? undefined, "到期") : undefined,
+        addOn: addon
+          ? {
+              remaining: Math.max(0, addon.remaining ?? 0),
+              total: addon.total ?? 0,
+            }
+          : undefined,
+      };
+    }
+
+    if (state?.balance) {
+      view.balance = state.balance;
+      view.planTag = state.balance.currency;
+    }
+
+    view.windows = limits
+      .filter(
+        (item) =>
+          item.id !== "credits" &&
+          item.id !== "addon_credits" &&
+          item.id !== "balance" &&
+          item.id !== "account",
+      )
+      .map((item) => {
+        const metric = item.id as QuotaMetric;
+        const metaInfo = METRIC_META[metric] ?? {
+          label: item.label,
+          tone: "blue" as const,
+          order: 50,
+        };
+        const usedPct = Math.round(item.usedPercent);
+        const warn = usedPct >= 80 && metaInfo.tone !== "purple";
+        return {
+          metric,
+          label: item.label || metaInfo.label,
+          usedPct,
+          usedText:
+            item.total != null
+              ? `${formatNum(Math.max(0, item.total - (item.remaining ?? 0)))} / ${formatNum(item.total)}`
+              : `${usedPct}%`,
+          resetsAt: item.resetsAt ?? undefined,
+          resetsIn: formatRelative(item.resetsAt ?? undefined, "重置"),
+          tone: warn ? ("orange" as const) : metaInfo.tone,
+        } satisfies QuotaWindowView;
+      })
+      .sort((a, b) => (METRIC_META[a.metric]?.order ?? 50) - (METRIC_META[b.metric]?.order ?? 50));
+
+    return view;
+  }
+
+  private stateWindows(state?: QuotaStateSnapshot): QuotaWindow[] {
+    if (!state) return [];
+    const map = new Map<string, QuotaWindow>();
+    for (const limit of state.limits) map.set(limit.id, limit);
+    const named: Array<[string, QuotaWindow | undefined]> = [
+      ["five_hour", state.fiveHour],
+      ["weekly", state.weekly],
+      ["seven_day", state.sevenDay],
+      ["primary_models", state.primaryModels],
+      ["other_models", state.otherModels],
+      ["plan", state.plan],
+    ];
+    for (const [id, window] of named) {
+      if (window && !map.has(id)) {
+        map.set(id, { ...window, id, label: window.label || id });
+      }
+    }
+    return [...map.values()];
   }
 
   private buildPlatformView(
@@ -198,12 +368,20 @@ export class UsageService {
       }
     }
 
+    if (platform === "deepseek") {
+      const snap = latest.find((q) => q.metric === "balance");
+      if (snap?.balance) {
+        view.balance = snap.balance;
+        view.planTag = snap.balance.currency;
+      }
+    }
+
     // 方舟展示会话、周、月三个套餐周期；Codex 维持两个核心周期。
     const specs =
       platform === "ark" || platform === "codex"
         ? latest
             .map((s) => s.metric)
-            .filter((m) => m !== "account" && m !== "credits" && m !== "addon_credits" && m !== "monthly_code")
+            .filter((m) => m !== "account" && m !== "credits" && m !== "addon_credits" && m !== "monthly_code" && m !== "balance")
             .sort((a, b) => METRIC_META[a].order - METRIC_META[b].order)
             .slice(0, platform === "ark" ? 3 : 2)
             .map((metric) => ({
@@ -400,7 +578,7 @@ export class UsageService {
           cached: 0,
           requests: 0,
           costUsd: 0,
-          priced: isModelPriced(r.model),
+          priced: isModelPriced(r.model, r.platform),
           pct: 0,
           platformTotals: new Map<string, number>(),
         };
@@ -470,6 +648,16 @@ export class UsageService {
       cursor.setDate(cursor.getDate() + 1);
     }
     return out;
+  }
+
+  /** 本地最早一条 Token 记录的日期（YYYY-MM-DD）；无数据返回 null。 */
+  getEarliestTokenDate(): string | null {
+    let earliest: string | null = null;
+    for (const record of this.storage.listTokens()) {
+      if (!record.date) continue;
+      if (earliest === null || record.date < earliest) earliest = record.date;
+    }
+    return earliest;
   }
 
   /**
@@ -573,9 +761,10 @@ export class UsageService {
         .map(async (connector) => {
           try {
             const snapshots = await waitForConnector(connector.id, connector.fetchQuotas());
-            if (snapshots.length) this.storage.saveQuotas(snapshots);
+            await this.saveQuotaReadings(connector.platformId() as Platform, snapshots);
             successful += 1;
           } catch (error) {
+            await this.saveQuotaFailure(connector.platformId() as Platform, error);
             errors.push(`${connector.id}: ${msg(error)}`);
           } finally {
             onProgress?.();
@@ -628,9 +817,10 @@ export class UsageService {
       .map(async (c) => {
         try {
           const snaps = await waitForConnector(c.id, c.fetchQuotas());
-          if (snaps.length) this.storage.saveQuotas(snaps);
+          await this.saveQuotaReadings(c.platformId() as Platform, snaps);
           successful += 1;
         } catch (e) {
+          await this.saveQuotaFailure(c.platformId() as Platform, e);
           errors.push(`${c.id}: ${msg(e)}`);
         } finally {
           reportProgress();
@@ -638,18 +828,25 @@ export class UsageService {
       });
 
     const tokenRange = { ...this.getRange("30d"), tz: settings.getPreferences().timezone };
+    let reloadNeeded = false;
     const tokenTasks = this.tokenConnectors
       .filter((c) => c.isConfigured())
       .map(async (c) => {
         try {
-          const rows = await waitForConnector(c.id, c.fetchTokens(tokenRange));
-          // 已成功取得的空数组代表该平台当前没有历史 Token，仍应覆盖旧数据。
-          this.storage.replaceTokensForPlatform(
-            c.platformId(),
-            tokenRange.start,
-            tokenRange.end,
-            rows,
-          );
+          if (c.selfPersisting && c.fetchBuckets && this.storage.reloadBuckets) {
+            // Rust 采集器自行落盘并推进游标，最后统一重新加载一次。
+            await waitForConnector(c.id, c.fetchBuckets(tokenRange));
+            reloadNeeded = true;
+          } else {
+            const rows = await waitForConnector(c.id, c.fetchTokens(tokenRange));
+            // 已成功取得的空数组代表该平台当前没有历史 Token，仍应覆盖旧数据。
+            await this.storage.replaceTokensForPlatform(
+              c.platformId(),
+              tokenRange.start,
+              tokenRange.end,
+              rows,
+            );
+          }
           successful += 1;
         } catch (e) {
           errors.push(`${c.id}: ${msg(e)}`);
@@ -659,6 +856,7 @@ export class UsageService {
       });
 
     await Promise.all([...quotaTasks, ...tokenTasks]);
+    if (reloadNeeded) await this.storage.reloadBuckets?.();
 
     const previous = this.storage.getSyncInfo();
     this.storage.saveSyncInfo({
@@ -669,6 +867,23 @@ export class UsageService {
         ? `${successful ? "部分连接器同步失败" : "没有连接器同步成功"}：${errors.join("; ")}`
         : undefined,
     });
+  }
+
+  private async saveQuotaReadings(
+    platform: Platform,
+    snapshots: QuotaSnapshot[],
+  ): Promise<void> {
+    if (this.storage.saveQuotaStates) {
+      await this.storage.saveQuotaStates(flatToStateSnapshots(platform, snapshots));
+      return;
+    }
+    if (snapshots.length) await this.storage.saveQuotas(snapshots);
+  }
+
+  private async saveQuotaFailure(platform: Platform, error: unknown): Promise<void> {
+    if (this.storage.saveQuotaStates) {
+      await this.storage.saveQuotaStates([failureSnapshot(platform, error)]);
+    }
   }
 
   setSyncing(flag: boolean): void {
@@ -682,21 +897,33 @@ export class UsageService {
   async syncTodayTokens(): Promise<void> {
     const range = { ...this.getRange("today"), tz: settings.getPreferences().timezone };
     const local = this.tokenConnectors.filter((c) => c.id !== "ark" && c.isConfigured());
+    let reloadNeeded = false;
     await Promise.all(
       local.map(async (c) => {
         try {
+          if (c.selfPersisting && c.fetchBuckets && this.storage.reloadBuckets) {
+            await Promise.race([
+              c.fetchBuckets(range),
+              new Promise<never>((_, reject) =>
+                window.setTimeout(() => reject(new Error(`${c.id} 刷新超时`)), 15_000),
+              ),
+            ]);
+            reloadNeeded = true;
+            return;
+          }
           const rows = await Promise.race([
             c.fetchTokens(range),
             new Promise<never>((_, reject) =>
               window.setTimeout(() => reject(new Error(`${c.id} 刷新超时`)), 15_000),
             ),
           ]);
-          this.storage.replaceTokensForPlatform(c.platformId(), range.start, range.end, rows);
+          await this.storage.replaceTokensForPlatform(c.platformId(), range.start, range.end, rows);
         } catch {
           // 单个连接器刷新失败不影响其他平台，也不打断自动刷新。
         }
       }),
     );
+    if (reloadNeeded) await this.storage.reloadBuckets?.();
   }
 
   // ---- 设置 ----
@@ -706,6 +933,12 @@ export class UsageService {
   }
   saveArkBaseUrl(baseUrl: string): void {
     settings.saveArkBaseUrl(baseUrl);
+  }
+  getDeepseekConfigView(): { apiKey: string } {
+    return settings.getDeepseekConfig();
+  }
+  saveDeepseekApiKey(apiKey: string): void {
+    settings.saveDeepseekApiKey(apiKey);
   }
   getOilConfigView(): { province: string; apiKey: string; grade: OilGrade } {
     return settings.getOilConfig();
@@ -718,6 +951,26 @@ export class UsageService {
   }
   saveQuotaDisplayConfig(config: { hiddenPlatforms: QuotaDisplayTarget[] }): void {
     settings.saveQuotaDisplayConfig(config);
+  }
+
+  getCacheStats(): UsageCacheStats | null {
+    return this.storage.cacheStats?.() ?? null;
+  }
+
+  async cleanupCache(retentionDays?: number): Promise<UsageCacheStats | null> {
+    return (await this.storage.cleanup?.(retentionDays)) ?? null;
+  }
+
+  async clearUsageCache(): Promise<UsageCacheStats | null> {
+    return (await this.storage.clearCache?.()) ?? null;
+  }
+
+  getUsageConfig(): UsageConfig | null {
+    return this.storage.getUsageConfig?.() ?? null;
+  }
+
+  saveUsageConfig(patch: Partial<UsageConfig>): void {
+    this.storage.saveUsageConfig?.(patch);
   }
 
   getPreferencesView(): { timezone: string; statsSince: string | null } {
@@ -738,6 +991,7 @@ const PLAN_TAG: Record<Platform, string> = {
   qoder: "Pro",
   kimi: "会员",
   "opencode-go": "个人版",
+  deepseek: "余额",
 };
 
 /** 由 arkcli 的 product 字段推导 ark 卡片套餐标签 */
@@ -767,16 +1021,20 @@ function sum<T>(arr: T[], pick: (x: T) => number): number {
 
 /** 单条日用量的预估费用（USD），按模型单价估算。 */
 function costOf(r: {
+  platform?: string;
   model?: string;
   inputTokens: number;
   outputTokens: number;
   cachedTokens?: number;
+  cacheWriteTokens?: number;
 }): number {
   return computeCostUsd({
     model: r.model,
+    source: r.platform,
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,
     cachedTokens: r.cachedTokens,
+    cacheWriteTokens: r.cacheWriteTokens,
   });
 }
 

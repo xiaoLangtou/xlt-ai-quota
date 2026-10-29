@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { ModelUsage } from "@/types/usage";
 import { formatTokens, formatUsd } from "@/utils/format";
 import { useTheme } from "@/composables/useTheme";
@@ -26,6 +26,7 @@ const PLATFORM_BRAND: Record<string, [string, string]> = {
   "opencode-go": ["--brand-open", "#17b8a6"],
   gemini: ["--brand-gemini", "#4989f5"],
   copilot: ["--brand-copilot", "#6e7681"],
+  deepseek: ["--brand-deepseek", "#4d6bfe"],
 };
 
 function cssVar(name: string, fallback: string): string {
@@ -68,6 +69,45 @@ const colored = computed(() => {
 });
 
 const metricTotal = computed(() => props.models.reduce((s, m) => s + metricValue(m), 0));
+
+// 列表默认只展示 Top N，其余合并为「其他 N 个模型」，可展开；展开状态在同一 session 内记忆。
+const TOP_N = 5;
+const EXPAND_KEY = "analytics:modelsExpanded";
+const expanded = ref(false);
+try {
+  expanded.value = sessionStorage.getItem(EXPAND_KEY) === "1";
+} catch {
+  /* 存储不可用时保持默认收起 */
+}
+watch(expanded, (value) => {
+  try {
+    sessionStorage.setItem(EXPAND_KEY, value ? "1" : "0");
+  } catch {
+    /* 忽略存储失败 */
+  }
+});
+
+const restRows = computed(() => colored.value.slice(TOP_N));
+const canExpand = computed(() => restRows.value.length > 0);
+const visibleRows = computed(() =>
+  expanded.value || !canExpand.value ? colored.value : colored.value.slice(0, TOP_N),
+);
+const restSummary = computed(() => {
+  const list = restRows.value;
+  if (!list.length) return null;
+  return {
+    count: list.length,
+    total: list.reduce((s, m) => s + m.total, 0),
+    cost: list.reduce((s, m) => s + m.costUsd, 0),
+    pct: Math.round(list.reduce((s, m) => s + m.metricPct, 0) * 10) / 10,
+    color: list[0].color,
+  };
+});
+const topShare = computed(() => {
+  const grand = metricTotal.value || 1;
+  const top = colored.value.slice(0, TOP_N).reduce((s, m) => s + m.metricValue, 0);
+  return Math.round((top / grand) * 1000) / 10;
+});
 
 const option = computed(() => {
   void resolved.value;
@@ -125,8 +165,8 @@ const option = computed(() => {
         <VChart v-if="metricTotal > 0" class="mb-donut" :option="option" autoresize />
         <div v-else class="mb-donut-empty">暂无数据</div>
         <div v-if="metricTotal > 0" class="mb-center">
-          <span>{{ metric === "cost" ? "预估费用" : "模型数" }}</span>
-          <strong>{{ metric === "cost" ? formatUsd(metricTotal) : colored.length }}</strong>
+          <span>{{ canExpand ? "Top 5 占比" : metric === "cost" ? "预估费用" : "模型数" }}</span>
+          <strong>{{ canExpand ? `${topShare}%` : metric === "cost" ? formatUsd(metricTotal) : colored.length }}</strong>
         </div>
       </div>
 
@@ -137,7 +177,7 @@ const option = computed(() => {
           <span class="num">Token</span>
           <span class="num">费用</span>
         </div>
-        <div v-for="m in colored" :key="m.model" class="mb-row" role="row">
+        <div v-for="m in visibleRows" :key="m.model" class="mb-row" role="row">
           <span class="mb-name">
             <ToolLogo :platform="m.platform" :size="18" />
             <b class="mb-model" :title="m.model">{{ m.model }}</b>
@@ -153,9 +193,39 @@ const option = computed(() => {
             {{ formatUsd(m.costUsd) }}<i v-if="!m.priced">*</i>
           </span>
         </div>
+
+        <button
+          v-if="restSummary && !expanded"
+          class="mb-row mb-more"
+          type="button"
+          role="row"
+          @click="expanded = true"
+        >
+          <span class="mb-name">
+            <span class="mb-more-icon">+{{ restSummary.count }}</span>
+            <b class="mb-model">其他 {{ restSummary.count }} 个模型</b>
+          </span>
+          <span class="mb-share">
+            <span class="mb-bar">
+              <span :style="{ width: `${restSummary.pct}%`, background: restSummary.color }" />
+            </span>
+            <em>{{ restSummary.pct }}%</em>
+          </span>
+          <span class="num mb-total">{{ formatTokens(restSummary.total) }}</span>
+          <span class="num mb-cost">{{ formatUsd(restSummary.cost) }}</span>
+        </button>
+
+        <div v-if="canExpand" class="mb-foot">
+          <button type="button" class="mb-expand" @click="expanded = !expanded">
+            {{ expanded ? "收起" : `查看全部 ${colored.length} 个模型` }}
+          </button>
+        </div>
       </div>
     </div>
     <div v-else class="mb-empty">该周期暂无模型记录</div>
+    <p v-if="colored.length" class="mb-note">
+      费用按内置单价估算，含缓存读取（未内置缓存价时按输入价 10% 折算）；带 <i>*</i> 表示未内置定价，按默认价（$1 / $5 每 1M）预估。
+    </p>
   </article>
 </template>
 
@@ -359,6 +429,62 @@ const option = computed(() => {
   padding: 40px 0;
   color: var(--text-subtle);
   font-size: 13px;
+}
+.mb-more {
+  width: 100%;
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.mb-more:hover {
+  background: var(--surface-2);
+}
+.mb-more-icon {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+}
+.mb-foot {
+  padding-top: 10px;
+  text-align: right;
+}
+.mb-expand {
+  padding: 3px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mb-expand:hover {
+  color: var(--accent-hover);
+}
+.mb-note {
+  margin: 0;
+  padding: 0 26px 18px;
+  color: var(--text-subtle);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.mb-note i {
+  color: var(--text-muted);
+  font-style: normal;
 }
 @media (max-width: 900px) {
   .mb-body {

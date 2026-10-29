@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import {
   ClipboardList,
   Database,
@@ -11,6 +12,7 @@ import {
   Sparkles,
   Sun,
 } from "lucide-vue-next";
+import { invoke } from "@tauri-apps/api/core";
 import { httpGet, isTauriDesktop } from "@/connectors/types";
 import { clipboardService } from "@/services/clipboard-service";
 import { dailyReportService } from "@/services/daily-report-service";
@@ -19,7 +21,12 @@ import { pushToast } from "@/composables/useToast";
 import type { ClipboardSettingsDraft, ClipboardStatus } from "@/types/clipboard";
 import type { AiProvider } from "@/types/daily-report";
 import { useUsageDashboard } from "@/composables/useUsageDashboard";
+import { usageService } from "@/services/usage-service";
 import { useTheme } from "@/composables/useTheme";
+import { useSidebarNavigation } from "@/composables/useSidebarNavigation";
+import { NAV_GROUPS } from "@/config/navigation";
+import { zentaoService } from "@/services/zentao-service";
+import type { ZentaoStatus } from "@/types/productivity";
 import type { OilGrade } from "@/types/oil";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -28,13 +35,14 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import ToolLogo from "@/components/ToolLogo.vue";
-import { type QuotaDisplayTarget } from "@/types/usage";
+import TranslateSettings from "@/components/translate/TranslateSettings.vue";
+import { type QuotaDisplayTarget, type UsageCacheStats } from "@/types/usage";
 
 type ArkStatusPayload = {
   logged_in?: boolean;
   ok?: boolean;
   control_plane_auth?: { status?: string; reason?: unknown };
-  volc_sso?: { expired?: boolean };
+  volc_sso?: { expired?: boolean; identity?: { is_root?: boolean } };
   active_profile?: { name?: string; type?: string };
   profiles_summary?: { is_default?: boolean; display_name?: string }[];
   error?: { message?: unknown };
@@ -51,10 +59,100 @@ const emit = defineEmits<{
 }>();
 
 const { loadSettings, saveSettings } = useUsageDashboard();
+const { hiddenPaths: hiddenMenuPaths, setMenuVisible, showAllMenus } = useSidebarNavigation();
 
 const arkBase = ref("");
+const deepseekApiKey = ref("");
+// ---- 禅道同步：登录态写入 ~/.zentao-token.json，密码不进应用存储 ----
+const zentaoAvailable = isTauriDesktop();
+const zentaoForm = ref({ url: "", account: "", password: "" });
+const zentaoStatus = ref<ZentaoStatus>({ configured: false, url: "", account: "" });
+const zentaoLoggingIn = ref(false);
+const zentaoShowForm = ref(false);
+
+async function loadZentaoStatus(): Promise<void> {
+  if (!zentaoAvailable) return;
+  try {
+    zentaoStatus.value = await zentaoService.status();
+    if (zentaoStatus.value.configured) {
+      zentaoForm.value.url = zentaoStatus.value.url;
+      zentaoForm.value.account = zentaoStatus.value.account;
+    }
+  } catch {
+    zentaoStatus.value = { configured: false, url: "", account: "" };
+  }
+}
+
+async function zentaoLogin(): Promise<void> {
+  zentaoLoggingIn.value = true;
+  try {
+    zentaoStatus.value = await zentaoService.login(
+      zentaoForm.value.url,
+      zentaoForm.value.account,
+      zentaoForm.value.password,
+    );
+    zentaoForm.value.password = "";
+    zentaoShowForm.value = false;
+    pushToast(`禅道已登录：${zentaoStatus.value.account}`, "success");
+  } catch (reason) {
+    pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    zentaoLoggingIn.value = false;
+  }
+}
+
+async function zentaoLogout(): Promise<void> {
+  try {
+    await zentaoService.logout();
+    zentaoStatus.value = { configured: false, url: "", account: "" };
+    zentaoShowForm.value = true;
+    pushToast("已退出禅道登录。", "success");
+  } catch (reason) {
+    pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+  }
+}
+
 const timezone = ref("");
 const statsSince = ref("");
+const cacheStats = ref<UsageCacheStats | null>(null);
+const cacheBusy = ref(false);
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function loadCacheStats(): void {
+  cacheStats.value = usageService.getCacheStats();
+}
+
+async function cleanupCache(): Promise<void> {
+  if (cacheBusy.value) return;
+  cacheBusy.value = true;
+  try {
+    cacheStats.value = await usageService.cleanupCache();
+    pushToast("已清理过期用量缓存", "success");
+  } catch (reason) {
+    pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    cacheBusy.value = false;
+  }
+}
+
+async function clearCache(): Promise<void> {
+  if (cacheBusy.value) return;
+  cacheBusy.value = true;
+  try {
+    cacheStats.value = await usageService.clearUsageCache();
+    pushToast("已清空本地用量缓存", "success");
+  } catch (reason) {
+    pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    cacheBusy.value = false;
+  }
+}
 const hiddenQuotaTargets = ref<QuotaDisplayTarget[]>([]);
 const oilProvince = ref("");
 const oilApiKey = ref("");
@@ -198,9 +296,39 @@ const reportProvider = ref<AiProvider>("minimax");
 const reportModel = ref("");
 const reportApiKey = ref("");
 const reportProviderOptions = AI_PROVIDER_OPTIONS;
-const reportModelOptions = computed(() => aiModelOptions(reportProvider.value));
+const addingReportModel = ref(false);
+const customReportModel = ref("");
+const reportModelOptions = computed(() => aiModelOptions(
+  reportProvider.value,
+  reportPrefs.value.aiCustomModels?.[reportProvider.value],
+  reportModel.value,
+));
+
+function cancelAddReportModel(): void {
+  addingReportModel.value = false;
+  customReportModel.value = "";
+}
+
+function addReportModel(): void {
+  const model = customReportModel.value.trim();
+  if (!model) return;
+  const provider = reportProvider.value;
+  if (!reportModelOptions.value.some((option) => option.value === model)) {
+    reportPrefs.value = {
+      ...reportPrefs.value,
+      aiCustomModels: {
+        ...reportPrefs.value.aiCustomModels,
+        [provider]: [...(reportPrefs.value.aiCustomModels?.[provider] ?? []), model],
+      },
+    };
+  }
+  reportModel.value = model;
+  persistReportAi();
+  cancelAddReportModel();
+}
 
 function fillReportAi(): void {
+  cancelAddReportModel();
   reportPrefs.value = dailyReportService.loadPreferences();
   const provider = reportPrefs.value.ai?.provider ?? "minimax";
   reportProvider.value = provider;
@@ -210,7 +338,10 @@ function fillReportAi(): void {
 
 function persistReportAi(): void {
   const prefs = { ...reportPrefs.value };
-  prefs.ai = { provider: reportProvider.value, model: reportModel.value };
+  const model = reportModel.value.trim();
+  if (!model) return;
+  prefs.ai = { provider: reportProvider.value, model };
+  prefs.aiSelectedModels = { ...prefs.aiSelectedModels, [reportProvider.value]: model };
   prefs.aiApiKeys = {
     ...prefs.aiApiKeys,
     [reportProvider.value]: reportApiKey.value.trim(),
@@ -223,8 +354,9 @@ function persistReportAi(): void {
 function changeReportProvider(value: string): void {
   const next = value as AiProvider;
   persistReportAi();
+  cancelAddReportModel();
   reportProvider.value = next;
-  reportModel.value = AI_PROVIDERS[next].models[0];
+  reportModel.value = reportPrefs.value.aiSelectedModels?.[next] ?? AI_PROVIDERS[next].models[0];
   reportApiKey.value = reportPrefs.value.aiApiKeys?.[next] ?? "";
   persistReportAi();
 }
@@ -260,6 +392,7 @@ const QUOTA_DISPLAY_OPTIONS: { value: QuotaDisplayTarget; label: string; platfor
   { value: "kiro", label: "Kiro", platform: "kiro" },
   { value: "qoder", label: "Qoder", platform: "qoder" },
   { value: "kimi", label: "Kimi", platform: "kimi" },
+  { value: "deepseek", label: "DeepSeek", platform: "deepseek" },
 ];
 
 /** 除火山方舟外的本机 CLI 连接器：登录态由各自 CLI 维护，同步时自动汇总。 */
@@ -272,23 +405,38 @@ const CONNECTORS = [
   { key: "kimi", name: "Kimi", desc: "会员额度：5h 滚动窗口 / 月 Code 额度 / 月总额度（本机 kimi CLI 登录态）", badge: "额度", tone: "ok" },
   { key: "gemini", name: "Gemini CLI", desc: "读取 ~/.gemini/tmp 会话的真实 Token", badge: "自动采集", tone: "ok" },
   { key: "copilot", name: "GitHub Copilot", desc: "读取 ~/.copilot 会话的真实 Token", badge: "自动采集", tone: "ok" },
+  { key: "deepseek", name: "DeepSeek", desc: "DSH 客户端会话 Token（真实）+ 官方账户余额（需 API Key）", badge: "余额+Token", tone: "ok" },
 ] as const;
 
 // ---- 设置页布局：顶部 Tabs + 分区卡片（全部默认展开，不可折叠） ----
-type SettingsTab = "general" | "connectors" | "clipboard" | "advanced";
+type SettingsTab = "general" | "connectors" | "translate" | "clipboard" | "advanced";
 
 const TABS: { key: SettingsTab; label: string }[] = [
   { key: "general", label: "通用" },
   { key: "connectors", label: "平台连接" },
+  { key: "translate", label: "翻译" },
   { key: "clipboard", label: "剪贴板" },
   { key: "advanced", label: "高级" },
 ];
 
 const activeTab = ref<SettingsTab>("general");
 
+// 支持外部深链到指定 tab（例如文档拆解跳转到「高级」完成 AI 配置）。
+const route = useRoute();
+watch(
+  () => route.query.tab,
+  (tab) => {
+    if (typeof tab === "string" && TABS.some((item) => item.key === tab)) {
+      activeTab.value = tab as SettingsTab;
+    }
+  },
+  { immediate: true },
+);
+
 function fillForm() {
   const cfg = loadSettings();
   arkBase.value = cfg.ark.baseUrl;
+  deepseekApiKey.value = cfg.deepseek.apiKey;
   oilProvince.value = cfg.oil.province;
   oilApiKey.value = cfg.oil.apiKey;
   oilGrade.value = cfg.oil.grade ?? "92";
@@ -306,6 +454,25 @@ const timezoneOptions = computed(() => {
     label: value === systemTz.value ? `${value}（系统）` : value,
   }));
 });
+
+const loggingIn = ref<"ark" | "qoder" | null>(null);
+async function loginConnector(provider: "ark" | "qoder"): Promise<void> {
+  if (loggingIn.value) return;
+  loggingIn.value = provider;
+  pushToast("正在打开浏览器，请完成账号授权。", "info");
+  try {
+    await invoke("connector_login", { provider });
+    if (provider === "ark") {
+      await checkArkStatus();
+      if (!arkStatus.value.ok) throw new Error(arkStatus.value.message);
+    } else {
+      await httpGet({ baseUrl: "/api/qoder", path: "/usage" });
+    }
+    pushToast("登录已验证，请点击同步更新用量。", "success");
+  } catch (reason) {
+    pushToast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally { loggingIn.value = null; }
+}
 
 async function checkArkStatus() {
   arkStatus.value = { checking: true, ok: null, message: "检测中…" };
@@ -341,9 +508,8 @@ async function checkArkStatus() {
     arkStatus.value = {
       checking: false,
       ok: false,
-      message: "无法检测本机 arkcli 状态",
+      message: e instanceof Error ? e.message : String(e),
     };
-    void e;
   }
 }
 
@@ -355,7 +521,9 @@ watch(
       fillForm();
       fillReportAi();
       checkArkStatus();
+      void loadZentaoStatus();
       void loadClipboardStatus();
+      loadCacheStats();
     }
   },
   { immediate: true },
@@ -380,6 +548,7 @@ watch([oilProvince, oilApiKey], () => {
 function persist(andSync: boolean) {
   saveSettings({
     ark: { baseUrl: arkBase.value },
+    deepseek: { apiKey: deepseekApiKey.value },
     oil: { province: oilProvince.value, apiKey: oilApiKey.value, grade: oilGrade.value },
     quotaDisplay: { hiddenPlatforms: hiddenQuotaTargets.value },
     preferences: { timezone: timezone.value, statsSince: statsSince.value || null },
@@ -489,6 +658,69 @@ function updateStatsSince(value: string): void {
 
           <section class="sec">
             <div class="sec-head solo">
+              <span class="sec-icon tone-info"><Database :size="18" /></span>
+              <span class="sec-copy">
+                <strong>本地用量缓存</strong>
+                <small>~/.xlt-workbench · 按月 JSONL · 支持定期与手动清理</small>
+              </span>
+            </div>
+            <div class="sec-body">
+              <div v-if="cacheStats" class="pref-grid">
+                <div class="pref-field">
+                  <span>数据目录</span>
+                  <strong>{{ cacheStats.dataDir }}</strong>
+                </div>
+                <div class="pref-field">
+                  <span>总记录</span>
+                  <strong>{{ cacheStats.totalRows.toLocaleString() }}</strong>
+                </div>
+                <div class="pref-field">
+                  <span>占用空间</span>
+                  <strong>{{ formatBytes(cacheStats.totalBytes) }}</strong>
+                </div>
+                <div class="pref-field">
+                  <span>时间范围</span>
+                  <strong>{{ cacheStats.oldestHour?.slice(0, 10) || "—" }} ~ {{ cacheStats.newestHour?.slice(0, 10) || "—" }}</strong>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2 pt-2">
+                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="cleanupCache">清理过期月份</Button>
+                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="clearCache">清空全部缓存</Button>
+                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="loadCacheStats">刷新</Button>
+              </div>
+              <p class="pref-note">清理按「保留天数」删除整月文件；清空会移除全部用量桶与额度快照，配置和账单保留。</p>
+            </div>
+          </section>
+
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-info"><LayoutGrid :size="18" /></span>
+              <span class="sec-copy">
+                <strong>侧边栏菜单</strong>
+                <small>勾选需要显示的入口，修改后自动保存并立即生效</small>
+              </span>
+            </div>
+            <div class="sec-body">
+              <div class="flex items-center justify-between gap-3 pb-2">
+                <p class="pref-note">设置入口始终保留，方便随时调整。</p>
+                <Button variant="ghost" size="sm" :disabled="!hiddenMenuPaths.length" @click="showAllMenus">显示全部</Button>
+              </div>
+              <div v-for="group in NAV_GROUPS" :key="group.title" class="border-t border-default py-3 last:pb-0">
+                <h3 class="mb-3 text-xs font-semibold text-muted">{{ group.title }}</h3>
+                <div class="quota-display-grid">
+                  <label v-for="item in group.items" :key="item.to" class="quota-display-option">
+                    <Checkbox :model-value="!hiddenMenuPaths.includes(item.to)" @update:model-value="setMenuVisible(item.to, $event === true)" />
+                    <UIcon :name="item.icon" class="size-4 shrink-0 text-muted" />
+                    <span>{{ item.label }}</span>
+                  </label>
+                </div>
+              </div>
+              <p class="pref-note mt-3">隐藏仅影响侧边栏显示，页面仍可通过快捷键或链接访问。</p>
+            </div>
+          </section>
+
+          <section class="sec">
+            <div class="sec-head solo">
               <span class="sec-icon tone-warn"><Fuel :size="18" /></span>
               <span class="sec-copy">
                 <strong>油价监控</strong>
@@ -563,16 +795,60 @@ function updateStatsSince(value: string): void {
                   <span class="conn-badge" :class="arkStatus.ok ? 'ok' : arkStatus.checking ? 'neutral' : 'off'">
                     {{ arkStatus.checking ? "检测中" : arkStatus.ok ? "已登录" : "未登录" }}
                   </span>
-                  <Button variant="ghost" size="sm" :disabled="arkStatus.checking" @click="checkArkStatus">重新检测</Button>
+                  <Button v-if="isTauriDesktop()" size="sm" :disabled="loggingIn !== null" @click="loginConnector('ark')">{{ loggingIn === 'ark' ? '等待浏览器授权…' : '登录方舟' }}</Button>
+                  <Button variant="ghost" size="sm" :disabled="arkStatus.checking || loggingIn !== null" @click="checkArkStatus">重新检测</Button>
                 </div>
               </div>
               <div v-if="!arkStatus.ok && !arkStatus.checking" class="connector-note">
                 <p>
-                  Ark 用量需 Volc 签名（AK/SK 或 SSO），<b>不能</b>用 <code>ark-*</code> Bearer Key。
-                  请在终端登录后再同步：
+                  方舟用量通过本机 arkcli 的 SSO 登录查询。点击「登录方舟」并在浏览器授权，应用不保存账号密码。
                 </p>
-                <pre class="cmd">arkcli auth login volc-sso</pre>
+                <p>有效凭证由 CLI 自动续期；授权失效后需重新完成浏览器授权。</p>
                 <p v-if="arkStatus.message" class="conn-msg">{{ arkStatus.message }}</p>
+              </div>
+
+              <div class="connector-note">
+                <p>Token 统计范围：账号全量，包含当前账号下可见资源的调用用量，可能包含子用户调用。</p>
+              </div>
+
+              <!-- 禅道：登录态写入 ~/.zentao-token.json，待办同步只读（仅桌面端） -->
+              <div v-if="zentaoAvailable" class="connector-row">
+                <span class="conn-mark"><span class="conn-mark-icon">禅</span></span>
+                <div class="conn-info">
+                  <strong>禅道</strong>
+                  <small>指派给我的任务 / Bug / 需求 → 待办 · 需登录（凭证仅存本机）</small>
+                </div>
+                <div class="conn-side">
+                  <span class="conn-badge" :class="zentaoStatus.configured ? 'ok' : 'off'">
+                    {{ zentaoStatus.configured ? `已登录 · ${zentaoStatus.account}` : "未登录" }}
+                  </span>
+                  <Button v-if="zentaoStatus.configured" variant="ghost" size="sm" @click="zentaoLogout">退出</Button>
+                  <Button v-else variant="ghost" size="sm" @click="zentaoShowForm = !zentaoShowForm">
+                    {{ zentaoShowForm ? "收起" : "登录" }}
+                  </Button>
+                </div>
+              </div>
+              <div v-if="zentaoAvailable && zentaoShowForm && !zentaoStatus.configured" class="connector-note">
+                <p>登录后凭证（token）写入 <code>~/.zentao-token.json</code>，密码不保存；可在「待办」页手动同步，应用每 15 分钟自动同步一次。</p>
+                <div class="pref-grid" style="margin-top: 10px;">
+                  <label class="pref-field">
+                    <span>服务器地址</span>
+                    <Input v-model="zentaoForm.url" type="text" autocomplete="off" placeholder="https://zentao.example.com" />
+                  </label>
+                  <label class="pref-field">
+                    <span>账号</span>
+                    <Input v-model="zentaoForm.account" type="text" autocomplete="off" placeholder="禅道登录账号" />
+                  </label>
+                  <label class="pref-field">
+                    <span>密码</span>
+                    <Input v-model="zentaoForm.password" type="password" autocomplete="off" placeholder="仅用于本次登录" @keyup.enter="zentaoLogin" />
+                  </label>
+                </div>
+                <div class="clip-actions">
+                  <Button type="button" :disabled="zentaoLoggingIn || !zentaoForm.url || !zentaoForm.account || !zentaoForm.password" @click="zentaoLogin">
+                    {{ zentaoLoggingIn ? "登录中…" : "登录禅道" }}
+                  </Button>
+                </div>
               </div>
 
               <!-- 其他本机 CLI：自动采集，无需登录配置 -->
@@ -583,11 +859,26 @@ function updateStatsSince(value: string): void {
                   <small>{{ c.desc }}</small>
                 </div>
                 <div class="conn-side">
+                  <Button v-if="c.key === 'qoder' && isTauriDesktop()" size="sm" :disabled="loggingIn !== null" @click="loginConnector('qoder')">{{ loggingIn === 'qoder' ? '等待浏览器授权…' : '登录 Qoder' }}</Button>
                   <span class="conn-badge" :class="c.tone">{{ c.badge }}</span>
                 </div>
               </div>
+
+              <!-- DeepSeek 账户余额需 API Key，仅本机保存；不填则只采集 DSH 会话 Token -->
+              <div class="connector-note">
+                <p><b>DeepSeek 账户余额</b>（费用中心）经官方 <code>/user/balance</code> 查询，需 API Key，仅保存在本机。</p>
+                <label class="pref-field deepseek-key-field">
+                  <span>DeepSeek API KEY（可选）</span>
+                  <Input v-model="deepseekApiKey" type="password" autocomplete="off" placeholder="sk-… 仅本机保存" />
+                </label>
+              </div>
             </div>
           </section>
+        </template>
+
+        <!-- ===================== 翻译 ===================== -->
+        <template v-else-if="activeTab === 'translate'">
+          <TranslateSettings />
         </template>
 
         <!-- ===================== 剪贴板 ===================== -->
@@ -662,8 +953,8 @@ function updateStatsSince(value: string): void {
             <div class="sec-head solo">
               <span class="sec-icon tone-accent"><Sparkles :size="18" /></span>
               <span class="sec-copy">
-                <strong>AI 报告</strong>
-                <small>Git 日报 / 周报使用的 Provider、模型与 API Key（仅保存在本机）</small>
+                <strong>AI 配置</strong>
+                <small>Git 报告与文档拆解共用的 Provider、模型与 API Key（仅保存在本机）</small>
               </span>
             </div>
             <div class="sec-body">
@@ -677,18 +968,32 @@ function updateStatsSince(value: string): void {
                 />
               </div>
               <div class="pref-grid">
-                <label class="pref-field">
-                  <span>模型</span>
+                <div class="pref-field">
+                  <div class="flex items-center justify-between gap-2">
+                    <span>模型</span>
+                    <Button type="button" size="sm" variant="ghost" @click="addingReportModel = true">新增模型</Button>
+                  </div>
                   <Select v-model="reportModel" :options="reportModelOptions" placeholder="选择模型"
                     @update:model-value="persistReportAi" />
-                </label>
+                </div>
                 <label class="pref-field">
                   <span>API Key</span>
                   <Input v-model="reportApiKey" type="password" autocomplete="off" placeholder="本机保存"
                     @change="persistReportAi" />
                 </label>
               </div>
-              <p class="pref-note">修改后立即保存；Git 报告页按此处配置生成内容。</p>
+              <div v-if="addingReportModel" class="mt-3 space-y-2 rounded-lg border border-default p-3">
+                <label class="pref-field">
+                  <span>新增 {{ AI_PROVIDERS[reportProvider].label }} 模型</span>
+                  <Input v-model="customReportModel" aria-label="自定义模型名称" autocomplete="off" placeholder="输入服务商提供的完整 model name"
+                    @keydown.enter.prevent="addReportModel" @keydown.esc="cancelAddReportModel" />
+                </label>
+                <div class="flex justify-end gap-2">
+                  <Button type="button" size="sm" variant="ghost" @click="cancelAddReportModel">取消</Button>
+                  <Button type="button" size="sm" :disabled="!customReportModel.trim()" @click="addReportModel">添加并选用</Button>
+                </div>
+              </div>
+              <p class="pref-note">模型按服务商分别保存；新增后自动选用。修改后立即保存，Git 报告与文档拆解共用此配置。</p>
             </div>
           </section>
 
@@ -993,6 +1298,17 @@ function updateStatsSince(value: string): void {
 .conn-msg {
   color: var(--u-warn);
 }
+.conn-mark-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, #4f8cff 16%, transparent);
+  color: #4f8cff;
+  font-size: 12px;
+  font-weight: 700;
+}
 
 /* 分区内表单元素 */
 .pref-grid {
@@ -1010,6 +1326,7 @@ function updateStatsSince(value: string): void {
   min-width: 150px;
 }
 .oil-key-field { flex: 1 1 100%; min-width: min(240px, 100%); }
+.deepseek-key-field { flex: 1 1 100%; min-width: min(240px, 100%); margin-top: 10px; }
 .pref-field span {
   color: var(--text-subtle);
   font-family: var(--font-mono);

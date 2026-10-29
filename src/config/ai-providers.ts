@@ -16,6 +16,16 @@ export const AI_PROVIDER_OPTIONS = (
   Object.entries(AI_PROVIDERS) as [AiProvider, AiProviderDetail][]
 ).map(([value, detail]) => ({ value, label: detail.label }));
 
-export function aiModelOptions(provider: AiProvider): { value: string; label: string }[] {
-  return AI_PROVIDERS[provider].models.map((model) => ({ value: model, label: model }));
+export function aiModelOptions(
+  provider: AiProvider,
+  customModels: readonly string[] = [],
+  selectedModel?: string,
+): { value: string; label: string }[] {
+  const builtIn = AI_PROVIDERS[provider].models;
+  const models = [...builtIn, ...customModels];
+  if (selectedModel) models.push(selectedModel);
+  return [...new Set(models.map((model) => model.trim()).filter(Boolean))].map((model) => ({
+    value: model,
+    label: builtIn.includes(model) ? model : `${model}（自定义）`,
+  }));
 }

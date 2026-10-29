@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>tray seed</title>
+  </head>
+  <body>
+    <script>
+      // 临时预览页：注入模拟额度数据后跳转到托盘面板（仅用于设计走查，不入库产品流程）。
+      const now = new Date().toISOString();
+      const h = (n) => new Date(Date.now() + n * 3600e3).toISOString();
+      const quotas = [
+        { platform: "codex", accountName: "Free", metric: "five_hour", used: 7, limit: 100, unit: "percent", collectedAt: now, resetsAt: h(120) },
+        { platform: "codex", accountName: "Free", metric: "weekly", used: 11, limit: 100, unit: "percent", collectedAt: now, resetsAt: h(96) },
+        { platform: "ark", accountName: "Agent Plan", metric: "session", used: 39, limit: 100, unit: "percent", collectedAt: now },
+        { platform: "ark", accountName: "Agent Plan", metric: "weekly", used: 30, limit: 100, unit: "percent", collectedAt: now, resetsAt: h(168) },
+        { platform: "kiro", accountName: "KIRO PRO+", metric: "credits", used: 1939.12, limit: 2000, unit: "credits", collectedAt: now, resetsAt: h(12) },
+        { platform: "qoder", accountName: "Pro", metric: "credits", used: 2000, limit: 2000, unit: "credits", collectedAt: now, resetsAt: h(144) },
+        { platform: "kimi", accountName: "Plus", metric: "five_hour", used: 53, limit: 100, unit: "percent", collectedAt: now, resetsAt: h(3) },
+        { platform: "kimi", accountName: "Plus", metric: "monthly", used: 40, limit: 100, unit: "percent", collectedAt: now },
+        { platform: "deepseek", accountName: "main", metric: "balance", used: 0, limit: 0, unit: "currency", collectedAt: now, balance: { total: 0, currency: "CNY", granted: 0, toppedUp: 0, available: false } },
+      ];
+      localStorage.setItem("xlt.quotas", JSON.stringify(quotas));
+      localStorage.setItem("xlt.sync", JSON.stringify({ lastSyncAt: new Date().toISOString(), syncing: false, outcome: "partial" }));
+      localStorage.setItem("xlt.v", "v2-no-seed");
+      localStorage.setItem("xlt.tray-preview-theme", new URLSearchParams(location.search).get("theme") ?? "");
+      location.replace("/tray-panel.html");
+    </script>
+  </body>
+</html>

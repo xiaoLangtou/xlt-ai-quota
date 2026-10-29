@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>翻译 · xlt-workbench 原型 v2</title>
+<style>
+:root{--bg:#f4f5f9;--card:#fff;--line:#e3e6ee;--ink:#1c2030;--mute:#5b6275;--acc:#4f5bd5;--acc-d:#3a44b0;--acc-bg:#eceefc;--hl:#fff3c4}
+@media (prefers-color-scheme:dark){:root{--bg:#14161f;--card:#1d2030;--line:#2e3348;--ink:#e8eaf3;--mute:#9aa1b8;--acc:#8590ff;--acc-d:#a9b1ff;--acc-bg:#262b4d;--hl:#4a4217}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+[hidden]{display:none!important}
+kbd{font:12px ui-monospace,Menlo,monospace;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+.muted{color:var(--mute);font-size:12px}
+.sp{flex:1}
+.bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:0 12px;min-height:36px}
+.btn:hover{border-color:var(--acc)}
+.btn[aria-pressed=true]{background:var(--acc-bg);border-color:var(--acc);color:var(--acc-d)}
+.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+.pri:hover{background:var(--acc-d);color:#fff}
+.src{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mute)}
+.src i{width:8px;height:8px;border-radius:50%;display:inline-block}
+
+.app{display:flex;height:100vh}
+aside{width:200px;flex:none;background:var(--card);border-right:1px solid var(--line);padding:20px 12px;display:flex;flex-direction:column;gap:16px}
+aside b{padding:0 8px;font-size:16px}
+.grp small{display:block;color:var(--mute);font-size:12px;padding:0 8px 4px}
+.grp div{padding:8px;border-radius:8px}
+.grp .on{background:var(--acc-bg);color:var(--acc-d);font-weight:600}
+
+/* 翻译流 */
+.feed{width:340px;flex:none;background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.comp{padding:14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.comp textarea{border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:10px 12px;resize:none;min-height:64px;line-height:1.6}
+.comp textarea:focus{outline:none;border-color:var(--acc)}
+.srch{margin:10px 14px 0;border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:0 12px;min-height:36px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding:10px 14px}
+.chips button{border:1px solid var(--line);background:transparent;border-radius:99px;padding:0 10px;min-height:28px;font-size:12px;color:var(--mute)}
+.chips button[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.list{flex:1;overflow:auto;padding:0 8px 12px}
+.it{display:block;width:100%;text-align:left;border:0;background:transparent;border-radius:10px;padding:10px 10px;margin-bottom:2px}
+.it:hover{background:var(--bg)}
+.it[aria-current=true]{background:var(--acc-bg)}
+.it .m{display:flex;gap:8px;align-items:center;margin-bottom:2px}
+.it .o{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.it .t{color:var(--mute);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.hint{color:var(--mute);padding:16px 10px;font-size:13px}
+
+/* 工作区 */
+.work{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+.wh{padding:16px 24px 8px;display:flex;justify-content:space-between;gap:16px;align-items:flex-start}
+.wh h2{margin:4px 0 0;font-size:18px;font-weight:600;line-height:1.4}
+.meta{display:flex;gap:10px;align-items:center;color:var(--mute);font-size:12px}
+.tb{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:6px 24px 12px;border-bottom:1px solid var(--line)}
+.pill{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:0 14px;min-height:36px}
+.pill:hover{border-color:var(--acc)}
+.seg{display:flex;background:var(--line);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:transparent;color:var(--mute);border-radius:8px;padding:0 12px;min-height:30px}
+.seg button[aria-pressed=true]{background:var(--card);color:var(--ink);font-weight:600}
+.wbody{flex:1;display:flex;min-height:0}
+.wmain{flex:1;min-width:0;overflow:auto;padding:8px 24px 16px}
+.shotbar{display:flex;gap:14px;align-items:center;margin:12px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.thumb{width:84px;height:48px;border:2px dashed var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:11px;flex:none}
+.row{display:grid;grid-template-columns:1fr 1fr 56px;gap:0 24px;padding:14px 0;border-bottom:1px solid var(--line)}
+.row .o{font-size:14.5px;line-height:1.75;color:var(--mute)}
+.row .t{font:17px/1.8 "Noto Serif SC","Source Han Serif SC","Songti SC","STSong",serif}
+.row .ra{display:flex;gap:2px;opacity:0;align-self:start}
+.row:hover .ra,.row:focus-within .ra{opacity:1}
+.row .ra button{border:0;background:transparent;color:var(--mute);width:28px;height:28px;border-radius:6px}
+.row .ra button:hover{background:var(--acc-bg);color:var(--acc-d)}
+.row:hover{background:linear-gradient(90deg,transparent,transparent)}
+.ovr{margin-left:8px;font:11px -apple-system,"PingFang SC",sans-serif;color:var(--acc-d);background:var(--acc-bg);border-radius:99px;padding:0 8px}
+.alt{grid-column:2;margin-top:6px;font-size:14px;line-height:1.7;color:var(--mute);border-left:2px solid var(--line);padding-left:10px}
+.alt span{display:block;font-size:11px}
+mark.gl{background:var(--hl);color:inherit;border-radius:3px;padding:0 2px}
+.gloss{width:270px;flex:none;border-left:1px solid var(--line);background:var(--card);overflow:auto;padding:14px}
+.gloss h3{margin:0 0 4px;font-size:14px}
+.gloss .tr{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.gloss .tr span{flex:1}
+.gloss .tr button{border:0;background:transparent;color:var(--mute);width:28px;height:28px;border-radius:6px}
+.gloss .add{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.gloss input{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:0 10px;min-height:34px}
+.wf{display:flex;gap:8px;flex-wrap:wrap;padding:10px 24px;border-top:1px solid var(--line);background:var(--card)}
+.empty{margin:auto;color:var(--mute)}
+
+/* 快捷面板 */
+.mask{position:fixed;inset:0;background:rgba(10,12,24,.35);display:none;align-items:flex-start;justify-content:center;padding-top:9vh;z-index:10}
+.mask.on{display:flex}
+.qp{--qb:#14172a;--qb2:#1c2036;--ql:#2b3050;--qi:#e9ecf8;--qm:#8e95b5;--qa:#8590ff;--qpaper:#f4f6fc;--qink:#1c2030;--qpm:#55607a;width:min(450px,94vw);background:var(--qb);color:var(--qi);border:1px solid var(--ql);border-radius:20px;padding:8px 10px 10px;box-shadow:0 20px 60px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:8px}
+.qp svg{display:block}
+.qp kbd{background:#262b4a;border-color:#363c63;color:var(--qm)}
+.qp .tp{display:flex;align-items:center;gap:4px;padding-left:6px}
+.qp .chip{font-size:12px;color:var(--qm);background:var(--qb2);border-radius:99px;padding:2px 10px}
+.qp .ib{border:0;background:transparent;color:var(--qm);width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center}
+.qp .ib:hover{background:var(--qb2);color:var(--qi)}
+.qp .ib[aria-pressed=true]{color:var(--qa)}
+.qp .in{background:var(--qb2);border:1px solid var(--ql);border-radius:14px;padding:10px 12px 8px}
+.qp .in:focus-within{border-color:var(--qa)}
+.qp textarea{background:transparent;border:0;color:var(--qi);font-size:15px;line-height:1.6;min-height:58px;resize:none;width:100%}
+.qp textarea:focus{outline:none}
+.qp textarea::placeholder{color:var(--qm)}
+.qp .ir{display:flex;align-items:center;gap:6px}
+.qp .pill{border:1px solid var(--ql);background:transparent;color:var(--qi);min-height:32px;font-size:13px}
+.qp .go{margin-left:auto;border:0;background:var(--qa);color:#101328;font-weight:700;border-radius:10px;padding:0 16px;min-height:36px}
+.qp .hint{color:var(--qm);padding:14px 8px;font-size:13px}
+.qp .paper{background:var(--qpaper);color:var(--qink);border-radius:14px;padding:12px 16px 10px}
+.qp .pm{display:flex;justify-content:space-between;color:var(--qpm);font-size:12px}
+.qp .pt{font:18px/1.75 "Noto Serif SC","Source Han Serif SC","Songti SC","STSong",serif;margin:6px 0 8px}
+.qp .terms{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.qp .term{font-size:12px;color:var(--qpm);border:1px solid #d3d9ea;border-radius:99px;padding:0 9px}
+.qp .strip{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid #dde2f0;padding-top:8px}
+.qp .strip button{border:1px solid #d3d9ea;background:transparent;color:var(--qpm);border-radius:8px;padding:0 10px;min-height:32px;font-size:13px}
+.qp .strip button[aria-pressed=true]{background:var(--qink);border-color:var(--qink);color:#fff}
+.qp .ft{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.qp .ft button{border:0;background:transparent;color:var(--qi);border-radius:8px;padding:0 10px;min-height:36px}
+.qp .ft button:hover{background:var(--qb2)}
+.qp .ft .rep,.qp .ft .ex{color:var(--qa);font-weight:600}
+.qp .ft .k{color:var(--qm);font-size:12px}
+
+.ff{padding:10px 14px;border-top:1px solid var(--line)}
+.set{flex:1;display:flex;min-height:0}
+.snav{width:170px;flex:none;border-right:1px solid var(--line);padding:12px 8px;display:flex;flex-direction:column;gap:2px}
+.snav button{border:0;background:transparent;text-align:left;border-radius:8px;padding:0 12px;min-height:38px;color:var(--mute)}
+.snav button[aria-current=true]{background:var(--acc-bg);color:var(--acc-d);font-weight:600}
+.sbody{flex:1;overflow:auto;padding:20px 28px 32px}
+.sbody section{max-width:760px}
+.sbody h3{margin:0 0 4px;font-size:15px}
+.lead{color:var(--mute);margin-bottom:14px;font-size:13px}
+.svc{border:1px solid var(--line);border-radius:12px;background:var(--card);margin-bottom:10px}
+.sh{display:flex;align-items:center;gap:8px;padding:10px 12px;flex-wrap:wrap}
+.sn{flex:1;min-width:160px;display:flex;flex-direction:column}
+.ib2{border:1px solid var(--line);background:transparent;border-radius:8px;width:32px;height:32px;color:var(--mute)}
+.ib2:hover{border-color:var(--acc)}
+.sf{border-top:1px solid var(--line);padding:12px;display:flex;flex-direction:column;gap:10px}
+.fr{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center}
+.fr input,.fr select,.fr textarea,.sbody select{border:1px solid var(--line);border-radius:8px;background:var(--bg);padding:0 10px;min-height:34px}
+.fr textarea{padding:8px 10px;min-height:64px;line-height:1.6}
+.sg{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:0 16px;margin-bottom:16px}
+.sg h4{margin:14px 0 0;font-size:13px;color:var(--mute);font-weight:600}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--line)}
+.sg .srow:last-child{border-bottom:0}
+.srow b{font-weight:500}
+.srow small{display:block;color:var(--mute);font-size:12px;font-weight:400}
+.srow input[type=checkbox],.sh input[type=checkbox]{width:20px;height:20px;accent-color:var(--acc)}
+.kb{min-width:170px;font:13px ui-monospace,Menlo,monospace}
+.warn{color:#b3261e;font-size:13px;margin:0 0 12px}
+@media (prefers-color-scheme:dark){.warn{color:#ff9a90}}
+@media (max-width:1100px){aside{display:none}}
+@media (max-width:860px){.set{flex-direction:column}.snav{width:100%;flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--line)}.app{flex-direction:column;height:auto}.feed{width:100%;max-height:60vh}.row{grid-template-columns:1fr}.alt{grid-column:1}.row .ra{opacity:1}.gloss{width:100%;border-left:0;border-top:1px solid var(--line)}.wbody{flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside>
+<b>xlt-workbench</b>
+<div class="grp"><small>用量</small><div>概览</div><div>分析</div></div>
+<div class="grp"><small>Skills</small><div>安装面板</div></div>
+<div class="grp"><small>工具</small><div class="on">翻译</div><div>剪贴板历史</div><div>密钥库</div></div>
+<div class="grp"><small>系统</small><div>设置</div></div>
+</aside>
+
+<section class="feed" aria-label="翻译流">
+<div class="comp">
+<textarea id="cIn" placeholder="输入或粘贴要翻译的文本，Enter 翻译" aria-label="新翻译"></textarea>
+<div class="bar">
+<button class="btn" id="cShot" title="截图识别 Alt+S">截图</button>
+<button class="btn" id="openSel" title="模拟划词 Alt+D">划词</button>
+<button class="btn" id="openQp" title="快捷面板 Alt+Space">面板</button>
+<span class="sp"></span>
+<button class="btn pri" id="cGo">翻译</button>
+</div>
+</div>
+<input class="srch" id="q" placeholder="搜索原文或译文" aria-label="搜索">
+<div class="chips" id="fchips"></div>
+<div class="list" id="list"></div>
+<div class="ff"><button class="btn" id="openSet" style="width:100%">设置：服务 / 识别 / 快捷键 / 常规</button></div>
+</section>
+
+<main class="work" id="work"></main>
+</div>
+
+<!-- 快捷面板 -->
+<div class="mask" id="mask" aria-hidden="true">
+<div class="qp" role="dialog" aria-label="快捷面板">
+<div class="tp">
+<span class="chip" id="qMode">输入翻译</span><span class="sp"></span>
+<button class="ib" id="qPin" aria-label="固定面板" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 3H8v2l1 1v5l-3 3v2h5v5h2v-5h5v-2l-3-3V6l1-1z"/></svg></button>
+<button class="ib" id="qClose" aria-label="关闭"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+</div>
+<div class="in">
+<textarea id="qIn" placeholder="输入或粘贴文本，停顿后自动翻译" aria-label="要翻译的文本"></textarea>
+<div class="ir"><button class="pill" id="qLang" aria-label="切换语言方向"></button><button class="go" id="qGo">翻译 <kbd>Enter</kbd></button></div>
+</div>
+<div id="qRes"></div>
+<div class="ft" id="qAct" hidden>
+<button id="qCopy">复制译文</button><button id="qFav">收藏</button>
+<button class="rep" id="qRep" hidden>替换选区</button>
+<button class="ex" id="qEx">展开到工作区</button>
+<span class="sp"></span><span class="k"><kbd>Esc</kbd> 关闭</span>
+</div>
+</div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const flash=(el,t)=>{const o=el.textContent;el.textContent=t;setTimeout(()=>el.textContent=o,1200);};
+const copy=t=>navigator.clipboard&&navigator.clipboard.writeText(t);
+
+const ENG=["有道翻译","DeepL","LLM（OpenAI 兼容）"];
+const short=i=>ENG[i].split("（")[0];
+const PAIRS=["自动 → 简体中文","简体中文 → English","自动 → English"];
+const A1="Attention mechanisms allow a model to focus on relevant parts of the input sequence when producing each element of the output.";
+const A2="Self-attention relates different positions of a single sequence in order to compute a representation of the sequence.";
+const A3="The Transformer relies entirely on self-attention to compute representations of its input and output without using sequence-aligned RNNs.";
+const D={};
+D[A1]=["注意力机制使模型能够在生成输出的每个元素时，聚焦于输入序列中的相关部分。","注意力机制允许模型在生成输出的每个元素时，关注输入序列的相关部分。","注意力机制让模型在产出每个输出元素时，聚焦于输入序列里相关的部分。"];
+D[A2]=["自注意力将单个序列的不同位置关联起来，以计算该序列的表示。","自注意力把同一序列中不同位置联系起来，从而得到该序列的表示。","自注意力关联单个序列的各个位置，用来计算这个序列的表示。"];
+D[A3]=["Transformer 完全依赖自注意力来计算输入和输出的表示，而不使用序列对齐的循环神经网络。","Transformer 完全依靠自注意力计算其输入和输出的表示，不使用序列对齐的 RNN。","Transformer 只依赖自注意力来计算输入与输出的表示，不用序列对齐的 RNN。"];
+D["representation"]=["表示；表征","表示","表征"];
+const mk=text=>text.trim().split(/(?<=[.!?。！？])\s+/).filter(Boolean).map(o=>({o:o,t:D[o]||["〔示例译文〕"+o,"〔示例译文〕"+o,"〔示例译文〕"+o]}));
+
+const SRC={input:["输入","#8e95b5"],select:["划词","#6f7bff"],shot:["截图","#1fa58a"],clip:["剪贴板","#d58a1f"]};
+const FIL=[["all","全部"],["input","输入"],["select","划词"],["shot","截图"],["clip","剪贴板"],["star","收藏"]];
+const S={sel:1,filter:"all",eng:0,cmp:false,acad:true,gloss:false,pair:0,nid:5,
+  terms:[["attention mechanism","注意力机制"],["self-attention","自注意力"],["representation","表示"],["sequence","序列"],["RNN","循环神经网络"]]};
+const items=[
+ {id:1,src:"select",app:"Safari",time:"10:21",star:true,sents:mk(A1+" "+A2+" "+A3),ov:{}},
+ {id:2,src:"shot",app:"屏幕",time:"10:24",star:false,sents:mk(A2),ov:{},ocr:{size:"412 × 96",eng:"系统 OCR（离线）",conf:"98%"}},
+ {id:3,src:"input",app:"手动输入",time:"昨天",star:true,sents:mk("representation"),ov:{}},
+ {id:4,src:"clip",app:"剪贴板",time:"昨天",star:false,sents:mk(A3),ov:{}}
+];
+const cur=()=>items.find(i=>i.id===S.sel);
+
+function visible(){
+  const k=$("#q").value.trim().toLowerCase();
+  return items.filter(it=>(S.filter==="all"||(S.filter==="star"?it.star:it.src===S.filter))&&(!k||it.sents.some(x=>(x.o+x.t[0]).toLowerCase().includes(k))));
+}
+function srcTag(s){return '<span class="src"><i style="background:'+SRC[s][1]+'"></i>'+SRC[s][0]+'</span>';}
+function renderFeed(){
+  $("#fchips").innerHTML=FIL.map(f=>{
+    const n=items.filter(it=>f[0]==="all"||(f[0]==="star"?it.star:it.src===f[0])).length;
+    return '<button data-f="'+f[0]+'" aria-pressed="'+(S.filter===f[0])+'">'+f[1]+' '+n+'</button>';
+  }).join("");
+  const v=visible();
+  $("#list").innerHTML=v.length?v.map(it=>'<button class="it" data-id="'+it.id+'" aria-current="'+(S.view==="main"&&it.id===S.sel)+'"><div class="m">'+srcTag(it.src)+'<span class="muted">'+it.time+'</span>'+(it.star?'<span class="muted" aria-label="已收藏">★</span>':'')+'</div><div class="o">'+esc(it.sents[0].o)+'</div><div class="t">'+esc(it.sents[0].t[0])+'</div></button>').join(""):'<div class="hint">没有匹配的记录</div>';
+}
+function hl(zh){
+  const safe=esc(zh);
+  if(!S.acad)return safe;
+  const zs=S.terms.map(t=>t[1]).filter(z=>z&&/[\u4e00-\u9fa5]/.test(z)).sort((a,b)=>b.length-a.length);
+  if(!zs.length)return safe;
+  const re=new RegExp(zs.map(z=>z.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join("|"),"g");
+  return safe.replace(re,m=>'<mark class="gl" title="术语表">'+m+'</mark>');
+}
+function renderWork(){
+  if(S.view==="settings"){renderSettings();return;}
+  const it=cur();
+  if(!it){$("#work").innerHTML='<div class="empty">在左侧选择一条记录，或输入新的翻译</div>';return;}
+  const e0=S.eng;
+  let h='<div class="wh"><div style="min-width:0"><div class="meta">'+srcTag(it.src)+'<span>'+it.app+' · '+it.time+'</span></div><h2>'+esc(it.sents[0].o.length>70?it.sents[0].o.slice(0,70)+"…":it.sents[0].o)+'</h2></div><button class="btn" id="wStar" aria-pressed="'+it.star+'">'+(it.star?"★ 已收藏":"☆ 收藏")+'</button></div>';
+  h+='<div class="tb"><button class="pill" id="wPair" aria-label="切换语言方向">'+PAIRS[S.pair]+'</button><div class="seg" role="group" aria-label="翻译引擎">'+ENG.map((n,i)=>'<button data-e="'+i+'" aria-pressed="'+(e0===i)+'">'+short(i)+'</button>').join("")+'</div><span class="sp"></span><button class="btn" data-tg="cmp" aria-pressed="'+S.cmp+'">对比引擎</button><button class="btn" data-tg="acad" aria-pressed="'+S.acad+'">术语高亮</button><button class="btn" data-tg="gloss" aria-pressed="'+S.gloss+'">术语表 '+S.terms.length+'</button></div>';
+  h+='<div class="wbody"><div class="wmain">';
+  if(it.ocr)h+='<div class="shotbar"><div class="thumb">截图</div><div style="flex:1" class="muted">识别区域 '+it.ocr.size+' · '+it.ocr.eng+' · 置信度 '+it.ocr.conf+'<br>原文可直接修改后重新翻译</div><button class="btn" id="wRe">重新识别</button></div>';
+  h+=it.sents.map((x,i)=>{
+    const e=it.ov[i]!==undefined?it.ov[i]:e0;
+    let r='<div class="row"><div class="o">'+esc(x.o)+'</div><div class="t">'+hl(x.t[e])+(it.ov[i]!==undefined?'<span class="ovr">'+short(e)+'</span>':'')+'</div><div class="ra"><button data-rt="'+i+'" aria-label="换引擎重译">↻</button><button data-cp="'+i+'" aria-label="复制译文">⧉</button></div>';
+    if(S.cmp)r+=ENG.map((n,k)=>k===e?"":'<div class="alt"><span>'+n+'</span>'+esc(x.t[k])+'</div>').join("");
+    return r+'</div>';
+  }).join("");
+  h+='</div>';
+  if(S.gloss)h+='<aside class="gloss"><h3>术语表</h3><div class="muted">命中的术语在译文中高亮，保证全文一致</div><div style="margin-top:8px">'+S.terms.map((t,i)=>'<div class="tr"><span>'+esc(t[0])+' → '+esc(t[1])+'</span><button data-del="'+i+'" aria-label="删除术语">×</button></div>').join("")+'</div><div class="add"><input id="gEn" placeholder="原文" aria-label="术语原文"><input id="gZh" placeholder="译文" aria-label="术语译文"><button class="btn" id="gAdd">添加术语</button></div></aside>';
+  h+='</div><div class="wf"><button class="btn" id="fCp">复制译文</button><button class="btn" id="fBi">复制双语</button><button class="btn" id="fSp">朗读</button><span class="sp"></span><button class="btn" id="fSn">存为片段</button></div>';
+  $("#work").innerHTML=h;
+}
+const full=(it,bi)=>it.sents.map((x,i)=>{const e=it.ov[i]!==undefined?it.ov[i]:S.eng;return bi?x.o+"\n"+x.t[e]:x.t[e];}).join(bi?"\n\n":"");
+
+$("#work").addEventListener("click",ev=>{
+  if(S.view==="settings"){onSettingsClick(ev);return;}
+  const t=ev.target,it=cur();
+  const b=t.closest("button");if(!b)return;
+  if(b.dataset.e!==undefined){S.eng=+b.dataset.e;it.ov={};renderWork();renderFeed();return;}
+  if(b.dataset.tg){S[b.dataset.tg]=!S[b.dataset.tg];renderWork();return;}
+  if(b.id==="wPair"){S.pair=(S.pair+1)%PAIRS.length;renderWork();return;}
+  if(b.id==="wStar"){it.star=!it.star;renderWork();renderFeed();return;}
+  if(b.dataset.rt!==undefined){const i=+b.dataset.rt;const c=it.ov[i]!==undefined?it.ov[i]:S.eng;it.ov[i]=(c+1)%3;renderWork();return;}
+  if(b.dataset.cp!==undefined){const i=+b.dataset.cp;copy(it.sents[i].t[it.ov[i]!==undefined?it.ov[i]:S.eng]);return;}
+  if(b.dataset.del!==undefined){S.terms.splice(+b.dataset.del,1);renderWork();return;}
+  if(b.id==="gAdd"){const en=$("#gEn").value.trim(),zh=$("#gZh").value.trim();if(en&&zh){S.terms.push([en,zh]);renderWork();}return;}
+  if(b.id==="fCp"){copy(full(it,false));flash(b,"已复制");return;}
+  if(b.id==="fBi"){copy(full(it,true));flash(b,"已复制");return;}
+  if(b.id==="fSp"){flash(b,"朗读中…");return;}
+  if(b.id==="fSn"){flash(b,"已存入片段库");return;}
+  if(b.id==="wRe"){flash(b,"识别完成");return;}
+});
+$("#list").addEventListener("click",ev=>{const b=ev.target.closest(".it");if(b){S.view="main";S.sel=+b.dataset.id;renderFeed();renderWork();}});
+$("#fchips").addEventListener("click",ev=>{const b=ev.target.closest("button");if(b){S.filter=b.dataset.f;renderFeed();}});
+$("#q").addEventListener("input",renderFeed);
+
+function addItem(src,text,o){
+  o=o||{};
+  const it={id:S.nid++,src:src,app:o.app||SRC[src][0],time:"刚刚",star:!!o.star,sents:mk(text),ov:{}};
+  if(src==="shot")it.ocr={size:"412 × 96",eng:"系统 OCR（离线）",conf:"98%"};
+  items.unshift(it);
+  if(!o.keep){S.view="main";S.sel=it.id;S.filter="all";}
+  renderFeed();renderWork();
+  return it;
+}
+function submit(){const v=$("#cIn").value.trim();if(!v)return;addItem("input",v,{app:"手动输入"});$("#cIn").value="";}
+$("#cGo").onclick=submit;
+$("#cIn").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});
+$("#cShot").onclick=()=>addItem("shot",A2,{app:"屏幕"});
+
+/* 快捷面板 */
+const Q={mode:"input",pri:0,cmp:false,st:"idle",pair:0,timer:null};
+const MODE={input:"输入翻译",select:"划词 · 来自 Safari",shot:"截图 · 412 × 96"};
+function qTerms(text){return S.terms.filter(t=>text.toLowerCase().includes(t[0].toLowerCase()));}
+function qRender(){
+  $("#qMode").textContent=MODE[Q.mode];
+  $("#qLang").textContent=PAIRS[Q.pair];
+  $("#qRep").hidden=Q.mode!=="select";
+  const r=$("#qRes"),text=$("#qIn").value;
+  if(Q.st!=="done"){r.innerHTML='<div class="hint">'+(Q.st==="loading"?"翻译中…":"停顿后自动翻译，<kbd>Enter</kbd> 立即翻译")+'</div>';$("#qAct").hidden=true;return;}
+  $("#qAct").hidden=false;
+  const ss=mk(text);
+  const out=e=>ss.map(x=>x.t[e]).join("");
+  let h='<div class="paper"><div class="pm"><span>'+ENG[Q.pri]+'</span><span>'+["0.4s","0.5s","1.2s"][Q.pri]+'</span></div><div class="pt">'+esc(out(Q.pri))+'</div>';
+  const tm=qTerms(text);
+  if(tm.length)h+='<div class="terms">'+tm.map(t=>'<span class="term">'+esc(t[0])+' → '+esc(t[1])+'</span>').join("")+'</div>';
+  h+='<div class="strip">'+ENG.map((n,i)=>'<button data-p="'+i+'" aria-pressed="'+(i===Q.pri)+'">'+short(i)+'</button>').join("")+'</div></div>';
+  r.innerHTML=h;
+}
+function qRun(d){
+  clearTimeout(Q.timer);
+  if(!$("#qIn").value.trim()){Q.st="idle";qRender();return;}
+  Q.st="loading";qRender();
+  Q.timer=setTimeout(()=>{Q.st="done";qRender();},d);
+}
+$("#qRes").addEventListener("click",e=>{const p=e.target.closest("[data-p]");if(p){Q.pri=+p.dataset.p;qRender();}});
+$("#qIn").addEventListener("input",()=>qRun(700));
+$("#qIn").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();qRun(250);}});
+$("#qGo").onclick=()=>qRun(250);
+$("#qLang").onclick=()=>{Q.pair=(Q.pair+1)%PAIRS.length;qRun(250);};
+$("#qCopy").onclick=e=>{copy(mk($("#qIn").value).map(x=>x.t[Q.pri]).join(""));flash(e.currentTarget,"已复制");};
+$("#qFav").onclick=e=>{addItem(Q.mode,$("#qIn").value,{star:true,keep:true,app:Q.mode==="select"?"Safari":undefined});flash(e.currentTarget,"已收藏");};
+$("#qRep").onclick=e=>{flash(e.currentTarget,"已替换选区");setTimeout(()=>closeQp(true),700);};
+$("#qEx").onclick=()=>{addItem(Q.mode,$("#qIn").value,{app:Q.mode==="select"?"Safari":undefined});closeQp(true);};
+const SEL="Attention mechanisms allow a model to focus on relevant parts of the input sequence when producing each element of the output.";
+function openQp(mode,text){
+  Q.mode=mode||"input";Q.pri=0;
+  $("#mask").classList.add("on");$("#mask").setAttribute("aria-hidden","false");
+  $("#qIn").value=text||"";
+  if(text)qRun(250);else{Q.st="idle";qRender();}
+  $("#qIn").focus();
+}
+function closeQp(force){
+  if(!force&&$("#qPin").getAttribute("aria-pressed")==="true")return;
+  clearTimeout(Q.timer);
+  $("#mask").classList.remove("on");$("#mask").setAttribute("aria-hidden","true");
+}
+$("#openQp").onclick=()=>openQp();
+$("#openSel").onclick=()=>openQp("select",SEL);
+$("#qClose").onclick=()=>{$("#qPin").setAttribute("aria-pressed","false");closeQp(true);};
+$("#qPin").onclick=e=>{const b=e.currentTarget;b.setAttribute("aria-pressed",b.getAttribute("aria-pressed")!=="true");};
+$("#mask").addEventListener("mousedown",e=>{if(e.target.id==="mask")closeQp();});
+document.addEventListener("keydown",e=>{
+  if(e.altKey&&e.code==="Space"){e.preventDefault();$("#mask").classList.contains("on")?closeQp():openQp();}
+  if(e.altKey&&e.code==="KeyD"){e.preventDefault();openQp("select",SEL);}
+  if(e.altKey&&e.code==="KeyS"){e.preventDefault();openQp("shot",A2);}
+  if(e.key==="Escape")closeQp();
+});
+
+
+/* 设置页 */
+S.view="main";S.sec="trans";S.cap=null;S.keyMsg="";
+const TSVC=[
+ {n:"有道翻译",tag:"云端",on:true,fields:[["应用 ID",""],["应用密钥","@vault"]]},
+ {n:"DeepL",tag:"云端",on:true,fields:[["接口类型","@sel:免费版 api-free.deepl.com|Pro 版 api.deepl.com"],["API Key","@vault"]]},
+ {n:"LLM 翻译（OpenAI 兼容）",tag:"云端 / 自建",on:true,fields:[["Base URL","https://api.openai.com/v1"],["模型","gpt-4o-mini"],["API Key","@vault"],["提示词","@area:将下列文本翻译为目标语言，遵循术语表中的译法，只输出译文。"]]},
+ {n:"Ollama",tag:"本地离线",on:false,fields:[["服务地址","http://127.0.0.1:11434"],["模型","qwen2.5:7b"]]},
+ {n:"百度翻译",tag:"云端",on:false,fields:[["APP ID",""],["密钥","@vault"]]}
+];
+const OSVC=[
+ {n:"系统 OCR",tag:"离线 · macOS Vision / Windows OCR",on:true,fields:[["识别语言","@sel:自动|中文 + 英文|日文 + 英文"]]},
+ {n:"Tesseract.js",tag:"离线",on:false,fields:[["语言包","@sel:eng + chi_sim|eng|jpn"]]},
+ {n:"PaddleOCR（本地）",tag:"离线 · 需下载模型",on:false,fields:[["模型目录","~/.xlt/ocr/paddle"]]},
+ {n:"百度 OCR",tag:"云端",on:false,fields:[["API Key",""],["Secret Key","@vault"]]}
+];
+const KEYS=[["panel","唤起快捷面板","Alt+Space"],["select","划词翻译","Alt+D"],["input","输入翻译","Alt+A"],["shot","截图识别","Alt+S"],["shottr","截图翻译","Alt+Shift+S"],["main","显示主窗口","Alt+W"],["clip","开关剪贴板监听","Alt+C"]];
+S.set={open:null,tdef:"有道翻译",odef:"系统 OCR",keys:{}};
+KEYS.forEach(k=>S.set.keys[k[0]]=k[2]);
+const GEN={theme:"跟随系统",src:"自动检测",dst:"简体中文",acad:true,hl:true,blur:true,near:true,remember:false,clipRead:false,auto:true,delay:"0.7 秒",boot:false,tray:true,proxy:"跟随系统",keep:"90 天",offline:false,ocrTr:false,keepNl:true,ocrCopy:false,retr:"轮换下一个引擎"};
+const SECS=[["trans","翻译服务"],["ocr","识别服务"],["keys","快捷键"],["gen","常规"]];
+
+function ctl(f){
+  const l=f[0],v=f[1];
+  if(v==="@vault")return '<select aria-label="'+l+'"><option>从密钥库选择…</option><option>密钥库 · OpenAI</option><option>密钥库 · DeepL</option><option>手动输入</option></select>';
+  if(v.indexOf("@sel:")===0)return '<select aria-label="'+l+'">'+v.slice(5).split("|").map(o=>'<option>'+o+'</option>').join("")+'</select>';
+  if(v.indexOf("@area:")===0)return '<textarea aria-label="'+l+'">'+esc(v.slice(6))+'</textarea>';
+  return '<input aria-label="'+l+'" value="'+esc(v)+'" placeholder="未填写">';
+}
+function svcHtml(kind){
+  const arr=kind==="t"?TSVC:OSVC,def=kind==="t"?S.set.tdef:S.set.odef;
+  return arr.map((s,i)=>{
+    const id=kind+":"+i,open=S.set.open===id;
+    return '<div class="svc"><div class="sh"><div class="sn"><b>'+esc(s.n)+'</b><span class="muted">'+s.tag+'</span></div>'
+      +'<button class="btn" data-def="'+id+'" aria-pressed="'+(def===s.n)+'">'+(def===s.n?"默认":"设为默认")+'</button>'
+      +'<button class="ib2" data-mv="'+id+':-1" aria-label="上移">↑</button><button class="ib2" data-mv="'+id+':1" aria-label="下移">↓</button>'
+      +'<input type="checkbox" data-on="'+id+'" aria-label="启用 '+esc(s.n)+'"'+(s.on?" checked":"")+'>'
+      +'<button class="btn" data-open="'+id+'" aria-expanded="'+open+'">配置</button></div>'
+      +(open?'<div class="sf">'+s.fields.map(f=>'<div class="fr"><span>'+f[0]+'</span>'+ctl(f)+'</div>').join("")+'<div class="bar"><button class="btn" data-test="1">测试连接</button><button class="btn pri" data-save="1">保存</button></div></div>':"")
+      +'</div>';
+  }).join("");
+}
+const swRow=(l,d,k)=>'<label class="srow"><span><b>'+l+'</b>'+(d?'<small>'+d+'</small>':'')+'</span><input type="checkbox" data-g="'+k+'"'+(GEN[k]?" checked":"")+'></label>';
+const selRow=(l,d,k,opts)=>'<label class="srow"><span><b>'+l+'</b>'+(d?'<small>'+d+'</small>':'')+'</span><select data-g="'+k+'">'+opts.map(o=>'<option'+(GEN[k]===o?" selected":"")+'>'+o+'</option>').join("")+'</select></label>';
+const grp=(t,rows)=>'<div class="sg"><h4>'+t+'</h4>'+rows+'</div>';
+
+const SEC={
+ trans:()=>'<section><h3>翻译服务</h3><div class="lead">已启用的服务会在翻译时并行出结果，列表顺序即显示顺序；密钥统一从「密钥库」选择，不在此处明文保存。</div>'+svcHtml("t")+'<button class="btn" id="sAdd">＋ 添加 OpenAI 兼容服务</button>'
+   +grp("策略",swRow("仅使用本地引擎","开启后只调用离线服务（如 Ollama），文本不会离开本机","offline")+selRow("单句重译默认引擎","","retr",["轮换下一个引擎","跟随当前引擎"]))+'</section>',
+ ocr:()=>'<section><h3>识别服务</h3><div class="lead">离线引擎不会上传任何截图；云端引擎仅在你启用并配置后才会使用。</div>'+svcHtml("o")
+   +grp("截图识别",swRow("识别后自动翻译","","ocrTr")+swRow("保留原文换行","学术文献建议关闭，避免把一句话拆成多行","keepNl")+swRow("识别后自动复制文字","","ocrCopy"))+'</section>',
+ keys:()=>'<section><h3>快捷键</h3><div class="lead">点击按键框后直接按下新的组合键，需包含修饰键；与其他功能冲突时会提示。</div>'
+   +(S.keyMsg?'<div class="warn" role="alert">'+S.keyMsg+'</div>':"")
+   +'<div class="sg">'+KEYS.map(k=>'<div class="srow"><span><b>'+k[1]+'</b></span><button class="btn kb" data-cap="'+k[0]+'" aria-pressed="'+(S.cap===k[0])+'">'+(S.cap===k[0]?"按下新快捷键…（Esc 取消）":S.set.keys[k[0]])+'</button></div>').join("")+'</div>'
+   +'<button class="btn" id="kReset">恢复默认快捷键</button></section>',
+ gen:()=>'<section><h3>常规</h3><div class="lead">界面、默认语言、快捷面板行为与数据。</div>'
+   +grp("外观与语言",selRow("主题","","theme",["跟随系统","浅色","深色"])+selRow("默认源语言","","src",["自动检测","English","日本語"])+selRow("默认目标语言","","dst",["简体中文","English","日本語"]))
+   +grp("翻译",swRow("默认开启学术模式","","acad")+swRow("高亮术语表命中的词","","hl"))
+   +grp("快捷面板",swRow("停顿后自动翻译","","auto")+selRow("自动翻译延迟","","delay",["0.5 秒","0.7 秒","1 秒"])+swRow("失焦后自动隐藏","","blur")+swRow("出现在鼠标附近","","near")+swRow("记住上次位置","","remember")+swRow("打开时自动读取剪贴板","","clipRead"))
+   +grp("系统",swRow("开机自启","","boot")+swRow("关闭窗口时最小化到托盘","","tray")+selRow("网络代理","","proxy",["跟随系统","不使用","自定义"]))
+   +grp("历史与数据",selRow("历史保留时长","","keep",["30 天","90 天","永久"])+'<div class="srow"><span><b>存储位置</b><small>浏览器 localStorage；接入 Tauri 后可切换为 SQLite</small></span><span class="bar"><button class="btn" id="sExport">导出 JSON</button><button class="btn" id="sClear">清空历史</button></span></div>')+'</section>'
+};
+function renderSettings(){
+  $("#work").innerHTML='<div class="wh"><div><h2>翻译设置</h2><div class="muted">服务、识别、快捷键与常规选项</div></div><button class="btn" id="sBack">返回翻译</button></div>'
+    +'<div class="set"><nav class="snav" aria-label="设置分类">'+SECS.map(x=>'<button data-sec="'+x[0]+'" aria-current="'+(S.sec===x[0])+'">'+x[1]+'</button>').join("")+'</nav><div class="sbody">'+SEC[S.sec]()+'</div></div>';
+}
+function onSettingsClick(ev){
+  const b=ev.target.closest("button");if(!b)return;
+  const d=b.dataset;
+  if(b.id==="sBack"){S.view="main";renderWork();renderFeed();return;}
+  if(d.sec){S.sec=d.sec;S.set.open=null;S.cap=null;S.keyMsg="";renderSettings();return;}
+  if(d.open!==undefined){S.set.open=S.set.open===d.open?null:d.open;renderSettings();return;}
+  if(d.def){const q=d.def.split(":"),arr=q[0]==="t"?TSVC:OSVC;S.set[q[0]==="t"?"tdef":"odef"]=arr[+q[1]].n;renderSettings();return;}
+  if(d.mv){const q=d.mv.split(":"),arr=q[0]==="t"?TSVC:OSVC,i=+q[1],j=i+(+q[2]);if(j>=0&&j<arr.length){const t=arr[i];arr[i]=arr[j];arr[j]=t;S.set.open=null;renderSettings();}return;}
+  if(d.test){flash(b,"连接成功 · 0.4s");return;}
+  if(d.save){flash(b,"已保存");return;}
+  if(d.cap){S.cap=d.cap;S.keyMsg="";renderSettings();return;}
+  if(b.id==="kReset"){KEYS.forEach(k=>S.set.keys[k[0]]=k[2]);S.keyMsg="";renderSettings();return;}
+  if(b.id==="sAdd"){TSVC.push({n:"自定义服务 "+(TSVC.length-4),tag:"OpenAI 兼容",on:false,fields:[["Base URL",""],["模型",""],["API Key","@vault"]]});S.set.open="t:"+(TSVC.length-1);renderSettings();return;}
+  if(b.id==="sExport"){flash(b,"已导出");return;}
+  if(b.id==="sClear"){flash(b,"已清空");return;}
+}
+$("#work").addEventListener("change",ev=>{
+  if(S.view!=="settings")return;
+  const el=ev.target;
+  if(el.dataset.g!==undefined)GEN[el.dataset.g]=el.type==="checkbox"?el.checked:el.value;
+  if(el.dataset.on){const q=el.dataset.on.split(":");(q[0]==="t"?TSVC:OSVC)[+q[1]].on=el.checked;}
+});
+document.addEventListener("keydown",e=>{
+  if(!S.cap)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  if(e.key==="Escape"){S.cap=null;S.keyMsg="";renderSettings();return;}
+  if(["Control","Alt","Shift","Meta"].indexOf(e.key)>=0)return;
+  const mods=[e.ctrlKey&&"Ctrl",e.altKey&&"Alt",e.shiftKey&&"Shift",e.metaKey&&"Cmd"].filter(Boolean);
+  if(!mods.length){S.keyMsg="全局快捷键需要包含 Ctrl / Alt / Shift / Cmd 之一";renderSettings();return;}
+  const k=e.code.indexOf("Key")===0?e.code.slice(3):e.code.indexOf("Digit")===0?e.code.slice(5):e.code==="Space"?"Space":(e.key.length===1?e.key.toUpperCase():e.key);
+  const combo=mods.concat(k).join("+");
+  const dup=KEYS.find(x=>x[0]!==S.cap&&S.set.keys[x[0]]===combo);
+  if(dup){S.keyMsg="与「"+dup[1]+"」冲突，请换一个组合";renderSettings();return;}
+  S.set.keys[S.cap]=combo;S.cap=null;S.keyMsg="";renderSettings();
+},true);
+$("#openSet").onclick=()=>{S.view="settings";renderFeed();renderWork();};
+
+renderFeed();renderWork();
+</script>
+</body>
+</html>

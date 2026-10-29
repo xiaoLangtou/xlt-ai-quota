@@ -18,9 +18,13 @@ chrono = "0.4.42"
 clipboard-rs = "0.3.5"
 dirs = "6"
 enigo = "0.6.1"
+encoding_rs = "0.8"
 flate2 = "1"
 futures-util = "0.3"
 image = { version = "0.25.10", default-features = false, features = ["png"] }
+libc = "0.2"
+pdf-extract = "0.12"
+quick-xml = "0.41"
 regex = "1.11.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -38,6 +42,7 @@ toml_edit = "0.22"
 url = "2"
 uuid = { version = "1.11", features = ["v4", "v5"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+zstd = "0.13"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"

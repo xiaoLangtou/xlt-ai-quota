@@ -1,5 +1,4 @@
 use chrono::NaiveDate;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fs, path::PathBuf, process::Command};
@@ -84,7 +83,16 @@ pub fn daily_report_validate_project(path: String) -> Result<GitProject, String>
 }
 
 #[tauri::command]
-pub fn daily_report_collect_commits(input: GitLogInput) -> Result<Vec<GitProjectCommits>, String> {
+pub async fn daily_report_collect_commits(
+    input: GitLogInput,
+) -> Result<Vec<GitProjectCommits>, String> {
+    // git 子进程可能较慢，放到阻塞线程池，避免占用 IPC 主线程。
+    tauri::async_runtime::spawn_blocking(move || collect_commits_blocking(input))
+        .await
+        .map_err(|error| format!("读取提交记录失败：{error}"))?
+}
+
+fn collect_commits_blocking(input: GitLogInput) -> Result<Vec<GitProjectCommits>, String> {
     validate_range(&input.start_date, &input.end_date)?;
     input
         .projects
@@ -96,7 +104,14 @@ pub fn daily_report_collect_commits(input: GitLogInput) -> Result<Vec<GitProject
 }
 
 #[tauri::command]
-pub fn daily_report_generate(input: AiGenerateRequest) -> Result<String, String> {
+pub async fn daily_report_generate(input: AiGenerateRequest) -> Result<String, String> {
+    // AI 调用是网络阻塞操作，必须离开主线程，否则界面会无响应。
+    tauri::async_runtime::spawn_blocking(move || daily_report_generate_blocking(input))
+        .await
+        .map_err(|error| format!("生成报告失败：{error}"))?
+}
+
+fn daily_report_generate_blocking(input: AiGenerateRequest) -> Result<String, String> {
     validate_range(&input.start_date, &input.end_date)?;
     if input.api_key.trim().is_empty() {
         return Err("请输入 AI Provider 的 API Key".to_owned());
@@ -115,60 +130,16 @@ pub fn daily_report_generate(input: AiGenerateRequest) -> Result<String, String>
         &input.start_date,
         &input.end_date,
     )?;
-    let body = serde_json::json!({
-        "model": input.model,
-        "messages": [
-            { "role": "system", "content": "你是专业的技术工作总结助手。仅根据 Git 提交记录，用中文生成准确、简洁的工作总结。" },
-            { "role": "user", "content": prompt },
-        ],
-        "temperature": 0.3,
-        "max_tokens": 2000,
-    });
-    let (host, path) = match input.provider.as_str() {
-        "minimax" => ("api.minimax.chat", "/v1/text/chatcompletion_v2"),
-        "kimi" => ("api.moonshot.cn", "/v1/chat/completions"),
-        "deepseek" => ("api.deepseek.com", "/chat/completions"),
-        _ => return Err("不支持的 AI Provider".to_owned()),
-    };
-    let output = Command::new("curl")
-        .arg("-sS")
-        .arg("--connect-timeout")
-        .arg("15")
-        .arg("--max-time")
-        .arg("60")
-        .arg("-X")
-        .arg("POST")
-        .arg("-H")
-        .arg("Content-Type: application/json")
-        .arg("-H")
-        .arg(format!("Authorization: Bearer {}", input.api_key.trim()))
-        .arg("--data-raw")
-        .arg(body.to_string())
-        .arg(format!("https://{host}{path}"))
-        .output()
-        .map_err(|error| format!("无法调用 AI Provider：{error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "AI Provider 请求失败：{}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    let response: Value = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("AI Provider 返回的不是 JSON：{error}"))?;
-    let content = response
-        .pointer("/choices/0/message/content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            let message = response
-                .pointer("/error/message")
-                .and_then(Value::as_str)
-                .or_else(|| response.get("message").and_then(Value::as_str))
-                .unwrap_or("AI Provider 未返回报告内容");
-            format!("AI Provider 返回错误：{message}")
-        })?;
-    let thinking = Regex::new(r"(?s)<think>.*?</think>")
-        .map_err(|error| format!("无法清理模型思考内容：{error}"))?;
-    let report = thinking.replace_all(content, "").trim().to_owned();
+    let report = crate::ai_provider::chat(crate::ai_provider::ChatRequest {
+        provider: &input.provider,
+        model: &input.model,
+        api_key: &input.api_key,
+        system: "你是专业的技术工作总结助手。仅根据 Git 提交记录，用中文生成准确、简洁的工作总结。",
+        user: &prompt,
+        temperature: 0.3,
+        max_tokens: 2000,
+        json_mode: false,
+    })?;
     if report.is_empty() {
         return Err("AI Provider 未返回可复制的报告内容".to_owned());
     }

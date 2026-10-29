@@ -8,7 +8,7 @@ use super::adapters::adapter_by_id;
 use super::error::McpError;
 use super::metadata;
 use super::paths::McpPaths;
-use super::plan::{file_mtime, ops_for, resolve_target, PlanRegistry};
+use super::plan::{file_mtime, ops_for, prune_expired_plans, resolve_target, PlanRegistry};
 use super::types::{ApplyPlanRequest, ApplyResult, WrittenFile};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,10 +45,11 @@ fn restrict_permissions(_path: &Path) {}
 
 /// 备份原文件到 `~/.xlt/backups/mcp/<agent>/<时间戳>/`，写入 manifest 供恢复。
 fn backup_file(paths: &McpPaths, agent: &str, path: &Path) -> Result<PathBuf, McpError> {
-    let dir = paths
-        .backups_root
-        .join(agent)
-        .join(format!("{}-{}", timestamp(), &uuid::Uuid::new_v4().to_string()[..6]));
+    let dir = paths.backups_root.join(agent).join(format!(
+        "{}-{}",
+        timestamp(),
+        &uuid::Uuid::new_v4().to_string()[..6]
+    ));
     fs::create_dir_all(&dir)?;
     restrict_permissions(&dir);
     let name = path
@@ -112,7 +113,11 @@ fn rollback(written: &[Written]) -> bool {
             if let Ok(entries) = fs::read_dir(dir) {
                 for file in entries.flatten() {
                     let candidate = file.path();
-                    if candidate.file_name().map(|name| name == "manifest.json").unwrap_or(false) {
+                    if candidate
+                        .file_name()
+                        .map(|name| name == "manifest.json")
+                        .unwrap_or(false)
+                    {
                         continue;
                     }
                     if fs::copy(&candidate, &entry.path).is_err() {
@@ -135,11 +140,15 @@ pub fn apply(
     plan_id: &str,
     request: &ApplyPlanRequest,
 ) -> Result<ApplyResult, McpError> {
-    let stored = registry
-        .lock()
-        .map_err(|_| McpError::internal("计划表锁定失败"))?
-        .remove(plan_id)
-        .ok_or_else(|| McpError::not_found("计划不存在或已过期"))?;
+    let stored = {
+        let mut plans = registry
+            .lock()
+            .map_err(|_| McpError::internal("计划表锁定失败"))?;
+        prune_expired_plans(&mut plans);
+        plans
+            .remove(plan_id)
+            .ok_or_else(|| McpError::not_found("计划不存在或已过期"))?
+    };
 
     // 冲突检测：生成计划后文件被其他程序改动即中止。
     for (path_str, expected) in stored.mtimes.iter().chain(request.expected_mtimes.iter()) {
@@ -260,8 +269,7 @@ pub fn restore_backup(paths: &McpPaths, backup_dir: &str) -> Result<(), McpError
     }
     let manifest_text = fs::read_to_string(dir.join("manifest.json"))
         .map_err(|_| McpError::not_found("备份 manifest 缺失"))?;
-    let manifest: BackupManifest =
-        serde_json::from_str(&manifest_text).map_err(McpError::from)?;
+    let manifest: BackupManifest = serde_json::from_str(&manifest_text).map_err(McpError::from)?;
     let source = dir.join(&manifest.name);
     if !source.is_file() {
         return Err(McpError::not_found("备份文件缺失"));

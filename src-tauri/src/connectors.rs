@@ -41,12 +41,14 @@ fn connector_get_blocking(request: ConnectorRequest) -> Result<Value, String> {
         ("/api/qoder", "/stats") => qoder_stats(&request.query),
         ("/api/gemini", "/stats") => gemini_stats(&request.query),
         ("/api/copilot", "/stats") => copilot_stats(&request.query),
-        ("/api/opencode", "/stats") => opencode_stats(),
+        ("/api/opencode", "/stats") => opencode_stats(&request.query),
         ("/api/codex", "/status") => codex_status(),
         ("/api/codex", "/usage") => codex_usage(),
         ("/api/codex", "/stats") => codex_stats(&request.query),
         ("/api/kimi", "/usage") => kimi_usage(),
         ("/api/kimi", "/stats") => kimi_stats(&request.query),
+        ("/api/deepseek", "/balance") => deepseek_balance(&request.query),
+        ("/api/deepseek", "/stats") => deepseek_stats(&request.query),
         ("/api/claude", "/stats") => claude_stats(&request.query),
         ("/api/oil", "/price") => current_oil_prices(&request.query),
         ("/api/oil", "/forecast") => oil_forecast(&request.query),
@@ -318,73 +320,45 @@ fn official_oil_adjustment() -> Result<Value, String> {
     }))
 }
 
+static ARKCLI_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn run_ark_json(args: &[&str], timeout: u64) -> Result<Value, String> {
+    let _guard = ARKCLI_LOCK.lock().map_err(|_| "方舟认证锁不可用".to_owned())?;
+    run_json_with_timeout("arkcli", "ARKCLI_BIN", args, timeout)
+}
+
 fn ark_status() -> Result<Value, String> {
-    run_json(
-        "arkcli",
-        "ARKCLI_BIN",
-        &["auth", "status", "--format", "json"],
-    )
+    run_ark_json(&["auth", "status", "--format", "json"], 20)
 }
 
 fn ark_plan() -> Result<Value, String> {
-    run_json(
-        "arkcli",
-        "ARKCLI_BIN",
-        &["usage", "plan", "--format", "json"],
-    )
+    run_ark_json(&["usage", "plan", "--format", "json"], 20)
 }
 
 fn ark_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
     let start = requested_date(query, "start")?;
     let end = requested_date(query, "end")?;
-    if start > end {
-        return Err("start 必须早于或等于 end".to_owned());
-    }
+    if start > end { return Err("start 必须早于或等于 end".to_owned()); }
+    run_ark_json(&["usage", "stats", "--start", &start.format("%F").to_string(),
+        "--end", &end.format("%F").to_string(), "--format", "json"], 15)
+}
 
-    let start = start.format("%F").to_string();
-    let end = end.format("%F").to_string();
-    let attempts: [Vec<&str>; 3] = [
-        vec![
-            "usage", "stats", "--start", &start, "--end", &end, "--mine", "--format", "json",
-        ],
-        vec![
-            "usage",
-            "stats",
-            "--start",
-            &start,
-            "--end",
-            &end,
-            "--mine",
-            "--mine-by",
-            "apikey",
-            "--format",
-            "json",
-        ],
-        vec![
-            "usage", "stats", "--start", &start, "--end", &end, "--format", "json",
-        ],
-    ];
-    let mut last_response: Option<Value> = None;
-    let mut last_error = String::new();
-
-    for args in attempts {
-        match run_json_with_timeout("arkcli", "ARKCLI_BIN", &args, 15) {
-            Ok(data) => {
-                if data
-                    .get("data_count")
-                    .and_then(Value::as_i64)
-                    .unwrap_or_default()
-                    > 0
-                {
-                    return Ok(data);
-                }
-                last_response = Some(data);
+/// 只允许用户主动发起已知连接器的浏览器登录，不接收任意命令。
+#[tauri::command]
+pub async fn connector_login(provider: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        match provider.as_str() {
+            "ark" => {
+                let _guard = ARKCLI_LOCK.try_lock().map_err(|_| "方舟正在同步或登录，请稍后再试".to_owned())?;
+                run_cli_with_timeout("arkcli", "ARKCLI_BIN", &["auth", "login", "volc-sso"], 600)?;
             }
-            Err(error) => last_error = error,
+            "qoder" => {
+                run_cli_with_timeout("qodercli", "QODERCLI_BIN", &["login"], 600)?;
+            }
+            _ => return Err("不支持的连接器登录类型".to_owned()),
         }
-    }
-
-    last_response.ok_or_else(|| format!("arkcli usage stats 失败: {last_error}"))
+        Ok(())
+    }).await.map_err(|error| format!("连接器登录任务失败: {error}"))?
 }
 
 fn kiro_usage() -> Result<Value, String> {
@@ -1156,15 +1130,42 @@ fn copilot_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
     Ok(token_stats_json(totals))
 }
 
-fn opencode_stats() -> Result<Value, String> {
-    let sql = "SELECT date(time_created/1000,'unixepoch','localtime') AS d, \
-        COALESCE(json_extract(data,'$.modelID'),json_extract(data,'$.model'),json_extract(data,'$.modelId'),'opencode') AS model, \
-        sum(json_extract(data,'$.tokens.input')) AS inp, \
-        sum(json_extract(data,'$.tokens.output')) AS outp, \
-        sum(COALESCE(json_extract(data,'$.tokens.cache.read'),0)) AS cache \
-        FROM message WHERE json_extract(data,'$.role')='assistant' \
-        AND json_extract(data,'$.tokens.input') IS NOT NULL GROUP BY d, model ORDER BY d, model";
-    run_json("opencode", "OPENCODE_BIN", &["db", sql, "--format", "json"])
+fn opencode_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let start = requested_date(query, "start")?;
+    let end = requested_date(query, "end")?;
+    if start > end { return Err("start 必须早于或等于 end".to_owned()); }
+    let data_home = env::var_os("XDG_DATA_HOME").map(PathBuf::from)
+        .unwrap_or_else(|| home_dir().join(".local").join("share"));
+    let path = data_home.join("opencode").join("opencode.db");
+    let connection = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("无法只读打开 OpenCode 数据库 {}: {error}", path.display()))?;
+    connection.busy_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
+    query_opencode_stats(&connection, start, end)
+}
+
+fn query_opencode_stats(connection: &Connection, start: NaiveDate, end: NaiveDate) -> Result<Value, String> {
+    let mut statement = connection.prepare(
+        "SELECT time_created, COALESCE(json_extract(data,'$.modelID'),json_extract(data,'$.model'),json_extract(data,'$.modelId'),'opencode'),
+            json_extract(data,'$.tokens.input'), COALESCE(json_extract(data,'$.tokens.output'),0), COALESCE(json_extract(data,'$.tokens.cache.read'),0)
+         FROM message WHERE time_created >= ?1 AND time_created < ?2 AND json_extract(data,'$.role')='assistant'
+         AND json_extract(data,'$.tokens.input') IS NOT NULL"
+    ).map_err(|error| format!("OpenCode 数据库结构无法读取: {error}"))?;
+    let lower = (start - chrono::Duration::days(1)).and_hms_opt(0,0,0).ok_or("起始日期无效")?.and_utc().timestamp_millis();
+    let upper = (end + chrono::Duration::days(2)).and_hms_opt(0,0,0).ok_or("结束日期无效")?.and_utc().timestamp_millis();
+    let rows = statement.query_map([lower, upper], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?)))
+        .map_err(|error| format!("OpenCode 用量查询失败: {error}"))?;
+    let mut totals: BTreeMap<(String, String), (i64, i64, i64)> = BTreeMap::new();
+    for row in rows {
+        let (created, model, input, output, cache) = row.map_err(|e| e.to_string())?;
+        let date = DateTime::from_timestamp_millis(created).ok_or("OpenCode 消息时间无效")?.with_timezone(&Local).date_naive();
+        if date < start || date > end { continue; }
+        let total = totals.entry((date.format("%F").to_string(), model)).or_default();
+        total.0 += input;
+        total.1 += output;
+        total.2 += cache;
+    }
+    Ok(Value::Array(totals.into_iter().map(|((date, model), (input, output, cache))|
+        json!({"d":date,"model":model,"inp":input,"outp":output,"cache":cache})).collect()))
 }
 
 fn codex_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
@@ -1420,8 +1421,168 @@ fn claude_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
     Ok(token_stats_json(totals))
 }
 
-fn codex_status() -> Result<Value, String> {
-    let status = run_cli("codex", "CODEX_BIN", &["login", "status"])
+/// DeepSeek 账户余额（官方 `/user/balance`，需 API Key，经 curl 走系统代理）。
+fn deepseek_balance(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let api_key = query
+        .get("apiKey")
+        .map(String::as_str)
+        .unwrap_or("")
+        .trim();
+    if api_key.is_empty() {
+        return Err("需要 apiKey 参数".to_owned());
+    }
+    let mut args = vec![
+        "-skS".to_owned(),
+        "--connect-timeout".to_owned(),
+        "8".to_owned(),
+        "--max-time".to_owned(),
+        "15".to_owned(),
+        "-H".to_owned(),
+        format!("Authorization: Bearer {api_key}"),
+    ];
+    add_https_proxy(&mut args);
+    args.push("https://api.deepseek.com/user/balance".to_owned());
+    let (stdout, stderr) = run_program("curl", &args, 25)?;
+    serde_json::from_str(&stdout).map_err(|_| {
+        if stderr.trim().is_empty() {
+            "DeepSeek 余额请求没有返回 JSON".to_owned()
+        } else {
+            format!("DeepSeek 余额网络请求失败: {}", snippet(&stderr))
+        }
+    })
+}
+
+/// DeepSeek Harness（DSH）会话根目录；DSH_HOME 可覆盖，默认 ~/.dsh。
+fn deepseek_harness_root() -> PathBuf {
+    env::var_os("DSH_HOME")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| home_dir().join(".dsh"))
+}
+
+fn visit_deepseek_sessions(path: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            visit_deepseek_sessions(&path, files);
+        } else if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+            if name.starts_with("session") && name.ends_with(".jsonl.zstd") {
+                files.push(path);
+            }
+        }
+    }
+}
+
+/// 累计 assistant/message 的 content 文本（含思考与工具调用参数）。
+fn deepseek_content_text(value: Option<&Value>) -> String {
+    fn walk(value: &Value, out: &mut String) {
+        match value {
+            Value::String(text) => {
+                out.push_str(text);
+                out.push('\n');
+            }
+            Value::Array(values) => {
+                for value in values {
+                    walk(value, out);
+                }
+            }
+            Value::Object(map) => {
+                if let Some(Value::String(text)) = map.get("text") {
+                    out.push_str(text);
+                    out.push('\n');
+                }
+                if let Some(Value::String(args)) = map.get("arguments") {
+                    out.push_str(args);
+                    out.push('\n');
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = String::new();
+    if let Some(value) = value {
+        walk(value, &mut out);
+    }
+    out
+}
+
+/// DeepSeek Harness 本地会话 Token：assistant/message 的 data.usage 为真实计数，
+/// 无 usage 的旧版会话用文本估算。inputTokens 为缓存未命中输入，与 cacheReadTokens 分开累加。
+fn deepseek_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
+    let (start, end) = stats_date_range(query)?;
+    let mut totals: BTreeMap<(String, String), TokenStats> = BTreeMap::new();
+    let mut files: Vec<PathBuf> = Vec::new();
+    visit_deepseek_sessions(&deepseek_harness_root().join("sessions"), &mut files);
+
+    for file in files {
+        let Ok(raw) = fs::read(&file) else {
+            continue;
+        };
+        let Ok(bytes) = zstd::stream::decode_all(raw.as_slice()) else {
+            continue;
+        };
+        let Ok(text) = String::from_utf8(bytes) else {
+            continue;
+        };
+        for line in text.lines() {
+            let Ok(event) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            if event.get("type").and_then(Value::as_str) != Some("assistant/message") {
+                continue;
+            }
+            let data = event.get("data");
+            let message = data.and_then(|value| value.get("message"));
+            let model = message
+                .and_then(|value| value.pointer("/source/model"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("deepseek")
+                .to_owned();
+            let Some(millis) = event
+                .get("time")
+                .or_else(|| data.and_then(|value| value.get("time")))
+                .and_then(value_timestamp_millis)
+            else {
+                continue;
+            };
+            let Some(day) = DateTime::<Utc>::from_timestamp_millis(millis)
+                .map(|timestamp| timestamp.with_timezone(&Local).date_naive())
+            else {
+                continue;
+            };
+            if !in_date_range(day, start, end) {
+                continue;
+            }
+            let day = day.format("%F").to_string();
+            let usage = data
+                .and_then(|value| value.get("usage"))
+                .filter(|value| value.is_object());
+            if let Some(usage) = usage {
+                let input = value_number(usage.get("inputTokens"));
+                let output = value_number(usage.get("outputTokens"));
+                let cached = value_number(usage.get("cacheReadTokens"));
+                if input == 0.0 && output == 0.0 && cached == 0.0 {
+                    continue;
+                }
+                add_tokens(&mut totals, &day, &model, input + cached, output, cached);
+            } else if let Some(message) = message {
+                let content = deepseek_content_text(message.get("content"));
+                if content.trim().is_empty() {
+                    continue;
+                }
+                add_tokens(&mut totals, &day, &model, estimate_text_tokens(&content), 0.0, 0.0);
+            }
+        }
+    }
+    Ok(token_stats_json(totals))
+}
+
+fn codex_status() -> Result<Value, String> {    let status = run_cli("codex", "CODEX_BIN", &["login", "status"])
         .map(|(stdout, stderr)| format!("{stdout}\n{stderr}"))
         .unwrap_or_default();
     let claims = codex_claims().unwrap_or_else(|_| Value::Null);
@@ -1872,6 +2033,20 @@ fn run_cli_with_timeout(
     run_program(&executable(program, env_key), &args, timeout_seconds)
 }
 
+fn cli_error_message(stderr: &str, stdout: &str) -> String {
+    for stream in [stderr, stdout] {
+        if let Ok(body) = serde_json::from_str::<Value>(stream.trim()) {
+            if let Some(message) = body.pointer("/error/message").and_then(Value::as_str) {
+                if message.contains("refresh_token") || message.contains("STS 续期失败") {
+                    return "方舟 SSO 授权已失效，请在设置页点击「登录方舟」重新授权".to_owned();
+                }
+                return message.to_owned();
+            }
+        }
+    }
+    if !stderr.trim().is_empty() { snippet(stderr) } else { snippet(stdout) }
+}
+
 fn run_program(
     program: &str,
     args: &[String],
@@ -1879,6 +2054,8 @@ fn run_program(
 ) -> Result<(String, String), String> {
     let mut child = Command::new(program)
         .args(args)
+        .env("ARKCLI_NO_UPDATE_NOTIFIER", "1")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -1905,6 +2082,9 @@ fn run_program(
         .map_err(|error| format!("无法读取 {program} 输出: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.success() {
+        return Err(format!("{program}: {}", cli_error_message(&stderr, &stdout)));
+    }
     if stdout.trim().is_empty() && stderr.trim().is_empty() {
         return Err(format!(
             "{program} 以退出码 {} 结束且未返回数据",
@@ -1949,6 +2129,9 @@ fn run_program_in_dir(
         .map_err(|error| format!("无法读取 {program} 输出: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    if !output.status.success() {
+        return Err(format!("{program}: {}", cli_error_message(&stderr, &stdout)));
+    }
     if stdout.trim().is_empty() && stderr.trim().is_empty() {
         return Err(format!(
             "{program} 以退出码 {} 结束且未返回数据",
@@ -1967,7 +2150,12 @@ fn executable(program: &str, env_key: &str) -> String {
     let home = home_dir();
     for candidate in [
         home.join(".local").join("bin").join(program),
-        home.join(".volta").join("bin").join(program),
+        home
+            .join(".local")
+            .join("share")
+            .join("mise")
+            .join("shims")
+            .join(program),
         PathBuf::from("/opt/homebrew/bin").join(program),
         PathBuf::from("/usr/local/bin").join(program),
     ] {
@@ -2125,7 +2313,7 @@ fn model_from_event(event: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod model_stats_tests {
-    use super::{add_tokens, model_from_event, token_stats_json, TokenStats};
+    use super::{add_tokens, deepseek_content_text, model_from_event, token_stats_json, TokenStats};
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -2151,6 +2339,20 @@ mod model_stats_tests {
         assert_eq!(rows[0]["model"], "gpt-5.6-sol");
         assert_eq!(rows[1]["model"], "gpt-5.6-terra");
     }
+
+    #[test]
+    fn concatenates_deepseek_message_content_and_tool_arguments() {
+        let content = json!([
+            { "type": "reasoning", "text": "think" },
+            { "type": "text", "text": "answer" },
+            { "type": "tool-call", "arguments": "{\"cmd\":\"ls\"}" },
+        ]);
+        let text = deepseek_content_text(Some(&content));
+        assert!(text.contains("think"));
+        assert!(text.contains("answer"));
+        assert!(text.contains("cmd"));
+        assert_eq!(deepseek_content_text(None), "");
+    }
 }
 
 #[cfg(test)]
@@ -2161,7 +2363,7 @@ mod desktop_stats_route_tests {
 
     #[test]
     fn dispatches_all_desktop_token_stats_routes() {
-        for base_url in ["/api/kiro", "/api/qoder", "/api/gemini", "/api/copilot"] {
+        for base_url in ["/api/kiro", "/api/qoder", "/api/gemini", "/api/copilot", "/api/deepseek"] {
             let request = ConnectorRequest {
                 base_url: base_url.to_owned(),
                 path: "/stats".to_owned(),
@@ -2271,4 +2473,30 @@ fn capitalize(value: &str) -> String {
 
 fn snippet(value: &str) -> String {
     value.trim().chars().take(300).collect()
+}
+
+#[cfg(test)]
+mod connector_regression_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn opencode_reads_usage_from_sqlite_with_date_and_role_filters() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch("CREATE TABLE message(time_created INTEGER, data TEXT)").unwrap();
+        let timestamp = Local.with_ymd_and_hms(2026, 10, 27, 12, 0, 0).unwrap().timestamp_millis();
+        for (offset, role, input, output, cache) in [(0, "assistant", 100, 20, 30), (0, "assistant", 50, 10, 5), (0, "user", 999, 999, 999), (-3, "assistant", 999, 999, 999)] {
+            let data = json!({"role":role,"modelID":"test-model","tokens":{"input":input,"output":output,"cache":{"read":cache}}});
+            connection.execute("INSERT INTO message VALUES (?1,?2)", rusqlite::params![timestamp + offset * 86_400_000, data.to_string()]).unwrap();
+        }
+        let date = NaiveDate::from_ymd_opt(2026,10,27).unwrap();
+        assert_eq!(query_opencode_stats(&connection,date,date).unwrap(), json!([{"d":"2026-10-27","model":"test-model","inp":150,"outp":30,"cache":35}]));
+    }
+
+    #[test]
+    fn cli_errors_preserve_business_reason_and_identify_expired_ark_auth() {
+        assert_eq!(cli_error_message(r#"{"ok":false,"error":{"message":"permission denied"}}"#, ""), "permission denied");
+        assert!(cli_error_message(r#"{"error":{"message":"refresh_token is invalid"}}"#, "").contains("登录方舟"));
+        assert!(cli_error_message("Unrecognized flag: --format", "help text").contains("Unrecognized flag"));
+    }
 }

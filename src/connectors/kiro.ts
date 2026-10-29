@@ -11,7 +11,7 @@ import {
  * Kiro Connector
  *
  * 数据来源：本机 `kiro-cli chat "/usage" --no-interactive`（dev 由
- * `vite-local-connectors.ts` 的 /api/kiro/usage 中间件转发）。
+ * `src-tauri/src/connectors.rs` 的 /api/kiro/usage 命令转发）。
  * 解析其文本输出（Credits / 重置日 / 套餐标签）。
  *
  * 注意：`/usage` 是 kiro-cli chat 内的 slash 命令，需登录态。

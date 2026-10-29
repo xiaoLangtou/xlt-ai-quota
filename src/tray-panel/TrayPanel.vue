@@ -5,9 +5,7 @@ import { LogicalSize } from "@tauri-apps/api/dpi";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ToolLogo from "@/components/ToolLogo.vue";
-import { clipboardService } from "@/services/clipboard-service";
 import { usageService } from "@/services/usage-service";
-import type { ClipboardStatus } from "@/types/clipboard";
 import type { PlatformQuotaView, SyncInfo } from "@/types/usage";
 
 const PANEL_WIDTH = 336;
@@ -15,8 +13,6 @@ const popoverEl = ref<HTMLElement | null>(null);
 const quotas = ref<PlatformQuotaView[]>([]);
 const sync = ref<SyncInfo>({ lastSyncAt: null, syncing: false });
 const requesting = ref(false);
-const clipboardStatus = ref<ClipboardStatus | null>(null);
-const clipboardError = ref("");
 const unlisteners: UnlistenFn[] = [];
 
 /**
@@ -96,13 +92,6 @@ function refresh(): void {
   sync.value = usageService.getSyncInfo();
   if (!sync.value.syncing) requesting.value = false;
   void fitWindowHeight();
-  void clipboardService.status()
-    .then((value) => {
-      clipboardStatus.value = value;
-      clipboardError.value = "";
-      void fitWindowHeight();
-    })
-    .catch((reason) => { clipboardError.value = reason instanceof Error ? reason.message : String(reason); void fitWindowHeight(); });
 }
 
 const syncing = computed(() => requesting.value || sync.value.syncing);
@@ -128,39 +117,12 @@ const statusText = computed(() => {
   return sync.value.outcome === "partial" ? `${relative} · 部分` : relative;
 });
 const hasData = computed(() => rows.value.length > 0);
+/** 临时：预览页用 localStorage 强制暗色，便于无头截图走查（不影响 Tauri 运行时）。 */
+const previewDark = typeof localStorage !== "undefined" && localStorage.getItem("xlt.tray-preview-theme") === "dark";
 
 async function openDashboard(): Promise<void> {
   await invoke("show_dashboard").catch(() => undefined);
   await getCurrentWindow().hide().catch(() => undefined);
-}
-
-async function openClipboard(): Promise<void> {
-  try {
-    await clipboardService.showPanel();
-    await getCurrentWindow().hide();
-  } catch (reason) { clipboardError.value = reason instanceof Error ? reason.message : String(reason); }
-}
-
-async function toggleClipboardCapture(): Promise<void> {
-  if (!clipboardStatus.value) return;
-  try {
-    clipboardStatus.value = await clipboardService.updateSettings({
-      ...clipboardStatus.value.settings,
-      enabled: !clipboardStatus.value.settings.enabled,
-    });
-    clipboardError.value = "";
-  } catch (reason) { clipboardError.value = reason instanceof Error ? reason.message : String(reason); }
-}
-
-async function toggleLaunchAtLogin(): Promise<void> {
-  if (!clipboardStatus.value) return;
-  try {
-    clipboardStatus.value = await clipboardService.updateSettings({
-      ...clipboardStatus.value.settings,
-      launchAtLogin: !clipboardStatus.value.settings.launchAtLogin,
-    });
-    clipboardError.value = "";
-  } catch (reason) { clipboardError.value = reason instanceof Error ? reason.message : String(reason); }
 }
 
 async function requestSync(): Promise<void> {
@@ -200,7 +162,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main ref="popoverEl" class="popover">
+  <main ref="popoverEl" class="popover" :class="{ dark: previewDark }">
     <!-- 磨砂玻璃细颗粒纹理 -->
     <div class="grain" aria-hidden="true" />
 
@@ -254,53 +216,40 @@ onUnmounted(() => {
     </div>
     <div v-else class="empty" @click="requestSync">
       <p>暂无额度数据</p>
-      <small>点击「立即同步」从本机 CLI 拉取</small>
+      <small>点击下方同步按钮从本机 CLI 拉取</small>
     </div>
 
     <div class="pop-divider" />
 
-    <p v-if="clipboardError" class="clipboard-error">{{ clipboardError }}</p>
-
     <div class="pop-actions">
-      <button class="act-btn" type="button" @click="openClipboard">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="12" height="17" rx="2" /><path d="M9 4.5V3h6v1.5" /></svg>
-        剪贴板
-      </button>
-      <button class="act-btn" type="button" @click="toggleClipboardCapture">
-        {{ clipboardStatus?.settings.enabled ? "暂停记录" : "继续记录" }}
-      </button>
-      <button class="act-btn" type="button" @click="toggleLaunchAtLogin">
-        {{ clipboardStatus?.settings.launchAtLogin ? "取消自启" : "开机自启" }}
-      </button>
-      <button class="act-btn" type="button" @click="openDashboard">
+      <button class="act-btn" type="button" title="打开看板" aria-label="打开看板" @click="openDashboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="7" height="9" rx="1.5" />
           <rect x="14" y="3" width="7" height="5" rx="1.5" />
           <rect x="14" y="12" width="7" height="9" rx="1.5" />
           <rect x="3" y="16" width="7" height="5" rx="1.5" />
         </svg>
-        打开看板
       </button>
       <button
         class="act-btn primary"
         type="button"
         :class="{ syncing }"
         :disabled="syncing"
+        :title="syncing ? '同步中' : '立即同步'"
+        :aria-label="syncing ? '同步中' : '立即同步'"
         @click="requestSync"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 12a9 9 0 1 1-3-6.7" />
           <path d="M21 3v6h-6" />
         </svg>
-        {{ syncing ? "同步中" : "立即同步" }}
       </button>
-      <button class="act-btn quit" type="button" @click="quit">
+      <button class="act-btn quit" type="button" title="退出" aria-label="退出" @click="quit">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
           <path d="M16 17l5-5-5-5" />
           <path d="M21 12H9" />
         </svg>
-        退出
       </button>
     </div>
   </main>
@@ -309,18 +258,19 @@ onUnmounted(() => {
 <style scoped>
 .popover {
   --ink: #1d1d1f;
-  --ink-soft: #48484d;
-  --muted: #8a8a8e;
-  --hairline: rgba(0, 0, 0, 0.085);
+  --ink-soft: rgba(29, 29, 31, 0.76);
+  --muted: rgba(29, 29, 31, 0.52);
+  --hairline: rgba(0, 0, 0, 0.11);
   --accent: #5a5fef;
   --green: #30c55a;
   --green-deep: #209948;
   --red: #ff3b30;
   --orange: #e88316;
-  --tint: rgba(248, 249, 252, 0.78);
-  --card: rgba(255, 255, 255, 0.58);
-  --card-border: rgba(0, 0, 0, 0.07);
-  --chip: rgba(90, 95, 239, 0.09);
+  --tint: rgba(246, 248, 249, 0.36);
+  --rim: rgba(255, 255, 255, 0.66);
+  --edge: rgba(66, 74, 80, 0.2);
+  --sheen: rgba(255, 255, 255, 0.32);
+  --footer: rgba(255, 255, 255, 0.08);
   --track: rgba(0, 0, 0, 0.08);
   --hover: rgba(0, 0, 0, 0.035);
   --press: rgba(0, 0, 0, 0.06);
@@ -331,15 +281,20 @@ onUnmounted(() => {
   /* 高度随内容自然撑开；再由 JS 把窗口尺寸精确贴到此高度 */
   flex-direction: column;
   overflow: hidden;
-  border-radius: 16px;
-  background: var(--tint);
+  border-radius: 20px;
+  background:
+    linear-gradient(165deg, var(--sheen), transparent 28%),
+    var(--tint);
+  -webkit-backdrop-filter: blur(32px) saturate(145%);
+  backdrop-filter: blur(32px) saturate(145%);
+  isolation: isolate;
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     var(--font-sans), sans-serif;
-  /* 仅内圈高光 + 发丝描边（外阴影由原生窗口投射） */
+  /* 内圈描边贴合原生圆角；桌面磨砂与外阴影由透明原生窗口提供。 */
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.72);
+    inset 0 1px 0 var(--rim),
+    inset 0 0 0 0.5px var(--edge);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -347,7 +302,7 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   z-index: 0;
-  opacity: 0.035;
+  opacity: 0.016;
   mix-blend-mode: overlay;
   pointer-events: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -359,7 +314,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 15px 16px 14px;
+  padding: 16px 16px 14px;
 }
 .pop-title {
   display: flex;
@@ -385,14 +340,14 @@ onUnmounted(() => {
 }
 .pop-title h1 {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.01em;
 }
 .pop-title p {
   margin: 2px 0 0;
   color: var(--muted);
-  font-size: 9.5px;
+  font-size: 10.5px;
   font-weight: 500;
 }
 
@@ -456,6 +411,7 @@ onUnmounted(() => {
   position: relative;
   z-index: 1;
   height: 0.5px;
+  margin-inline: 16px;
   background: var(--hairline);
 }
 
@@ -466,8 +422,8 @@ onUnmounted(() => {
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  gap: 7px;
-  padding: 8px;
+  gap: 2px;
+  padding: 7px 8px;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.16) transparent;
 }
@@ -483,16 +439,12 @@ onUnmounted(() => {
 }
 
 .qrow {
-  padding: 10px 11px 11px;
-  border: 0.5px solid var(--card-border);
+  padding: 9px 10px 10px;
   border-radius: 10px;
-  background: var(--card);
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.025);
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease;
 }
 .qrow:hover {
-  border-color: rgba(90, 95, 239, 0.16);
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--hover);
 }
 .qrow-top {
   display: flex;
@@ -501,13 +453,11 @@ onUnmounted(() => {
 }
 .qicon {
   display: grid;
-  width: 30px;
+  width: 22px;
   height: 30px;
-  flex: 0 0 30px;
+  flex: 0 0 22px;
   place-items: center;
-  border: 0.5px solid var(--card-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.68);
+  opacity: 0.92;
 }
 .qcopy {
   min-width: 0;
@@ -521,26 +471,31 @@ onUnmounted(() => {
 }
 .qname {
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 630;
 }
 .qtag {
   overflow: hidden;
-  padding: 1px 6px;
-  border-radius: 5px;
-  background: var(--chip);
-  color: var(--accent);
-  font-size: 8.5px;
+  color: var(--muted);
+  font-size: 10px;
   font-weight: 600;
+  letter-spacing: 0.04em;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
+}
+.qtag::before {
+  content: "·";
+  margin: 0 4px 0 1px;
+  color: rgba(0, 0, 0, 0.22);
+  font-weight: 700;
 }
 .qmeta {
   display: block;
   margin-top: 2px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -564,12 +519,11 @@ onUnmounted(() => {
   color: var(--muted);
 }
 .qtrack {
-  height: 4px;
-  margin: 9px 0 0 39px;
+  height: 3px;
+  margin: 8px 0 0;
   overflow: hidden;
   border-radius: 20px;
   background: var(--track);
-  box-shadow: inset 0 0.5px 1.5px rgba(0, 0, 0, 0.08);
 }
 .qfill {
   height: 100%;
@@ -577,7 +531,7 @@ onUnmounted(() => {
   transition: width 0.4s ease;
 }
 .qfill.ok {
-  background: linear-gradient(90deg, #6e78f4, var(--accent));
+  background: linear-gradient(90deg, #7c85f5, var(--accent));
 }
 .qfill.warn {
   background: linear-gradient(90deg, #ffb24d, var(--orange));
@@ -613,31 +567,28 @@ onUnmounted(() => {
   z-index: 1;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  padding: 6px;
-  background: rgba(255, 255, 255, 0.22);
+  padding: 7px 10px 9px;
+  background: var(--footer);
 }
-.clipboard-error { position:relative; z-index:1; margin:0; padding:7px 12px; background:rgba(255,59,48,.07); color:var(--red); font-size:9.5px; line-height:1.4; }
 .act-btn {
   position: relative;
   display: flex;
-  height: 36px;
+  height: 32px;
   flex: 1;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   border: 0;
   background: transparent;
   color: var(--ink-soft);
-  font: inherit;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 500;
+  border-radius: 7px;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
 }
 .act-btn svg {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
   opacity: 0.75;
 }
 .act-btn + .act-btn::before {
@@ -650,9 +601,7 @@ onUnmounted(() => {
   background: var(--press);
 }
 .act-btn.primary {
-  background: rgba(90, 95, 239, 0.08);
   color: var(--accent);
-  font-weight: 600;
 }
 .act-btn.primary svg {
   opacity: 1;
@@ -672,39 +621,60 @@ onUnmounted(() => {
   }
 }
 
-/* 系统暗色外观：vibrancy 变深，翻转墨色/发丝线/色块以保持可读 */
+/* 静态设计预览复用同一套暗色材质。 */
+.popover.dark {
+    --ink: rgba(255, 255, 255, 0.9);
+    --ink-soft: rgba(255, 255, 255, 0.76);
+    --muted: rgba(235, 239, 241, 0.46);
+    --hairline: rgba(255, 255, 255, 0.13);
+    --tint: rgba(41, 45, 47, 0.48);
+    --rim: rgba(220, 239, 247, 0.23);
+    --edge: rgba(255, 255, 255, 0.16);
+    --sheen: rgba(171, 211, 226, 0.1);
+    --footer: rgba(255, 255, 255, 0.015);
+    --track: rgba(255, 255, 255, 0.12);
+    --hover: rgba(255, 255, 255, 0.075);
+    --press: rgba(255, 255, 255, 0.12);
+    --green-deep: #64d98b;
+}
+.popover.dark .qtag::before { color: rgba(255, 255, 255, 0.28); }
+.popover.dark .sync-pill.warn { color: #ffc278; }
+.popover.dark .sync-pill.error { color: #ff8e86; }
+
+/* 跟随系统菜单外观，与原生 popover 磨砂材质一致。 */
 @media (prefers-color-scheme: dark) {
   .popover {
-    --ink: #f5f5f7;
-    --ink-soft: #c7c7cc;
-    --muted: #8e8e93;
-    --hairline: rgba(255, 255, 255, 0.1);
-    --tint: rgba(28, 30, 38, 0.45);
-    --card: rgba(255, 255, 255, 0.055);
-    --card-border: rgba(255, 255, 255, 0.085);
-    --chip: rgba(255, 255, 255, 0.1);
-    --track: rgba(255, 255, 255, 0.14);
-    --hover: rgba(255, 255, 255, 0.06);
-    --press: rgba(255, 255, 255, 0.1);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.12),
-      inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+    --ink: rgba(255, 255, 255, 0.9);
+    --ink-soft: rgba(255, 255, 255, 0.76);
+    --muted: rgba(235, 239, 241, 0.46);
+    --hairline: rgba(255, 255, 255, 0.13);
+    --tint: rgba(41, 45, 47, 0.48);
+    --rim: rgba(220, 239, 247, 0.23);
+    --edge: rgba(255, 255, 255, 0.16);
+    --sheen: rgba(171, 211, 226, 0.1);
+    --footer: rgba(255, 255, 255, 0.015);
+    --track: rgba(255, 255, 255, 0.12);
+    --hover: rgba(255, 255, 255, 0.075);
+    --press: rgba(255, 255, 255, 0.12);
+    --green-deep: #64d98b;
   }
-  .qtrack {
-    box-shadow: inset 0 0.5px 1.5px rgba(0, 0, 0, 0.3);
-  }
-  .qicon {
-    background: rgba(255, 255, 255, 0.08);
+  .qtag::before {
+    color: rgba(255, 255, 255, 0.28);
   }
   .qrow:hover {
-    border-color: rgba(125, 130, 255, 0.24);
-    background: rgba(255, 255, 255, 0.085);
+    background: var(--hover);
   }
   .quota-list {
     scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   }
   .quota-list::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.2);
+  }
+  .sync-pill.warn {
+    color: #ffc278;
+  }
+  .sync-pill.error {
+    color: #ff8e86;
   }
 }
 </style>

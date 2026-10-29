@@ -20,6 +20,8 @@ function readPreferences(): DailyReportPreferences {
     authors: Array.isArray(parsed.authors) ? parsed.authors : [],
     ai: parsed.ai,
     aiApiKeys: parsed.aiApiKeys,
+    aiCustomModels: parsed.aiCustomModels,
+    aiSelectedModels: parsed.aiSelectedModels,
   };
 }
 

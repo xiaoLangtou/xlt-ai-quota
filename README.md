@@ -34,6 +34,7 @@ AI 用量看板是一款本地优先的桌面应用，用于统一查看多个 A
 | Claude Code | 不支持 | 支持 | 从 `~/.claude/projects` 中的会话记录聚合。 |
 | Gemini CLI | 不支持 | 支持 | 从 `~/.gemini/tmp` 中的会话记录聚合。 |
 | GitHub Copilot CLI | 不支持 | 支持 | 从 `~/.copilot/session-state` 中的会话记录聚合。 |
+| DeepSeek | 账户余额 | 支持 | 余额经官方 `/user/balance`（需 API Key，可选）；Token 读取 DeepSeek Harness 客户端 `~/.dsh/sessions` 的真实用量。 |
 
 没有对应工具或登录态时，相关连接器会显示同步错误，但不会影响其他数据源的采集。
 

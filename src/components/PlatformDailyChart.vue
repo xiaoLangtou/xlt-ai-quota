@@ -21,6 +21,7 @@ const PLATFORM_VAR: Record<string, [string, string]> = {
   "opencode-go": ["--brand-open", "#17b8a6"],
   gemini: ["--brand-gemini", "#4989f5"],
   copilot: ["--brand-copilot", "#6e7681"],
+  deepseek: ["--brand-deepseek", "#4d6bfe"],
 };
 const PLATFORM_LABEL: Record<string, string> = {
   ark: "火山方舟",
@@ -31,6 +32,7 @@ const PLATFORM_LABEL: Record<string, string> = {
   "opencode-go": "OpenCode Go",
   gemini: "Gemini CLI",
   copilot: "GitHub Copilot",
+  deepseek: "DeepSeek",
 };
 
 const option = computed(() => {
@@ -48,7 +50,7 @@ const option = computed(() => {
       totalByPlatform.set(key, (totalByPlatform.get(key) ?? 0) + value);
     }
   }
-  const order = ["ark", "codex", "claude", "kiro", "qoder", "opencode-go", "gemini", "copilot"];
+  const order = ["ark", "codex", "claude", "kiro", "qoder", "opencode-go", "gemini", "copilot", "deepseek"];
   const series = order
     .filter((p) => (totalByPlatform.get(p) ?? 0) > 0)
     .map((p) => {

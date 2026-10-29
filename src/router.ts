@@ -22,9 +22,36 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
         component: () => import("./views/tools/DailyReportPage.vue"),
       },
       {
+        path: "/calendar",
+        name: "calendar",
+        component: () => import("./views/CalendarTodoView.vue"),
+      },
+      {
+        path: "/todos",
+        name: "todos",
+        component: () => import("./views/TodoView.vue"),
+      },
+      {
+        // 禅道条目详情独立页面：大屏下用整页宽幅布局替代抽屉。
+        path: "/todos/:taskId",
+        name: "todo-detail",
+        component: () => import("./views/TodoDetailPage.vue"),
+        props: true,
+      },
+      {
+        path: "/calendar/decompose",
+        name: "calendar-decompose",
+        component: () => import("./views/tools/DocumentDecompositionPage.vue"),
+      },
+      {
         path: "/snippets",
         name: "snippets",
         component: () => import("./views/tools/SnippetsPage.vue"),
+      },
+      {
+        path: "/translate",
+        name: "translate",
+        component: () => import("./views/tools/TranslatePage.vue"),
       },
       {
         path: "/clipboard",
@@ -35,6 +62,11 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
         path: "/vault",
         name: "vault",
         component: () => import("./views/tools/VaultPage.vue"),
+      },
+      {
+        path: "/shell-env",
+        name: "shell-env",
+        component: () => import("./views/tools/ShellEnvPage.vue"),
       },
       // 停用时不注册页面，旧链接统一走末尾的概览重定向。
       ...(skillsMcpEnabled ? [

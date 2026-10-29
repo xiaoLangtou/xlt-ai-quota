@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import type {
   ApplyPlanRequest,
@@ -96,16 +96,21 @@ async function loadSources() {
   }
 }
 
+let packageRequest = 0;
 async function loadPackages() {
+  const request = ++packageRequest;
   loading.value = true;
   error.value = "";
   try {
-    packages.value = await mcpApi.listPackages(currentFilter(), projectPaths.value);
+    const result = await mcpApi.listPackages(currentFilter(), projectPaths.value);
+    if (request !== packageRequest) return;
+    packages.value = result;
     visible.value = PAGE_SIZE;
   } catch (caught) {
+    if (request !== packageRequest) return;
     error.value = mcpErrorMessage(caught);
   } finally {
-    loading.value = false;
+    if (request === packageRequest) loading.value = false;
   }
 }
 
@@ -134,6 +139,10 @@ onMounted(async () => {
 });
 
 let searchTimer: number | undefined;
+onUnmounted(() => {
+  window.clearTimeout(searchTimer);
+  packageRequest++;
+});
 watch(search, () => {
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => void loadPackages(), 500);

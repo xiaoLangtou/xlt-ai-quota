@@ -293,6 +293,8 @@ export interface CostInput {
   cachedTokens?: number;
   /** 缓存写入 token（Claude cache_creation 等） */
   cacheWriteTokens?: number;
+  /** 推理 token；Codex / Every Code 的 output 已包含推理，避免重复计费 */
+  reasoningTokens?: number;
 }
 
 /**
@@ -311,21 +313,24 @@ function cacheWriteRate(rates: ModelRates): number {
 /**
  * 估算单条用量的费用（USD）。
  *
- * input 是否含缓存因采集源而异：input >= cached + cacheWrite 时按净输入计费，
- * 否则认为 input 已是净输入，缓存部分单独计费。
+ * 与 juejin 对齐：`inputTokens` 视为**净输入**（不含缓存），缓存读/写与推理分开计费。
+ * Codex / Every Code 的 output 已包含推理 token，不再重复计推理费。
  */
 export function computeCostUsd(row: CostInput): number {
   const { rates } = lookupRates(row.model, row.source);
   const input = Math.max(0, row.inputTokens);
+  const output = Math.max(0, row.outputTokens);
   const cached = Math.max(0, row.cachedTokens ?? 0);
   const cacheWrite = Math.max(0, row.cacheWriteTokens ?? 0);
-  const billedInput =
-    input >= cached + cacheWrite ? input - cached - cacheWrite : input;
+  const reasoning = Math.max(0, row.reasoningTokens ?? 0);
+  const reasoningIncluded =
+    row.source === "codex" || row.source === "every-code";
   const usd =
-    (billedInput * rates.input +
+    (input * rates.input +
+      output * rates.output +
       cached * cacheReadRate(rates) +
       cacheWrite * cacheWriteRate(rates) +
-      Math.max(0, row.outputTokens) * rates.output) /
+      (reasoningIncluded ? 0 : reasoning * rates.output)) /
     1_000_000;
   return Math.round(usd * 1e9) / 1e9;
 }

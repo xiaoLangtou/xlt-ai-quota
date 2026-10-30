@@ -146,13 +146,24 @@ async function clearCache(): Promise<void> {
   cacheBusy.value = true;
   try {
     cacheStats.value = await usageService.clearUsageCache();
-    pushToast("已清空本地用量缓存", "success");
+    pushToast("已清空本地用量缓存，请回到看板点「同步」重新拉取历史数据", "success");
   } catch (reason) {
     pushToast(reason instanceof Error ? reason.message : String(reason), "error");
   } finally {
     cacheBusy.value = false;
   }
 }
+async function copyCachePath(): Promise<void> {
+  const path = cacheStats.value?.dataDir;
+  if (!path) return;
+  try {
+    await navigator.clipboard.writeText(path);
+    pushToast("已复制数据目录", "success");
+  } catch {
+    pushToast("复制失败，请手动选择路径", "error");
+  }
+}
+
 const hiddenQuotaTargets = ref<QuotaDisplayTarget[]>([]);
 const oilProvince = ref("");
 const oilApiKey = ref("");
@@ -393,6 +404,7 @@ const QUOTA_DISPLAY_OPTIONS: { value: QuotaDisplayTarget; label: string; platfor
   { value: "qoder", label: "Qoder", platform: "qoder" },
   { value: "kimi", label: "Kimi", platform: "kimi" },
   { value: "deepseek", label: "DeepSeek", platform: "deepseek" },
+  { value: "devin", label: "Devin", platform: "devin" },
 ];
 
 /** 除火山方舟外的本机 CLI 连接器：登录态由各自 CLI 维护，同步时自动汇总。 */
@@ -406,6 +418,7 @@ const CONNECTORS = [
   { key: "gemini", name: "Gemini CLI", desc: "读取 ~/.gemini/tmp 会话的真实 Token", badge: "自动采集", tone: "ok" },
   { key: "copilot", name: "GitHub Copilot", desc: "读取 ~/.copilot 会话的真实 Token", badge: "自动采集", tone: "ok" },
   { key: "deepseek", name: "DeepSeek", desc: "DSH 客户端会话 Token（真实）+ 官方账户余额（需 API Key）", badge: "余额+Token", tone: "ok" },
+  { key: "devin", name: "Devin", desc: "读取 devin auth status 的套餐信息；额度数值待官方接口开放", badge: "套餐", tone: "ok" },
 ] as const;
 
 // ---- 设置页布局：顶部 Tabs + 分区卡片（全部默认展开，不可折叠） ----
@@ -657,38 +670,45 @@ function updateStatsSince(value: string): void {
           </section>
 
           <section class="sec">
-            <div class="sec-head solo">
+            <div class="sec-head solo cache-head">
               <span class="sec-icon tone-info"><Database :size="18" /></span>
               <span class="sec-copy">
                 <strong>本地用量缓存</strong>
                 <small>~/.xlt-workbench · 按月 JSONL · 支持定期与手动清理</small>
               </span>
+              <div class="cache-actions">
+                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="loadCacheStats">刷新</Button>
+                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="cleanupCache">清理过期月份</Button>
+                <Button variant="ghost" size="sm" class="cache-danger" :disabled="cacheBusy" @click="clearCache">清空全部缓存</Button>
+              </div>
             </div>
-            <div class="sec-body">
-              <div v-if="cacheStats" class="pref-grid">
-                <div class="pref-field">
-                  <span>数据目录</span>
-                  <strong>{{ cacheStats.dataDir }}</strong>
+            <div class="sec-body cache-body">
+              <div v-if="cacheStats" class="cache-path">
+                <div class="cache-path-main">
+                  <span class="cache-label">数据目录</span>
+                  <code :title="cacheStats.dataDir">{{ cacheStats.dataDir }}</code>
                 </div>
-                <div class="pref-field">
+                <Button variant="ghost" size="sm" @click="copyCachePath">复制</Button>
+              </div>
+              <div v-if="cacheStats" class="cache-stats">
+                <div class="cache-stat">
                   <span>总记录</span>
                   <strong>{{ cacheStats.totalRows.toLocaleString() }}</strong>
                 </div>
-                <div class="pref-field">
+                <div class="cache-stat">
                   <span>占用空间</span>
                   <strong>{{ formatBytes(cacheStats.totalBytes) }}</strong>
                 </div>
-                <div class="pref-field">
+                <div class="cache-stat">
                   <span>时间范围</span>
-                  <strong>{{ cacheStats.oldestHour?.slice(0, 10) || "—" }} ~ {{ cacheStats.newestHour?.slice(0, 10) || "—" }}</strong>
+                  <strong>{{ cacheStats.oldestHour?.slice(0, 10) || "—" }} <em>→</em> {{ cacheStats.newestHour?.slice(0, 10) || "—" }}</strong>
+                </div>
+                <div class="cache-stat">
+                  <span>游标来源</span>
+                  <strong>{{ cacheStats.cursorSources.length }} 个</strong>
                 </div>
               </div>
-              <div class="flex flex-wrap gap-2 pt-2">
-                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="cleanupCache">清理过期月份</Button>
-                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="clearCache">清空全部缓存</Button>
-                <Button variant="ghost" size="sm" :disabled="cacheBusy" @click="loadCacheStats">刷新</Button>
-              </div>
-              <p class="pref-note">清理按「保留天数」删除整月文件；清空会移除全部用量桶与额度快照，配置和账单保留。</p>
+              <p class="cache-note">清理按「保留天数」删除整月文件；清空会移除全部用量桶与额度快照，配置和账单保留。清空后请回到看板点「同步」重新拉取历史数据。</p>
             </div>
           </section>
 
@@ -1085,7 +1105,7 @@ function updateStatsSince(value: string): void {
   position: sticky;
   top: 0;
   z-index: 3;
-  background: var(--bg);
+  background: transparent;
 }
 .tab-bar button {
   flex: 1;
@@ -1592,7 +1612,7 @@ function updateStatsSince(value: string): void {
   position: static;
   flex: 0 0 auto;
   margin: 12px -2px 0;
-  background: var(--bg);
+  background: transparent;
 }
 .foot-hint {
   color: var(--text-subtle);
@@ -1623,5 +1643,145 @@ function updateStatsSince(value: string): void {
   .page-foot {
     flex-wrap: wrap;
   }
+}
+
+/* 本地用量缓存 */
+.cache-head {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.cache-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.cache-danger {
+  color: var(--u-crit);
+}
+.cache-danger:hover {
+  background: color-mix(in srgb, var(--u-crit) 10%, transparent);
+}
+.cache-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 14px;
+}
+.cache-path {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+.cache-path-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 10px;
+}
+.cache-label {
+  flex: 0 0 auto;
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+}
+.cache-path code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cache-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.cache-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 14px;
+  border-right: 1px solid var(--border);
+}
+.cache-stat:last-child {
+  border-right: 0;
+}
+.cache-stat span {
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+}
+.cache-stat strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cache-stat em {
+  margin: 0 2px;
+  color: var(--text-subtle);
+  font-style: normal;
+}
+.cache-note {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+@media (max-width: 760px) {
+  .cache-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .cache-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cache-stat {
+    border-bottom: 1px solid var(--border);
+  }
+  .cache-stat:nth-child(2n) {
+    border-right: 0;
+  }
+  .cache-stat:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
+}
+
+.devin-usage-input {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  outline: none;
+}
+.devin-usage-input:focus {
+  border-color: var(--accent);
 }
 </style>

@@ -368,7 +368,7 @@ async function onRemoveFromDetail(payload: { event: CalendarEvent; task: TodoTas
   min-width: 0;
   min-height: 0;
   height: 100%;
-  background: var(--bg);
+  background: transparent;
 }
 .calendar-pane {
   display: grid;

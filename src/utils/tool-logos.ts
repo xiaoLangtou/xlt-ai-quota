@@ -9,6 +9,7 @@ import codexLogo from "@lobehub/icons-static-svg/icons/codex-color.svg";
 import copilotLogo from "@lobehub/icons-static-svg/icons/copilot-color.svg";
 import cursorLogo from "@lobehub/icons-static-svg/icons/cursor.svg";
 import deepSeekLogo from "@lobehub/icons-static-svg/icons/deepseek-color.svg";
+import devinLogo from "@lobehub/icons-static-svg/icons/devin-color.svg";
 import geminiLogo from "@lobehub/icons-static-svg/icons/gemini-color.svg";
 import gooseLogo from "@lobehub/icons-static-svg/icons/goose.svg";
 import kiroLogo from "@lobehub/icons-static-svg/icons/kiro-color.svg";
@@ -46,6 +47,7 @@ export const TOOL_LOGO_ASSETS: Record<string, ToolLogoAsset> = {
   copilot: { src: copilotLogo, monochrome: false },
   cursor: { src: cursorLogo, monochrome: true },
   deepseek: { src: deepSeekLogo, monochrome: false },
+  devin: { src: devinLogo, monochrome: false },
   "deep-seek": { src: deepSeekLogo, monochrome: false },
   gemini: { src: geminiLogo, monochrome: false },
   "github-copilot": { src: copilotLogo, monochrome: false },
@@ -72,6 +74,16 @@ export const TOOL_LOGO_ASSETS: Record<string, ToolLogoAsset> = {
   roocode: { src: rooLogo, monochrome: true },
   "roo-code": { src: rooLogo, monochrome: true },
   trae: { src: traeLogo, monochrome: false },
+  "codex-acp": { src: codexLogo, monochrome: false },
+  "claude-acp": { src: claudeLogo, monochrome: false },
+  "opencode-acp": { src: openCodeLogo, monochrome: true },
+  "kiro-acp": { src: kiroLogo, monochrome: false },
+  "cursor-acp": { src: cursorLogo, monochrome: true },
+  "qoder-acp": { src: qoderLogo, monochrome: false },
+  "codebuddy-acp": { src: codebuddyLogo, monochrome: false },
+  "kimi-acp": { src: kimiLogo, monochrome: true },
+  "mimo-acp": { src: mimoLogo, monochrome: true },
+  "copilot-acp": { src: copilotLogo, monochrome: false },
 };
 
 export function resolveToolLogo(platform: string): ToolLogoAsset | undefined {

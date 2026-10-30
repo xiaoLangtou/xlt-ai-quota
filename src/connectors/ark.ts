@@ -103,9 +103,12 @@ export class ArkConnector
       platform: "ark",
       date: r.Day,
       model: r.ModelName,
-      inputTokens: num(r.InputTokens),
+      project: r.ProjectName || undefined,
+      inputTokens: Math.max(0, num(r.InputTokens) - (r.CacheTokensHit != null ? num(r.CacheTokensHit) : 0)),
       outputTokens: num(r.OutputTokens),
       cachedTokens: r.CacheTokensHit != null ? num(r.CacheTokensHit) : undefined,
+      cacheWriteTokens: r.CacheTokensCreate != null ? num(r.CacheTokensCreate) : undefined,
+      reasoningTokens: r.ReasoningTokens != null ? num(r.ReasoningTokens) : undefined,
       requestCount: r.ReqCnt != null ? num(r.ReqCnt) : undefined,
       collectedAt,
     }));
@@ -153,8 +156,11 @@ interface ArkStatsRow {
   InputTokens?: number | string;
   OutputTokens?: number | string;
   CacheTokensHit?: number | string;
+  CacheTokensCreate?: number | string;
+  ReasoningTokens?: number | string;
   ReqCnt?: number | string;
   ModelName?: string;
+  ProjectName?: string;
 }
 interface ArkStatsPayload {
   error?: string;

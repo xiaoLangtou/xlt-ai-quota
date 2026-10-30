@@ -13,7 +13,7 @@ import type {
 } from "@/types/usage";
 import type { ConnectorConfigPersist, UsageStorage } from "./storage";
 import { webStorage } from "./web-storage";
-import { aggregateBucketsToDaily, dailyToBuckets, dayBoundsUtc, localNoonUtc } from "@/utils/usage-time";
+import { aggregateBucketsToDaily, dailyToBuckets, dayBoundsUtc, localDate, localNoonUtc } from "@/utils/usage-time";
 
 interface UsageBootstrap {
   config: UsageConfig;
@@ -172,28 +172,9 @@ class TauriUsageStorage implements UsageStorage {
   }
 
   async saveQuotaStates(snapshots: QuotaStateSnapshot[]): Promise<void> {
-    const byKey = new Map(this.quotas.map((item) => [`${item.channel}|${item.account ?? ""}`, item]));
-    for (const snapshot of snapshots) {
-      const key = `${snapshot.channel}|${snapshot.account ?? ""}`;
-      const previous = byKey.get(key);
-      if (snapshot.status === "ready") {
-        byKey.set(key, {
-          ...snapshot,
-          fetchedAt: snapshot.fetchedAt ?? new Date().toISOString(),
-          stale: false,
-        });
-      } else if (previous?.status === "ready") {
-        byKey.set(key, {
-          ...previous,
-          stale: true,
-          message: snapshot.message ?? "暂时无法获取最新额度，当前展示上次成功结果",
-        });
-      } else {
-        byKey.set(key, snapshot);
-      }
-    }
-    this.quotas = [...byKey.values()];
     await invoke("usage_save_quotas", { snapshots });
+    // 以 Rust 侧为准重新加载：套餐变更/失败降级/旧卡清理都在后端完成。
+    this.quotas = await invoke<QuotaStateSnapshot[]>("usage_list_quotas");
   }
 
   listTokens(): TokenDailyUsage[] {
@@ -205,6 +186,14 @@ class TauriUsageStorage implements UsageStorage {
 
   listTokensByRange(start: string, end: string): TokenDailyUsage[] {
     return this.listTokens().filter((record) => record.date >= start && record.date <= end);
+  }
+
+  listBucketsByRange(start: string, end: string): QueueBucket[] {
+    const timezone = this.config.timezone ?? undefined;
+    return this.buckets.filter((bucket) => {
+      const date = localDate(bucket.hourStart, timezone);
+      return date >= start && date <= end;
+    });
   }
 
   async saveTokens(records: TokenDailyUsage[]): Promise<void> {
@@ -297,6 +286,10 @@ class TauriUsageStorage implements UsageStorage {
     });
     await this.reload();
     return this.stats;
+  }
+
+  async reloadQuotas(): Promise<void> {
+    this.quotas = await invoke<QuotaStateSnapshot[]>("usage_list_quotas");
   }
 
   async reloadBuckets(): Promise<void> {

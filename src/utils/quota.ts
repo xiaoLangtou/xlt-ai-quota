@@ -42,24 +42,32 @@ function toWindow(row: QuotaSnapshot): QuotaWindow {
   };
 }
 
-/** 把 connector 的扁平读数按账户聚合成状态快照。 */
+/**
+ * 把 connector 的扁平读数聚合成状态快照。
+ *
+ * - 方舟：按套餐（coding-plan / agent-plan）分卡；
+ * - 其他平台：一个平台一张卡，`accountName` 只作为套餐标签，不参与分组。
+ *   这样 Codex 的 Plus/Free、Kiro 的 Pro/Pro+、Qoder 的 Pro/personal_standard
+ *   不会因为套餐名变化而堆出多张卡。
+ */
 export function flatToStateSnapshots(
   platform: Platform,
   rows: QuotaSnapshot[],
 ): QuotaStateSnapshot[] {
-  const byAccount = new Map<string, QuotaSnapshot[]>();
-  for (const row of rows) {
-    const account = row.accountName?.trim() || platform;
-    byAccount.set(account, [...(byAccount.get(account) ?? []), row]);
-  }
-  return [...byAccount.entries()].map(([account, items]) => {
+  if (rows.length === 0) return [];
+  const groups =
+    platform === "ark"
+      ? groupByAccount(rows)
+      : [[rows[0]?.accountName?.trim() || platform, rows] as const];
+
+  return groups.map(([account, items]) => {
     const limits = items
       .filter((row) => row.metric !== "balance")
       .map(toWindow);
     const balanceRow = items.find((row) => row.metric === "balance");
     return {
       channel: platform,
-      account,
+      account: platform === "ark" ? account : undefined,
       status: "ready",
       planLabel: account,
       region: null,
@@ -70,6 +78,15 @@ export function flatToStateSnapshots(
       balance: balanceRow?.balance,
     } satisfies QuotaStateSnapshot;
   });
+}
+
+function groupByAccount(rows: QuotaSnapshot[]): Array<readonly [string, QuotaSnapshot[]]> {
+  const byAccount = new Map<string, QuotaSnapshot[]>();
+  for (const row of rows) {
+    const account = row.accountName?.trim() || "ark";
+    byAccount.set(account, [...(byAccount.get(account) ?? []), row]);
+  }
+  return [...byAccount.entries()];
 }
 
 const ERROR_STATUS: { pattern: RegExp; status: QuotaStatus }[] = [

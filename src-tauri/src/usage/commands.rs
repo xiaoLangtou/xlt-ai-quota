@@ -32,6 +32,7 @@ pub fn usage_init() -> Result<UsageBootstrap, String> {
     let _guard = lock();
     paths::ensure_dirs()?;
     let _ = cleanup::cleanup_if_due();
+    let _ = quota::normalize();
     let cfg = config::load();
     Ok(UsageBootstrap {
         config: cfg,

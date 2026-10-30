@@ -22,7 +22,12 @@
         "center": true,
         "visible": false,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "transparent": true,
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "active"
+        }
       },
       {
         "label": "tray-panel",

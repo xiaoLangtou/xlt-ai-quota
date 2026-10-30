@@ -491,7 +491,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   height: 100%;
-  background: var(--bg);
+  background: transparent;
 }
 .steps {
   display: flex;

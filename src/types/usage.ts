@@ -1,16 +1,17 @@
 // 数据模型 - 与产品方案一致
 
-export type Platform = "ark" | "codex" | "kimi" | "kiro" | "qoder" | "opencode-go" | "deepseek";
+export type Platform = "ark" | "codex" | "kimi" | "kiro" | "qoder" | "opencode-go" | "deepseek" | "devin";
 
 /** 会在「套餐额度」区域展示的平台。 */
-export const QUOTA_PLATFORMS = ["codex", "ark", "kiro", "qoder", "kimi", "deepseek"] as const;
+export const QUOTA_PLATFORMS = ["codex", "ark", "kiro", "qoder", "kimi", "deepseek", "devin"] as const;
 export type QuotaPlatform = (typeof QUOTA_PLATFORMS)[number];
 
 /** 套餐额度视图的显示开关；方舟的两种套餐可独立控制。 */
-export const QUOTA_DISPLAY_TARGETS = ["codex", "ark-coding", "ark-agent", "kiro", "qoder", "kimi", "deepseek"] as const;
+export const QUOTA_DISPLAY_TARGETS = ["codex", "ark-coding", "ark-agent", "kiro", "qoder", "kimi", "deepseek", "devin"] as const;
 export type QuotaDisplayTarget = (typeof QUOTA_DISPLAY_TARGETS)[number];
 
 export type QuotaMetric =
+  | "daily"
   | "five_hour"
   | "weekly"
   | "monthly"
@@ -128,6 +129,8 @@ export interface TokenDailyUsage {
   /** YYYY-MM-DD */
   date: string;
   model?: string;
+  /** 项目名（工作目录最后一段）；未知为 unknown */
+  project?: string;
   inputTokens: number;
   outputTokens: number;
   cachedTokens?: number;
@@ -135,6 +138,8 @@ export interface TokenDailyUsage {
   cacheWriteTokens?: number;
   reasoningTokens?: number;
   requestCount?: number;
+  /** 上游上报的真实费用（USD）；存在时优先于模型单价估算 */
+  reportedCostUsd?: number;
   collectedAt: string;
 }
 
@@ -246,6 +251,12 @@ export interface TokenSummary {
   input: number;
   output: number;
   cached?: number;
+  /** 缓存写入 token（Claude cache_creation 等） */
+  cacheWrite?: number;
+  /** 推理 token（reasoning / thoughts） */
+  reasoning?: number;
+  /** 缓存命中率：缓存读 ÷（净输入 + 缓存读 + 缓存写） */
+  cacheHitRate?: number;
   requests: number;
   /** 预估费用（USD），按模型单价估算 */
   costUsd: number;
@@ -386,7 +397,36 @@ export const PLATFORM_META: Record<
   kimi: { name: "Kimi", logoChar: "K", logoClass: "kimi" },
   "opencode-go": { name: "OpenCode Go", logoChar: "O", logoClass: "open" },
   deepseek: { name: "DeepSeek", logoChar: "D", logoClass: "deepseek" },
+  devin: { name: "Devin", logoChar: "D", logoClass: "devin" },
 };
+
+/** 项目分布中的单个模型切片。 */
+export interface ProjectModelUsage {
+  model: string;
+  platform: string;
+  tokens: number;
+  costUsd: number;
+  pct: number;
+}
+
+/** 按项目聚合的用量。 */
+export interface ProjectUsage {
+  /** 规范化后的项目名（工作目录最后一段） */
+  project: string;
+  tokens: number;
+  input: number;
+  output: number;
+  cached: number;
+  cacheWrite: number;
+  reasoning: number;
+  requests: number;
+  costUsd: number;
+  /** 缓存命中率（0-100） */
+  cacheHitRate: number;
+  /** 占所选周期总 Token 的百分比 */
+  pct: number;
+  models: ProjectModelUsage[];
+}
 
 /** 用于存储 connector 配置（API Key 等），仅保存在本机 */
 export interface ConnectorConfig {
@@ -422,4 +462,6 @@ export interface UsageConfig {
   retentionDays: number;
   pricingUrl?: string | null;
   lastCleanupAt?: string | null;
+  /** 手动粘贴的 devin /usage 输出 */
+  devinUsageText?: string | null;
 }

@@ -80,7 +80,22 @@ export function dayBoundsUtc(date: string): { start: string; end: string } {
   };
 }
 
-/** 把半小时桶聚合成日粒度（platform + date + model）。 */
+/** 项目名规范化：解开 percent-encoding / file URL，取路径最后一段。 */
+export function normalizeProjectName(value?: string): string {
+  const raw = (value ?? "").trim();
+  if (!raw || raw === "unknown") return "unknown";
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // 保留原值
+  }
+  if (/^file:/i.test(decoded)) decoded = decoded.replace(/^file:\/\//i, "");
+  const parts = decoded.replace(/\\/g, "/").replace(/\/+$/, "").split("/");
+  return parts[parts.length - 1]?.trim() || "unknown";
+}
+
+/** 把半小时桶聚合成日粒度（platform + date + model + project）。 */
 export function aggregateBucketsToDaily(
   buckets: QueueBucket[],
   timezone?: string,
@@ -89,19 +104,22 @@ export function aggregateBucketsToDaily(
   for (const bucket of buckets) {
     const date = localDate(bucket.hourStart, timezone);
     const model = bucket.model || "未知模型";
-    const key = `${bucket.source}|${date}|${model}`;
+    const project = normalizeProjectName(bucket.project);
+    const key = `${bucket.source}|${date}|${model}|${project}`;
     const current =
       byKey.get(key) ??
       ({
         platform: bucket.source,
         date,
         model,
+        project,
         inputTokens: 0,
         outputTokens: 0,
         cachedTokens: 0,
         cacheWriteTokens: 0,
         reasoningTokens: 0,
         requestCount: 0,
+        reportedCostUsd: 0,
         collectedAt: bucket.hourStart,
       } satisfies TokenDailyUsage);
     current.inputTokens += bucket.inputTokens;
@@ -110,6 +128,7 @@ export function aggregateBucketsToDaily(
     current.cacheWriteTokens = (current.cacheWriteTokens ?? 0) + bucket.cacheCreationInputTokens;
     current.reasoningTokens = (current.reasoningTokens ?? 0) + bucket.reasoningOutputTokens;
     current.requestCount = (current.requestCount ?? 0) + (bucket.localMetrics?.requestCount ?? 0);
+    current.reportedCostUsd = (current.reportedCostUsd ?? 0) + (bucket.reportedCostUsd ?? 0);
     if (bucket.hourStart < current.collectedAt) current.collectedAt = bucket.hourStart;
     byKey.set(key, current);
   }
@@ -130,7 +149,7 @@ export function dailyToBuckets(
     return {
       hourStart: localNoonUtc(row.date, timezone),
       source: row.platform,
-      project: "unknown",
+      project: normalizeProjectName(row.project),
       model: row.model?.trim() || "unknown",
       inputTokens: input,
       outputTokens: output,
@@ -139,6 +158,7 @@ export function dailyToBuckets(
       reasoningOutputTokens: reasoning,
       totalTokens: input + output + cached + cacheWrite + reasoning,
       conversationCount: 0,
+      reportedCostUsd: row.reportedCostUsd,
       localMetrics: {
         requestCount: row.requestCount ?? 0,
         cacheHitTokens: cached,

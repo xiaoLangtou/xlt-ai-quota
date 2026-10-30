@@ -4,6 +4,7 @@ import type {
   QuotaDisplayTarget,
   QuotaSnapshot,
   QuotaStateSnapshot,
+  QueueBucket,
   SubscriptionPreferences,
   SyncInfo,
   TokenDailyUsage,
@@ -74,6 +75,10 @@ export interface UsageStorage {
   clearCache?(): Promise<UsageCacheStats>;
   /** 从磁盘重新加载用量桶（Rust 采集器自行落盘后使用）。 */
   reloadBuckets?(): Promise<void>;
+  /** 从磁盘重新加载额度快照（托盘面板与主窗口共用文件）。 */
+  reloadQuotas?(): Promise<void>;
+  /** 按本地日期区间读取原始半小时桶（小时级图表用）。 */
+  listBucketsByRange?(start: string, end: string): QueueBucket[];
 
   /** 用量数据目录配置（时区 / 起始日 / 保留天数 / 定价地址）。 */
   getUsageConfig?(): UsageConfig;

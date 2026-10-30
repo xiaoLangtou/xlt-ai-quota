@@ -8,7 +8,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     env, fs,
     path::{Path, PathBuf},
     process::Command,
@@ -44,6 +44,7 @@ fn connector_get_blocking(request: ConnectorRequest) -> Result<Value, String> {
         ("/api/opencode", "/stats") => opencode_stats(&request.query),
         ("/api/codex", "/status") => codex_status(),
         ("/api/codex", "/usage") => codex_usage(),
+        ("/api/devin", "/usage") => devin_usage(),
         ("/api/codex", "/stats") => codex_stats(&request.query),
         ("/api/kimi", "/usage") => kimi_usage(),
         ("/api/kimi", "/stats") => kimi_stats(&request.query),
@@ -477,6 +478,18 @@ fn in_date_range(day: NaiveDate, start: NaiveDate, end: NaiveDate) -> bool {
     day >= start && day <= end
 }
 
+fn project_from_path(path: &str) -> String {
+    let trimmed = path.trim().trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() {
+        return "unknown".to_owned();
+    }
+    trimmed
+        .rsplit(|character| character == '/' || character == '\\')
+        .next()
+        .unwrap_or("unknown")
+        .to_owned()
+}
+
 fn model_name(value: Option<&Value>, default: &str) -> String {
     value
         .and_then(Value::as_str)
@@ -538,7 +551,7 @@ fn estimate_json_tokens(value: &Value) -> f64 {
 }
 
 fn add_tokens_with_requests(
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
     day: NaiveDate,
     model: &str,
     input: f64,
@@ -546,15 +559,51 @@ fn add_tokens_with_requests(
     cached: f64,
     requests: u64,
 ) {
-    if input == 0.0 && output == 0.0 && cached == 0.0 && requests == 0 {
+    add_tokens_full(
+        totals,
+        &day.format("%F").to_string(),
+        model,
+        "unknown",
+        input,
+        output,
+        cached,
+        0.0,
+        0.0,
+        requests,
+    );
+}
+
+/// 统一口径：`input` 为净输入（不含缓存），缓存读/写与推理 token 分开计。
+#[allow(clippy::too_many_arguments)]
+fn add_tokens_full(
+    totals: &mut TokenTotals,
+    day: &str,
+    model: &str,
+    project: &str,
+    input: f64,
+    output: f64,
+    cached: f64,
+    cache_write: f64,
+    reasoning: f64,
+    requests: u64,
+) {
+    if input == 0.0
+        && output == 0.0
+        && cached == 0.0
+        && cache_write == 0.0
+        && reasoning == 0.0
+        && requests == 0
+    {
         return;
     }
     let current = totals
-        .entry((day.format("%F").to_string(), model.trim().to_owned()))
+        .entry((day.to_owned(), model.trim().to_owned(), project.to_owned()))
         .or_default();
     current.input += input;
     current.output += output;
     current.cached += cached;
+    current.cache_write += cache_write;
+    current.reasoning += reasoning;
     current.requests += requests;
 }
 
@@ -603,7 +652,7 @@ fn collect_kiro_cli_stats(
     cli_dir: &Path,
     start: NaiveDate,
     end: NaiveDate,
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
 ) {
     let Ok(entries) = fs::read_dir(cli_dir) else {
         return;
@@ -691,7 +740,7 @@ fn collect_kiro_ide_stats(
     sessions_root: &Path,
     start: NaiveDate,
     end: NaiveDate,
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
 ) {
     for path in jsonl_files(sessions_root) {
         if path.file_name().and_then(|value| value.to_str()) != Some("messages.jsonl")
@@ -802,16 +851,28 @@ fn collect_qoder_database_stats(
     path: &Path,
     start: NaiveDate,
     end: NaiveDate,
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
 ) -> Result<(), String> {
     let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|error| format!("无法读取 {}: {error}", path.display()))?;
     connection
         .busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|error| format!("设置 Qoder 数据库超时失败: {error}"))?;
+    let mut projects: HashMap<String, String> = HashMap::new();
+    if let Ok(mut sessions) = connection.prepare(
+        "SELECT session_id, COALESCE(project_name, project_uri, 'unknown') FROM chat_session",
+    ) {
+        if let Ok(rows) = sessions.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for (session_id, project) in rows.flatten() {
+                projects.insert(session_id, project);
+            }
+        }
+    }
     let mut statement = connection
         .prepare(
-            "SELECT token_info, COALESCE(model_info, ''), CAST(gmt_create AS INTEGER) \
+            "SELECT token_info, COALESCE(model_info, ''), CAST(gmt_create AS INTEGER), COALESCE(session_id, '') \
              FROM chat_message WHERE role='assistant' AND token_info IS NOT NULL \
              AND length(token_info) > 2",
         )
@@ -822,11 +883,12 @@ fn collect_qoder_database_stats(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
             ))
         })
         .map_err(|error| format!("查询 Qoder Token 失败: {error}"))?;
     for row in rows.flatten() {
-        let (token_info, model_info, timestamp) = row;
+        let (token_info, model_info, timestamp, session_id) = row;
         let timestamp = Value::from(timestamp);
         let Some(day) = local_date_from_value(&timestamp) else {
             continue;
@@ -840,13 +902,20 @@ fn collect_qoder_database_stats(
         let prompt = value_number(info.get("prompt_tokens")).max(0.0);
         let completion = value_number(info.get("completion_tokens")).max(0.0);
         let cached = value_number(info.get("cached_tokens")).max(0.0);
-        add_tokens_with_requests(
+        let project = projects
+            .get(&session_id)
+            .map(|value| project_from_path(value))
+            .unwrap_or_else(|| "unknown".to_owned());
+        add_tokens_full(
             totals,
-            day,
+            &day.format("%F").to_string(),
             &qoder_model(&model_info),
+            &project,
             (prompt - cached).max(0.0),
             completion,
             cached,
+            0.0,
+            0.0,
             1,
         );
     }
@@ -856,7 +925,7 @@ fn collect_qoder_database_stats(
 fn collect_qoder_cli_stats(
     start: NaiveDate,
     end: NaiveDate,
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
 ) {
     for path in jsonl_files(&home_dir().join(".qoder").join("projects")) {
         for_each_json_line(&path, |event| {
@@ -880,12 +949,20 @@ fn collect_qoder_cli_stats(
                 .map(estimate_json_tokens)
                 .unwrap_or_default();
             let model = model_name(message.get("model"), "qoder-cli");
-            add_tokens_with_requests(
+            let project = event
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(project_from_path)
+                .unwrap_or_else(|| "unknown".to_owned());
+            add_tokens_full(
                 totals,
-                day,
+                &day.format("%F").to_string(),
                 &model,
+                &project,
                 if role == "user" { tokens } else { 0.0 },
                 if role == "assistant" { tokens } else { 0.0 },
+                0.0,
+                0.0,
                 0.0,
                 u64::from(role == "assistant"),
             );
@@ -911,6 +988,7 @@ struct GeminiTotals {
     input: f64,
     cached: f64,
     output: f64,
+    reasoning: f64,
     total: f64,
 }
 
@@ -919,13 +997,14 @@ fn gemini_totals(message: &Value) -> Option<GeminiTotals> {
         let input = value_number(tokens.get("input")).max(0.0);
         let cached = value_number(tokens.get("cached")).max(0.0);
         let output = value_number(tokens.get("output")).max(0.0)
-            + value_number(tokens.get("tool")).max(0.0)
-            + value_number(tokens.get("thoughts")).max(0.0);
-        let total = value_number(tokens.get("total")).max(input + cached + output);
+            + value_number(tokens.get("tool")).max(0.0);
+        let reasoning = value_number(tokens.get("thoughts")).max(0.0);
+        let total = value_number(tokens.get("total")).max(input + cached + output + reasoning);
         return (total > 0.0).then_some(GeminiTotals {
             input,
             cached,
             output,
+            reasoning,
             total,
         });
     }
@@ -940,18 +1019,20 @@ fn gemini_totals(message: &Value) -> Option<GeminiTotals> {
             .or_else(|| usage.get("input_tokens")),
     )
     .max(0.0);
-    let output = value_number(
+    let reasoning = value_number(usage.get("thoughtsTokenCount")).max(0.0);
+    let output = (value_number(
         usage
             .get("candidatesTokenCount")
             .or_else(|| usage.get("output_tokens")),
-    )
-    .max(0.0);
+    ) - reasoning)
+        .max(0.0);
     let input = (prompt - cached).max(0.0);
-    let total = input + cached + output;
+    let total = input + cached + output + reasoning;
     (total > 0.0).then_some(GeminiTotals {
         input,
         cached,
         output,
+        reasoning,
         total,
     })
 }
@@ -970,6 +1051,7 @@ fn diff_gemini_totals(
         input: (current.input - previous.input).max(0.0),
         cached: (current.cached - previous.cached).max(0.0),
         output: (current.output - previous.output).max(0.0),
+        reasoning: (current.reasoning - previous.reasoning).max(0.0),
         total: (current.total - previous.total).max(0.0),
     };
     (delta.total > 0.0).then_some(delta)
@@ -1064,13 +1146,21 @@ fn gemini_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
                 continue;
             };
             if in_date_range(day, start, end) {
-                add_tokens_with_requests(
+                let project = message
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(project_from_path)
+                    .unwrap_or_else(|| "unknown".to_owned());
+                add_tokens_full(
                     &mut totals,
-                    day,
+                    &day.format("%F").to_string(),
                     &model,
-                    delta.input + delta.cached,
+                    &project,
+                    delta.input,
                     delta.output,
                     delta.cached,
+                    0.0,
+                    delta.reasoning,
                     1,
                 );
             }
@@ -1146,26 +1236,44 @@ fn opencode_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
 fn query_opencode_stats(connection: &Connection, start: NaiveDate, end: NaiveDate) -> Result<Value, String> {
     let mut statement = connection.prepare(
         "SELECT time_created, COALESCE(json_extract(data,'$.modelID'),json_extract(data,'$.model'),json_extract(data,'$.modelId'),'opencode'),
-            json_extract(data,'$.tokens.input'), COALESCE(json_extract(data,'$.tokens.output'),0), COALESCE(json_extract(data,'$.tokens.cache.read'),0)
+            COALESCE(json_extract(data,'$.tokens.input'),0),
+            COALESCE(json_extract(data,'$.tokens.output'),0),
+            COALESCE(json_extract(data,'$.tokens.cache.read'),0),
+            COALESCE(json_extract(data,'$.tokens.cache.write'),0),
+            COALESCE(json_extract(data,'$.tokens.reasoning'),0),
+            COALESCE(json_extract(data,'$.path.root'), json_extract(data,'$.path.cwd'), 'unknown')
          FROM message WHERE time_created >= ?1 AND time_created < ?2 AND json_extract(data,'$.role')='assistant'
          AND json_extract(data,'$.tokens.input') IS NOT NULL"
     ).map_err(|error| format!("OpenCode 数据库结构无法读取: {error}"))?;
     let lower = (start - chrono::Duration::days(1)).and_hms_opt(0,0,0).ok_or("起始日期无效")?.and_utc().timestamp_millis();
     let upper = (end + chrono::Duration::days(2)).and_hms_opt(0,0,0).ok_or("结束日期无效")?.and_utc().timestamp_millis();
-    let rows = statement.query_map([lower, upper], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?)))
+    let rows = statement.query_map([lower, upper], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, String>(7)?,
+        ))
+    })
         .map_err(|error| format!("OpenCode 用量查询失败: {error}"))?;
-    let mut totals: BTreeMap<(String, String), (i64, i64, i64)> = BTreeMap::new();
+    let mut totals: BTreeMap<(String, String, String), (i64, i64, i64, i64, i64)> = BTreeMap::new();
     for row in rows {
-        let (created, model, input, output, cache) = row.map_err(|e| e.to_string())?;
+        let (created, model, input, output, cache_read, cache_write, reasoning, project) = row.map_err(|e| e.to_string())?;
         let date = DateTime::from_timestamp_millis(created).ok_or("OpenCode 消息时间无效")?.with_timezone(&Local).date_naive();
         if date < start || date > end { continue; }
-        let total = totals.entry((date.format("%F").to_string(), model)).or_default();
+        let total = totals.entry((date.format("%F").to_string(), model, project_from_path(&project))).or_default();
         total.0 += input;
         total.1 += output;
-        total.2 += cache;
+        total.2 += cache_read;
+        total.3 += cache_write;
+        total.4 += reasoning;
     }
-    Ok(Value::Array(totals.into_iter().map(|((date, model), (input, output, cache))|
-        json!({"d":date,"model":model,"inp":input,"outp":output,"cache":cache})).collect()))
+    Ok(Value::Array(totals.into_iter().map(|((date, model, project), (input, output, cache_read, cache_write, reasoning))|
+        json!({"d":date,"model":model,"project":project,"inp":input,"outp":output,"cache":cache_read,"cacheWrite":cache_write,"reasoning":reasoning})).collect()))
 }
 
 fn codex_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
@@ -1184,18 +1292,32 @@ fn codex_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
             .ok_or_else(|| "日期范围超出支持范围".to_owned())?;
     }
 
-    let mut totals: BTreeMap<(String, String), TokenStats> = BTreeMap::new();
+    let mut totals: TokenTotals = BTreeMap::new();
     let sessions_root = home_dir().join(".codex").join("sessions");
     for day in days {
         let folder = sessions_root
             .join(day.format("%Y").to_string())
             .join(day.format("%m").to_string())
             .join(day.format("%d").to_string());
-        for file in jsonl_files(&folder) {
+        for file in codex_session_files(&folder) {
             let mut current_model = "codex".to_owned();
-            for_each_json_line(&file, |event| {
+            let mut current_project = "unknown".to_owned();
+            for_each_codex_line(&file, |event| {
                 if let Some(model) = model_from_event(event) {
                     current_model = model;
+                }
+                let payload_for_cwd = event.get("payload");
+                if let Some(cwd) = payload_for_cwd
+                    .and_then(|value| value.get("cwd"))
+                    .or_else(|| {
+                        payload_for_cwd
+                            .and_then(|value| value.get("turn_context"))
+                            .and_then(|value| value.get("cwd"))
+                    })
+                    .or_else(|| event.get("cwd"))
+                    .and_then(Value::as_str)
+                {
+                    current_project = project_from_path(cwd);
                 }
                 let payload = event.get("payload");
                 let usage = payload
@@ -1216,14 +1338,19 @@ fn codex_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
                     return;
                 }
                 let usage = usage.expect("usage 已检查");
-                add_tokens(
+                let cached = value_number(usage.get("cached_input_tokens"));
+                let input = (value_number(usage.get("input_tokens")) - cached).max(0.0);
+                add_tokens_full(
                     &mut totals,
                     &day.format("%F").to_string(),
                     &current_model,
-                    value_number(usage.get("input_tokens")),
+                    &current_project,
+                    input,
                     value_number(usage.get("output_tokens")),
-                    value_number(usage.get("cached_input_tokens"))
-                        + value_number(usage.get("cache_write_input_tokens")),
+                    cached,
+                    value_number(usage.get("cache_write_input_tokens")),
+                    0.0,
+                    1,
                 );
             });
         }
@@ -1252,13 +1379,34 @@ fn kimi_model_name(value: Option<&Value>, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_owned())
 }
 
+fn kimi_project_from_path(path: &Path) -> String {
+    for component in path.components() {
+        let Some(name) = component.as_os_str().to_str() else {
+            continue;
+        };
+        let Some(rest) = name.strip_prefix("wd_") else {
+            continue;
+        };
+        if let Some(index) = rest.rfind('_') {
+            let (project, hash) = rest.split_at(index);
+            let suffix = &hash[1..];
+            if suffix.len() >= 9 && suffix.chars().all(|character| character.is_ascii_hexdigit()) {
+                return project.to_owned();
+            }
+        }
+        return rest.to_owned();
+    }
+    "unknown".to_owned()
+}
+
 fn collect_kimi_code_stats(
     root: &Path,
     start: NaiveDate,
     end: NaiveDate,
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
 ) {
     for path in wire_files(root) {
+        let project = kimi_project_from_path(&path);
         for_each_json_line(&path, |rec| {
             if rec.get("type").and_then(Value::as_str) != Some("usage.record") {
                 return;
@@ -1268,9 +1416,9 @@ fn collect_kimi_code_stats(
             };
             let input = value_number(usage.get("inputOther"));
             let output = value_number(usage.get("output"));
-            let cached = value_number(usage.get("inputCacheRead"))
-                + value_number(usage.get("inputCacheCreation"));
-            if input == 0.0 && output == 0.0 && cached == 0.0 {
+            let cache_read = value_number(usage.get("inputCacheRead"));
+            let cache_write = value_number(usage.get("inputCacheCreation"));
+            if input == 0.0 && output == 0.0 && cache_read == 0.0 && cache_write == 0.0 {
                 return;
             }
             let Some(time) = rec.get("time") else { return };
@@ -1280,13 +1428,16 @@ fn collect_kimi_code_stats(
             if !in_date_range(day, start, end) {
                 return;
             }
-            add_tokens_with_requests(
+            add_tokens_full(
                 totals,
-                day,
+                &day.format("%F").to_string(),
                 &kimi_model_name(rec.get("model"), "kimi-for-coding"),
-                input + cached,
+                &project,
+                input,
                 output,
-                cached,
+                cache_read,
+                cache_write,
+                0.0,
                 1,
             );
         });
@@ -1297,9 +1448,10 @@ fn collect_kimi_legacy_stats(
     root: &Path,
     start: NaiveDate,
     end: NaiveDate,
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
 ) {
     for path in wire_files(root) {
+        let project = kimi_project_from_path(&path);
         let mut current_model = "kimi-for-coding".to_owned();
         for_each_json_line(&path, |rec| {
             let Some(message) = rec.get("message") else {
@@ -1323,9 +1475,9 @@ fn collect_kimi_legacy_stats(
             };
             let input = value_number(usage.get("input_other"));
             let output = value_number(usage.get("output"));
-            let cached = value_number(usage.get("input_cache_read"))
-                + value_number(usage.get("input_cache_creation"));
-            if input == 0.0 && output == 0.0 && cached == 0.0 {
+            let cache_read = value_number(usage.get("input_cache_read"));
+            let cache_write = value_number(usage.get("input_cache_creation"));
+            if input == 0.0 && output == 0.0 && cache_read == 0.0 && cache_write == 0.0 {
                 return;
             }
             // legacy 时间戳为 epoch 秒；value_timestamp_millis 自动换算
@@ -1338,13 +1490,16 @@ fn collect_kimi_legacy_stats(
             if !in_date_range(day, start, end) {
                 return;
             }
-            add_tokens_with_requests(
+            add_tokens_full(
                 totals,
-                day,
+                &day.format("%F").to_string(),
                 &current_model,
-                input + cached,
+                &project,
+                input,
                 output,
-                cached,
+                cache_read,
+                cache_write,
+                0.0,
                 1,
             );
         });
@@ -1368,6 +1523,26 @@ fn kimi_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
     Ok(token_stats_json(totals))
 }
 
+fn claude_file_project(file: &Path) -> String {
+    if let Ok(content) = fs::read_to_string(file) {
+        for line in content.lines().take(80) {
+            if !line.contains("\"cwd\"") {
+                continue;
+            }
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                if let Some(cwd) = value.get("cwd").and_then(Value::as_str) {
+                    return project_from_path(cwd);
+                }
+            }
+        }
+    }
+    file.parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .map(|name| name.trim_start_matches('-').to_owned())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
 fn claude_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
     let start = requested_date(query, "start")?;
     let end = requested_date(query, "end")?;
@@ -1375,8 +1550,9 @@ fn claude_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
         return Err("start 必须早于或等于 end".to_owned());
     }
 
-    let mut totals: BTreeMap<(String, String), TokenStats> = BTreeMap::new();
+    let mut totals: TokenTotals = BTreeMap::new();
     for file in jsonl_files(&home_dir().join(".claude").join("projects")) {
+        let file_project = claude_file_project(&file);
         for_each_json_line(&file, |event| {
             let message = event.get("message");
             let usage = message.and_then(|value| value.get("usage"));
@@ -1402,9 +1578,12 @@ fn claude_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
                 return;
             }
             let usage = usage.expect("usage 已检查");
-            let cached = value_number(usage.get("cache_creation_input_tokens"))
-                + value_number(usage.get("cache_read_input_tokens"));
-            add_tokens(
+            let project = event
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(project_from_path)
+                .unwrap_or_else(|| file_project.clone());
+            add_tokens_full(
                 &mut totals,
                 &day,
                 message
@@ -1412,9 +1591,13 @@ fn claude_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
                     .and_then(Value::as_str)
                     .filter(|model| !model.trim().is_empty())
                     .unwrap_or("claude-code"),
-                value_number(usage.get("input_tokens")) + cached,
+                &project,
+                value_number(usage.get("input_tokens")),
                 value_number(usage.get("output_tokens")),
-                cached,
+                value_number(usage.get("cache_read_input_tokens")),
+                value_number(usage.get("cache_creation_input_tokens")),
+                0.0,
+                1,
             );
         });
     }
@@ -1513,7 +1696,7 @@ fn deepseek_content_text(value: Option<&Value>) -> String {
 /// 无 usage 的旧版会话用文本估算。inputTokens 为缓存未命中输入，与 cacheReadTokens 分开累加。
 fn deepseek_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
     let (start, end) = stats_date_range(query)?;
-    let mut totals: BTreeMap<(String, String), TokenStats> = BTreeMap::new();
+    let mut totals: TokenTotals = BTreeMap::new();
     let mut files: Vec<PathBuf> = Vec::new();
     visit_deepseek_sessions(&deepseek_harness_root().join("sessions"), &mut files);
 
@@ -1565,11 +1748,35 @@ fn deepseek_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
             if let Some(usage) = usage {
                 let input = value_number(usage.get("inputTokens"));
                 let output = value_number(usage.get("outputTokens"));
-                let cached = value_number(usage.get("cacheReadTokens"));
-                if input == 0.0 && output == 0.0 && cached == 0.0 {
+                let cache_read = value_number(usage.get("cacheReadTokens"));
+                let cache_write = value_number(usage.get("cacheWriteTokens"));
+                let reasoning = value_number(usage.get("reasoningTokens"));
+                if input == 0.0
+                    && output == 0.0
+                    && cache_read == 0.0
+                    && cache_write == 0.0
+                    && reasoning == 0.0
+                {
                     continue;
                 }
-                add_tokens(&mut totals, &day, &model, input + cached, output, cached);
+                let project = data
+                    .and_then(|value| value.pointer("/message/path/root"))
+                    .or_else(|| data.and_then(|value| value.pointer("/message/path/cwd")))
+                    .and_then(Value::as_str)
+                    .map(project_from_path)
+                    .unwrap_or_else(|| "unknown".to_owned());
+                add_tokens_full(
+                    &mut totals,
+                    &day,
+                    &model,
+                    &project,
+                    input,
+                    output,
+                    cache_read,
+                    cache_write,
+                    reasoning,
+                    1,
+                );
             } else if let Some(message) = message {
                 let content = deepseek_content_text(message.get("content"));
                 if content.trim().is_empty() {
@@ -1580,6 +1787,306 @@ fn deepseek_stats(query: &BTreeMap<String, String>) -> Result<Value, String> {
         }
     }
     Ok(token_stats_json(totals))
+}
+
+/// Devin 套餐信息。本机 `devin auth status` 只提供 Tier / Plan / 邮箱，
+/// 没有可读的额度数值；这里返回套餐卡所需字段，额度等官方只读接口。
+fn parse_devin_usage_text(text: &str) -> Vec<Value> {
+    let daily = Regex::new(r"(?i)Daily.*?(\d+(?:\.\d+)?)%\s+used\s+·\s+resets in (.+)")
+        .expect("固定的 Devin Daily 正则应有效");
+    let weekly = Regex::new(r"(?i)Weekly.*?(\d+(?:\.\d+)?)%\s+used\s+·\s+resets (.+)")
+        .expect("固定的 Devin Weekly 正则应有效");
+    let now = chrono::Utc::now();
+    let mut limits = Vec::new();
+    if let Some(capture) = daily.captures(text) {
+        let used = capture.get(1).and_then(|value| value.as_str().parse::<f64>().ok()).unwrap_or(0.0);
+        let reset = capture.get(2).map(|value| value.as_str().trim()).unwrap_or("");
+        let resets_at = parse_devin_relative_reset(reset, now);
+        limits.push(json!({"id":"daily","label":"日额度","usedPercent":used,"resetsAt":resets_at}));
+    }
+    if let Some(capture) = weekly.captures(text) {
+        let used = capture.get(1).and_then(|value| value.as_str().parse::<f64>().ok()).unwrap_or(0.0);
+        let reset = capture.get(2).map(|value| value.as_str().trim()).unwrap_or("");
+        let resets_at = parse_devin_absolute_reset(reset, now);
+        limits.push(json!({"id":"weekly","label":"周额度","usedPercent":used,"resetsAt":resets_at}));
+    }
+    limits
+}
+
+fn parse_devin_relative_reset(raw: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let mut total_minutes = 0_i64;
+    let mut matched = false;
+    for part in raw.split_whitespace() {
+        if let Some(value) = part.strip_suffix('h') {
+            if let Ok(hours) = value.parse::<i64>() {
+                total_minutes += hours * 60;
+                matched = true;
+            }
+        } else if let Some(value) = part.strip_suffix('m') {
+            if let Ok(minutes) = value.parse::<i64>() {
+                total_minutes += minutes;
+                matched = true;
+            }
+        }
+    }
+    matched.then(|| (now + chrono::Duration::minutes(total_minutes)).to_rfc3339())
+}
+
+fn parse_devin_absolute_reset(raw: &str, now: chrono::DateTime<chrono::Utc>) -> Option<String> {
+    // 例：`Nov 1, 4:00 PM (UTC+8)` → `Nov 1, 4:00 PM +0800`
+    let normalized = Regex::new(r"\(UTC([+-]\d{1,2})\)")
+        .ok()?
+        .replace(raw, |caps: &regex::Captures| {
+            let offset = caps.get(1).map(|value| value.as_str()).unwrap_or("0");
+            let sign = if offset.starts_with('-') { '-' } else { '+' };
+            let digits = offset.trim_start_matches(['+', '-']);
+            let (hours, minutes) = digits
+                .split_once(':')
+                .map(|(h, m)| (h, m))
+                .unwrap_or((digits, "00"));
+            format!("{sign}{:0>2}{:0>2}", hours, minutes)
+        })
+        .to_string();
+    let with_year = format!("{} {normalized}", now.format("%Y"));
+    chrono::DateTime::parse_from_str(&with_year, "%Y %b %d, %I:%M %p %z")
+        .ok()
+        .map(|value| value.with_timezone(&chrono::Utc).to_rfc3339())
+}
+
+
+#[derive(Debug, Clone)]
+enum ProtoValue {
+    Varint(u64),
+    Bytes(Vec<u8>),
+}
+
+fn proto_varint(bytes: &[u8], index: &mut usize) -> Option<u64> {
+    let mut value = 0_u64;
+    let mut shift = 0_u32;
+    while *index < bytes.len() {
+        let byte = bytes[*index];
+        *index += 1;
+        value |= ((byte & 0x7f) as u64) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
+        }
+    }
+    None
+}
+
+fn proto_fields(bytes: &[u8]) -> Vec<(u64, ProtoValue)> {
+    let mut out = Vec::new();
+    let mut index = 0_usize;
+    while index < bytes.len() {
+        let Some(tag) = proto_varint(bytes, &mut index) else {
+            break;
+        };
+        let field = tag >> 3;
+        match tag & 7 {
+            0 => {
+                let Some(value) = proto_varint(bytes, &mut index) else {
+                    break;
+                };
+                out.push((field, ProtoValue::Varint(value)));
+            }
+            2 => {
+                let Some(len) = proto_varint(bytes, &mut index) else {
+                    break;
+                };
+                let end = index.saturating_add(len as usize);
+                if end > bytes.len() {
+                    break;
+                }
+                out.push((field, ProtoValue::Bytes(bytes[index..end].to_vec())));
+                index = end;
+            }
+            1 => index = index.saturating_add(8),
+            5 => index = index.saturating_add(4),
+            _ => break,
+        }
+    }
+    out
+}
+
+fn proto_varint_bytes(mut value: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return out;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+fn proto_bytes_field(field: u64, value: &[u8]) -> Vec<u8> {
+    let mut out = proto_varint_bytes((field << 3) | 2);
+    out.extend(proto_varint_bytes(value.len() as u64));
+    out.extend_from_slice(value);
+    out
+}
+
+fn devin_credentials_token() -> Option<String> {
+    let path = home_dir()
+        .join(".local")
+        .join("share")
+        .join("devin")
+        .join("credentials.toml");
+    let content = fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("windsurf_api_key") else {
+            continue;
+        };
+        let value = rest.trim_start().strip_prefix('=')?.trim().trim_matches('"');
+        if !value.is_empty() {
+            return Some(value.to_owned());
+        }
+    }
+    None
+}
+
+/// 直接调用 Devin CLI 使用的 `GetUserStatus` protobuf 接口。
+/// `PlanStatus` 字段 14/15 是日/周剩余百分比，17/18 是对应的 Unix 重置时间。
+fn devin_plan_status(
+    token: &str,
+) -> Option<(f64, f64, Option<String>, Option<String>, Option<String>)> {
+    let version = "3000.11.234";
+    let inner = [
+        proto_bytes_field(1, b"devin-cli"),
+        proto_bytes_field(2, version.as_bytes()),
+        proto_bytes_field(3, token.as_bytes()),
+        proto_bytes_field(5, b"en"),
+        proto_bytes_field(6, b"darwin"),
+        proto_bytes_field(7, version.as_bytes()),
+        proto_bytes_field(8, b"chisel"),
+    ]
+    .concat();
+    let body = proto_bytes_field(1, &inner);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+        .ok()?;
+    let response = client
+        .post("https://server.codeium.com/exa.seat_management_pb.SeatManagementService/GetUserStatus")
+        .header("Authorization", format!("Basic {token}"))
+        .header("Content-Type", "application/proto")
+        .header("User-Agent", "Go-http-client/1.1")
+        .body(body)
+        .send()
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let bytes = response.bytes().ok()?;
+    let top = proto_fields(&bytes);
+    let user = top.iter().find_map(|(field, value)| match (field, value) {
+        (1, ProtoValue::Bytes(bytes)) => Some(bytes.as_slice()),
+        _ => None,
+    })?;
+    let plan = proto_fields(user).into_iter().find_map(|(field, value)| match (field, value) {
+        (13, ProtoValue::Bytes(bytes)) => Some(bytes),
+        _ => None,
+    })?;
+    let fields = proto_fields(&plan);
+    let varint = |target: u64| {
+        fields.iter().find_map(|(field, value)| match (field, value) {
+            (f, ProtoValue::Varint(v)) if *f == target => Some(*v),
+            _ => None,
+        })
+    };
+    let daily_remaining = varint(14)? as f64;
+    let weekly_remaining = varint(15)? as f64;
+    let daily_reset = varint(17).and_then(|value| {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(value as i64, 0)
+            .map(|date| date.to_rfc3339())
+    });
+    let weekly_reset = varint(18).and_then(|value| {
+        chrono::DateTime::<chrono::Utc>::from_timestamp(value as i64, 0)
+            .map(|date| date.to_rfc3339())
+    });
+    let plan_name = fields.iter().find_map(|(field, value)| match (field, value) {
+        (1, ProtoValue::Bytes(bytes)) => {
+            proto_fields(bytes).into_iter().find_map(|(f, v)| match (f, v) {
+                (2, ProtoValue::Bytes(name)) => String::from_utf8(name).ok(),
+                _ => None,
+            })
+        }
+        _ => None,
+    });
+    Some((
+        daily_remaining,
+        weekly_remaining,
+        daily_reset,
+        weekly_reset,
+        plan_name,
+    ))
+}
+
+fn devin_usage() -> Result<Value, String> {
+    let (stdout, stderr) = run_cli("devin", "DEVIN_BIN", &["auth", "status"])?;
+    let text = format!("{stdout}\n{stderr}");
+    let field = |label: &str| -> Option<String> {
+        text.lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix(label)
+                    .map(|value| value.trim().to_owned())
+            })
+            .filter(|value| !value.is_empty())
+    };
+    let tier = field("Tier:").or_else(|| field("Plan:"));
+    let plan = field("Plan:");
+    let email = field("Email:");
+    let membership = field("Team membership:");
+    if tier.is_none() && plan.is_none() {
+        return Err(cli_error_message(&stderr, &stdout));
+    }
+    let mut plan_tag = tier.clone().unwrap_or_else(|| "Devin".to_owned());
+    let api_status = devin_credentials_token().and_then(|token| devin_plan_status(&token));
+    let limits = if let Some((daily_remaining, weekly_remaining, daily_reset, weekly_reset, plan_name)) = api_status {
+        if tier.is_none() {
+            if let Some(name) = plan_name {
+                plan_tag = format!("Devin {name}");
+            }
+        }
+        json!([
+            {
+                "id": "daily",
+                "label": "日额度",
+                "usedPercent": (100.0 - daily_remaining).clamp(0.0, 100.0),
+                "resetsAt": daily_reset
+            },
+            {
+                "id": "weekly",
+                "label": "周额度",
+                "usedPercent": (100.0 - weekly_remaining).clamp(0.0, 100.0),
+                "resetsAt": weekly_reset
+            }
+        ])
+    } else {
+        let usage_text = crate::usage::config::load().devin_usage_text.unwrap_or_default();
+        Value::Array(parse_devin_usage_text(&usage_text))
+    };
+    Ok(json!({
+        "planTag": plan_tag,
+        "tier": tier,
+        "plan": plan,
+        "email": email,
+        "membership": membership,
+        "limits": limits,
+        "message": if limits.as_array().map(|items| items.is_empty()).unwrap_or(true) {
+            "Devin 套餐信息来自本机 devin CLI；未能读取 GetUserStatus 额度"
+        } else {
+            "额度来自 Devin GetUserStatus（日/周剩余百分比）"
+        }
+    }))
 }
 
 fn codex_status() -> Result<Value, String> {    let status = run_cli("codex", "CODEX_BIN", &["login", "status"])
@@ -1964,7 +2471,7 @@ mod kimi_stats_tests {
         let rows = rows.as_array().expect("应为数组");
         assert_eq!(rows.len(), 1, "零用量事件应被跳过: {rows:?}");
         assert_eq!(rows[0]["model"], "k3");
-        assert_eq!(rows[0]["inp"], 1000.0, "input 应含缓存");
+        assert_eq!(rows[0]["inp"], 100.0, "input 为净输入，缓存单列");
         assert_eq!(rows[0]["outp"], 50.0);
         assert_eq!(rows[0]["cache"], 900.0);
         assert_eq!(rows[0]["requests"], 1);
@@ -2220,6 +2727,51 @@ fn home_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Codex 会话既有明文 `.jsonl`，也有压缩的 `.jsonl.zst`（ACP/长会话常见）。
+fn codex_session_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    visit_codex_files(root, &mut files);
+    files.sort();
+    files
+}
+
+fn visit_codex_files(path: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            visit_codex_files(&entry_path, files);
+            continue;
+        }
+        let name = entry_path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        if name.ends_with(".jsonl") || name.ends_with(".jsonl.zst") {
+            files.push(entry_path);
+        }
+    }
+}
+
+fn for_each_codex_line(file: &Path, mut visit: impl FnMut(&Value)) {
+    let Ok(raw) = fs::read(file) else {
+        return;
+    };
+    let bytes = if file.extension().and_then(|value| value.to_str()) == Some("zst") {
+        match zstd::stream::decode_all(raw.as_slice()) {
+            Ok(bytes) => bytes,
+            Err(_) => return,
+        }
+    } else {
+        raw
+    };
+    let text = String::from_utf8_lossy(&bytes);
+    for line in text.lines() {
+        if let Ok(value) = serde_json::from_str::<Value>(line) {
+            visit(&value);
+        }
+    }
+}
+
 fn jsonl_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_jsonl(root, &mut files);
@@ -2255,37 +2807,42 @@ fn for_each_json_line(file: &Path, mut visit: impl FnMut(&Value)) {
     }
 }
 
+type TokenTotals = BTreeMap<(String, String, String), TokenStats>;
+
 #[derive(Default)]
 struct TokenStats {
     input: f64,
     output: f64,
     cached: f64,
+    cache_write: f64,
+    reasoning: f64,
     requests: u64,
 }
 
 fn add_tokens(
-    totals: &mut BTreeMap<(String, String), TokenStats>,
+    totals: &mut TokenTotals,
     day: &str,
     model: &str,
     input: f64,
     output: f64,
     cached: f64,
 ) {
-    if input == 0.0 && output == 0.0 && cached == 0.0 {
-        return;
-    }
-    let current = totals
-        .entry((day.to_owned(), model.trim().to_owned()))
-        .or_default();
-    current.input += input;
-    current.output += output;
-    current.cached += cached;
-    current.requests += 1;
+    add_tokens_full(totals, day, model, "unknown", input, output, cached, 0.0, 0.0, 1);
 }
 
-fn token_stats_json(totals: BTreeMap<(String, String), TokenStats>) -> Value {
-    Value::Array(totals.into_iter().map(|((day, model), stats)| {
-        json!({ "d": day, "model": model, "inp": stats.input, "outp": stats.output, "cache": stats.cached, "requests": stats.requests })
+fn token_stats_json(totals: TokenTotals) -> Value {
+    Value::Array(totals.into_iter().map(|((day, model, project), stats)| {
+        json!({
+            "d": day,
+            "model": model,
+            "project": project,
+            "inp": stats.input,
+            "outp": stats.output,
+            "cache": stats.cached,
+            "cacheWrite": stats.cache_write,
+            "reasoning": stats.reasoning,
+            "requests": stats.requests
+        })
     }).collect())
 }
 
@@ -2313,7 +2870,7 @@ fn model_from_event(event: &Value) -> Option<String> {
 
 #[cfg(test)]
 mod model_stats_tests {
-    use super::{add_tokens, deepseek_content_text, model_from_event, token_stats_json, TokenStats};
+    use super::{add_tokens, add_tokens_full, deepseek_content_text, model_from_event, token_stats_json, TokenStats, TokenTotals};
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -2324,7 +2881,7 @@ mod model_stats_tests {
         });
         assert_eq!(model_from_event(&event).as_deref(), Some("gpt-5.6-terra"));
 
-        let mut totals: BTreeMap<(String, String), TokenStats> = BTreeMap::new();
+        let mut totals: TokenTotals = BTreeMap::new();
         add_tokens(
             &mut totals,
             "2026-09-16",
@@ -2338,6 +2895,29 @@ mod model_stats_tests {
         assert_eq!(rows.as_array().map(Vec::len), Some(2));
         assert_eq!(rows[0]["model"], "gpt-5.6-sol");
         assert_eq!(rows[1]["model"], "gpt-5.6-terra");
+    }
+
+    #[test]
+    fn token_stats_keep_five_fields_separate() {
+        let mut totals: TokenTotals = BTreeMap::new();
+        add_tokens_full(
+            &mut totals,
+            "2026-10-29",
+            "claude-opus-4-8",
+            "xlt-workbench",
+            100.0,
+            30.0,
+            50.0,
+            20.0,
+            5.0,
+            1,
+        );
+        let rows = token_stats_json(totals);
+        assert_eq!(rows[0]["inp"], 100.0);
+        assert_eq!(rows[0]["outp"], 30.0);
+        assert_eq!(rows[0]["cache"], 50.0);
+        assert_eq!(rows[0]["cacheWrite"], 20.0);
+        assert_eq!(rows[0]["reasoning"], 5.0);
     }
 
     #[test]
@@ -2490,7 +3070,7 @@ mod connector_regression_tests {
             connection.execute("INSERT INTO message VALUES (?1,?2)", rusqlite::params![timestamp + offset * 86_400_000, data.to_string()]).unwrap();
         }
         let date = NaiveDate::from_ymd_opt(2026,10,27).unwrap();
-        assert_eq!(query_opencode_stats(&connection,date,date).unwrap(), json!([{"d":"2026-10-27","model":"test-model","inp":150,"outp":30,"cache":35}]));
+        assert_eq!(query_opencode_stats(&connection,date,date).unwrap(), json!([{"d":"2026-10-27","model":"test-model","project":"unknown","inp":150,"outp":30,"cache":35,"cacheWrite":0,"reasoning":0}]));
     }
 
     #[test]
@@ -2498,5 +3078,23 @@ mod connector_regression_tests {
         assert_eq!(cli_error_message(r#"{"ok":false,"error":{"message":"permission denied"}}"#, ""), "permission denied");
         assert!(cli_error_message(r#"{"error":{"message":"refresh_token is invalid"}}"#, "").contains("登录方舟"));
         assert!(cli_error_message("Unrecognized flag: --format", "help text").contains("Unrecognized flag"));
+    }
+}
+
+#[cfg(test)]
+mod devin_usage_tests {
+    use super::parse_devin_usage_text;
+
+    #[test]
+    fn parses_daily_and_weekly_usage() {
+        let text = " Daily   ■■■■■■■■■■■■■■■■■■■■  16% used  · resets in 6h 17m\n Weekly  ■■■■■■■■■■■■■■■■■■■■  59% used  · resets Nov 1, 4:00 PM (UTC+8)";
+        let limits = parse_devin_usage_text(text);
+        assert_eq!(limits.len(), 2);
+        assert_eq!(limits[0]["id"], "daily");
+        assert_eq!(limits[0]["usedPercent"], 16.0);
+        assert!(limits[0]["resetsAt"].as_str().is_some());
+        assert_eq!(limits[1]["id"], "weekly");
+        assert_eq!(limits[1]["usedPercent"], 59.0);
+        assert!(limits[1]["resetsAt"].as_str().is_some());
     }
 }

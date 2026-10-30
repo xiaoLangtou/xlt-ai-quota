@@ -78,10 +78,13 @@ export class DeepSeekConnector implements Connector, QuotaConnector, TokenConnec
     return rows.map((row) => ({
       platform: "deepseek",
       date: row.d,
+      project: row.project || undefined,
       model: row.model || undefined,
       inputTokens: num(row.inp),
       outputTokens: num(row.outp),
       cachedTokens: row.cache != null ? num(row.cache) : undefined,
+      cacheWriteTokens: row.cacheWrite != null ? num(row.cacheWrite) : undefined,
+      reasoningTokens: row.reasoning != null ? num(row.reasoning) : undefined,
       requestCount: row.requests != null ? num(row.requests) : undefined,
       collectedAt,
     }));
@@ -90,10 +93,13 @@ export class DeepSeekConnector implements Connector, QuotaConnector, TokenConnec
 
 interface DeepSeekTokenRow {
   d: string;
+  project?: string;
   model?: string;
   inp?: number | string;
   outp?: number | string;
   cache?: number | string;
+  cacheWrite?: number | string;
+  reasoning?: number | string;
   requests?: number | string;
 }
 

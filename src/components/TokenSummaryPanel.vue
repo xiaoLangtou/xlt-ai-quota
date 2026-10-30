@@ -7,6 +7,10 @@ const props = defineProps<{
   total: number;
   input: number;
   output: number;
+  cached?: number;
+  cacheWrite?: number;
+  reasoning?: number;
+  cacheHitRate?: number;
   requests: number;
   costUsd: number;
   deltaPct?: number;
@@ -35,6 +39,12 @@ const inputPct = computed(() =>
 const outputPct = computed(() =>
   props.total > 0 ? Math.round((props.output / props.total) * 100) : 0,
 );
+/** 与 juejin 对齐：缓存命中率 = 缓存读 ÷（净输入 + 缓存读 + 缓存写）。 */
+const cacheHitPct = computed(() => {
+  const cached = props.cached ?? 0;
+  const denom = props.input + cached + (props.cacheWrite ?? 0);
+  return denom > 0 ? Math.round((cached / denom) * 1000) / 10 : 0;
+});
 </script>
 
 <template>
@@ -47,6 +57,7 @@ const outputPct = computed(() =>
         </span>
       </div>
       <strong class="sp-value">{{ formatTokens(total) }}</strong>
+      <span class="sp-hint">输入 + 输出 + 缓存读/写 + 推理</span>
       <div v-if="spark && spark.length > 1" class="sp-spark">
         <Sparkline
           :values="spark"
@@ -74,7 +85,9 @@ const outputPct = computed(() =>
         </span>
       </div>
       <strong class="sp-value small">{{ formatTokens(input) }}</strong>
-      <span class="sp-hint">占总量 {{ inputPct }}%</span>
+      <span class="sp-hint">
+        占总量 {{ inputPct }}%<template v-if="(cached ?? 0) > 0"> · 缓存命中 {{ cacheHitPct }}%</template>
+      </span>
     </div>
 
     <div class="sp-metric">
@@ -86,6 +99,17 @@ const outputPct = computed(() =>
       </div>
       <strong class="sp-value small">{{ formatTokens(output) }}</strong>
       <span class="sp-hint">占总量 {{ outputPct }}%</span>
+    </div>
+
+    <div class="sp-metric">
+      <div class="sp-labelrow">
+        <span class="sp-label">缓存</span>
+      </div>
+      <strong class="sp-value small">{{ formatTokens((cached ?? 0) + (cacheWrite ?? 0)) }}</strong>
+      <span class="sp-hint">
+        读 {{ formatTokens(cached ?? 0) }} · 写 {{ formatTokens(cacheWrite ?? 0) }}
+        <template v-if="cacheHitRate != null"> · 命中 {{ cacheHitRate }}%</template>
+      </span>
     </div>
 
     <div class="sp-metric">
@@ -103,7 +127,7 @@ const outputPct = computed(() =>
 <style scoped>
 .summary-panel {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 14px;
 }
 .sp-metric {

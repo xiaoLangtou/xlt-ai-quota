@@ -3,6 +3,7 @@ import { setupUsageTray, updateUsageTrayStatus } from "@/desktop/tray";
 import { pushToast } from "@/composables/useToast";
 import { usageService, type TodayHourly } from "@/services/usage-service";
 import { isTauriDesktop } from "@/connectors/types";
+import { emit } from "@tauri-apps/api/event";
 import type {
   PlatformQuotaView,
   RangePreset,
@@ -12,6 +13,7 @@ import type {
   PlatformDailyPoint,
   ToolUsage,
   ModelUsage,
+  ProjectUsage,
   HeatmapDay,
   QuotaDisplayTarget,
 } from "@/types/usage";
@@ -25,6 +27,7 @@ interface DashboardState {
   platformDaily: PlatformDailyPoint[];
   toolUsage: ToolUsage[];
   modelUsage: ModelUsage[];
+  projectUsage: ProjectUsage[];
   heatmap: HeatmapDay[];
   todayHourly: TodayHourly;
   earliestUsageDate: string | null;
@@ -41,6 +44,7 @@ const state = reactive<DashboardState>({
   platformDaily: [],
   toolUsage: [],
   modelUsage: [],
+  projectUsage: [],
   heatmap: [],
   todayHourly: { labels: [], trend: [], platform: [] },
   earliestUsageDate: null,
@@ -60,6 +64,7 @@ function readAll(): void {
   state.platformDaily = usageService.getPlatformDaily(state.range);
   state.toolUsage = usageService.getToolBreakdown(state.range);
   state.modelUsage = usageService.getModelBreakdown(state.range);
+  state.projectUsage = usageService.getProjectBreakdown(state.range);
   state.heatmap = usageService.getDailyHeatmap();
   state.earliestUsageDate = usageService.getEarliestTokenDate();
   state.sync = usageService.getSyncInfo();
@@ -86,6 +91,7 @@ export function useUsageDashboard() {
     state.platformDaily = usageService.getPlatformDaily(preset);
     state.toolUsage = usageService.getToolBreakdown(preset);
     state.modelUsage = usageService.getModelBreakdown(preset);
+    state.projectUsage = usageService.getProjectBreakdown(preset);
     // 切到「今天」时立即拉最新本地用量 + 按小时时间轴，避免看到过期数据。
     if (preset === "today") {
       void syncToday();
@@ -130,7 +136,7 @@ export function useUsageDashboard() {
     state.sync = usageService.getSyncInfo();
     updateTray();
     try {
-      await usageService.syncAll(readAll);
+      await usageService.syncAll(readAll, state.range);
       readAll();
       // 依据同步结果给出反馈。
       if (state.sync.outcome === "success") pushToast("同步完成", "success");
@@ -198,6 +204,7 @@ export function useUsageDashboard() {
       usageService.saveQuotaDisplayConfig(patch.quotaDisplay);
       readAll();
       updateTray();
+      void emit("usage-updated").catch(() => undefined);
     }
     if (patch.preferences) usageService.savePreferences(patch.preferences);
   }
@@ -246,6 +253,7 @@ export function useUsageDashboard() {
     platformDaily: computed(() => state.platformDaily),
     toolUsage: computed(() => state.toolUsage),
     modelUsage: computed(() => state.modelUsage),
+    projectUsage: computed(() => state.projectUsage),
     heatmap: computed(() => state.heatmap),
     todayHourly: computed(() => state.todayHourly),
     earliestUsageDate: computed(() => state.earliestUsageDate),

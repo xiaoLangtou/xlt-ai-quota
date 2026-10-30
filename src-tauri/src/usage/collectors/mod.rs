@@ -11,6 +11,7 @@ use super::types::QueueBucket;
 pub mod amp;
 pub mod cline;
 pub mod codebuddy;
+pub mod jetbrains_acp;
 pub mod kilocode;
 pub mod openclaw;
 pub mod qwen;
@@ -104,6 +105,30 @@ impl Ctx {
         entry.conversation_count += 1;
         entry.recompute_total();
         self.events_parsed += 1;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_cost(
+        &mut self,
+        source: &str,
+        collector: &str,
+        model: &str,
+        project: &str,
+        hour_start: &str,
+        cost_usd: f64,
+    ) {
+        let key = format!(
+            "{}|{}|{}|{}|{}",
+            source,
+            collector,
+            model.trim(),
+            project,
+            hour_start
+        );
+        if let Some(bucket) = self.buckets.get_mut(&key) {
+            bucket.reported_cost_usd =
+                Some(bucket.reported_cost_usd.unwrap_or(0.0) + cost_usd);
+        }
     }
 
     pub fn into_buckets(self) -> Vec<QueueBucket> {
@@ -332,6 +357,7 @@ pub fn collect(source: &str, since: &str, until: &str) -> Result<CollectResult, 
         "cline" => cline::collect(&mut ctx, previous),
         "codebuddy" => codebuddy::collect(&mut ctx, previous),
         "workbuddy" => workbuddy::collect(&mut ctx, previous),
+        "jetbrains-acp" => jetbrains_acp::collect(&mut ctx, previous),
         other => {
             return Err(format!("尚未移植的采集源: {other}"));
         }
@@ -363,6 +389,7 @@ pub fn known_sources() -> Vec<&'static str> {
         "cline",
         "codebuddy",
         "workbuddy",
+        "jetbrains-acp",
     ]
 }
 
@@ -571,6 +598,48 @@ mod tests {
         assert_eq!(buckets[0].cache_creation_input_tokens, 5);
 
         std::env::remove_var("AI_USAGE_VSCODE_ROOTS");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn jetbrains_acp_reads_usage_deltas_and_cost() {
+        let _guard = crate::usage::TEST_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let root = temp_dir("jetbrains-acp");
+        write(
+            &root.join("s1.usage"),
+            r#"{"used":1000,"size":200000,"cost":{"amount":0.5,"currency":"USD"}}"#,
+        );
+        write(&root.join("s1.agentsession"), "acp.registry.cursor:s1");
+        std::env::set_var("JETBRAINS_ACP_DIR", &root);
+
+        let now = chrono::Utc::now();
+        let since = (now - chrono::Duration::days(1)).to_rfc3339();
+        let until = (now + chrono::Duration::days(1)).to_rfc3339();
+
+        let mut ctx = Ctx::new(&since, &until).unwrap();
+        let cursor = jetbrains_acp::collect(&mut ctx, None);
+        let buckets = ctx.into_buckets();
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].source, "cursor-acp");
+        assert_eq!(buckets[0].input_tokens, 1000);
+        assert_eq!(buckets[0].reported_cost_usd, Some(0.5));
+
+        write(
+            &root.join("s1.usage"),
+            r#"{"used":1500,"size":200000,"cost":{"amount":0.8,"currency":"USD"}}"#,
+        );
+        let mut ctx = Ctx::new(&since, &until).unwrap();
+        let cursor = jetbrains_acp::collect(&mut ctx, Some(cursor));
+        let buckets = ctx.into_buckets();
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].input_tokens, 500);
+        assert!((buckets[0].reported_cost_usd.unwrap_or(0.0) - 0.3).abs() < 1e-9);
+
+        let mut ctx = Ctx::new(&since, &until).unwrap();
+        jetbrains_acp::collect(&mut ctx, Some(cursor));
+        assert!(ctx.into_buckets().is_empty());
+
+        std::env::remove_var("JETBRAINS_ACP_DIR");
         fs::remove_dir_all(&root).ok();
     }
 

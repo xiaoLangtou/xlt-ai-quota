@@ -43,10 +43,13 @@ export class OpenCodeConnector implements Connector, TokenConnector {
       .map((r) => ({
         platform: "opencode-go",
         date: r.d,
+        project: r.project || undefined,
         model: r.model || undefined,
         inputTokens: num(r.inp),
         outputTokens: num(r.outp),
         cachedTokens: r.cache != null ? num(r.cache) : undefined,
+        cacheWriteTokens: r.cacheWrite != null ? num(r.cacheWrite) : undefined,
+        reasoningTokens: r.reasoning != null ? num(r.reasoning) : undefined,
         collectedAt,
       }));
   }
@@ -54,10 +57,13 @@ export class OpenCodeConnector implements Connector, TokenConnector {
 
 interface OpenCodeRow {
   d: string;
+  project?: string;
   model?: string;
   inp?: number | string;
   outp?: number | string;
   cache?: number | string;
+  cacheWrite?: number | string;
+  reasoning?: number | string;
 }
 
 function num(v: number | string | undefined): number {

@@ -23,6 +23,12 @@ function usedCredits(view: PlatformQuotaView): number {
   return view.credits ? Math.max(0, view.credits.total - view.credits.remaining) : 0;
 }
 
+function creditUsedPct(view: PlatformQuotaView): number {
+  const total = view.credits?.total ?? 0;
+  if (total <= 0) return 0;
+  return Math.min(100, Math.round((usedCredits(view) / total) * 1000) / 10);
+}
+
 function money(value: number, currency: string): string {
   const symbol = currency === "USD" ? "$" : "¥";
   return `${symbol}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -79,18 +85,18 @@ function statusText(status?: string): string {
           <strong>{{ view.credits.total.toLocaleString() }}</strong>
         </div>
       </div>
-      <div v-if="view.windows.length" class="plan-meter">
+      <div class="plan-meter">
         <div class="meter-top">
           <span>已使用 {{ usedCredits(view).toLocaleString() }}</span>
-          <span>{{ view.credits.expiresIn ?? compactReset(view.windows[0].resetsIn) }}</span>
+          <span>剩余 {{ view.credits.remaining.toLocaleString() }}</span>
         </div>
         <div class="bar">
-          <span
-            :class="view.windows[0].tone"
-            :style="{ width: `${view.windows[0].usedPct}%` }"
-          />
+          <span class="purple" :style="{ width: `${creditUsedPct(view)}%` }" />
         </div>
-        <div class="plan-meter-value">{{ view.windows[0].usedPct }}<small>%</small></div>
+        <div class="plan-meter-value">{{ creditUsedPct(view) }}<small>%</small></div>
+        <div v-if="view.credits.expiresIn || view.credits.refreshIn" class="plan-meter-reset">
+          {{ view.credits.expiresIn ?? view.credits.refreshIn }}
+        </div>
       </div>
       <div v-if="view.credits.addOn" class="plan-meter credit-addon">
         <div class="plan-meter-header">
@@ -133,7 +139,7 @@ function statusText(status?: string): string {
     <div v-if="!view.balance && !view.credits && view.windows.length === 0" class="empty">
       <template v-if="view.account">
         <span class="account-label">{{ view.account.label }}</span>
-        <span class="account-note">已登录 · 额度详情需浏览器连接器</span>
+        <span class="account-note">{{ view.message || "已登录 · 额度详情暂不可读" }}</span>
       </template>
       <template v-else-if="view.status && view.status !== 'ready'">
         <span class="account-note">{{ view.message || statusText(view.status) }}</span>

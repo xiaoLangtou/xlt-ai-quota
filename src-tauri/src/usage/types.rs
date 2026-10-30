@@ -203,8 +203,13 @@ pub struct QuotaSnapshot {
 }
 
 impl QuotaSnapshot {
+    /// 方舟按套餐分卡（coding-plan / agent-plan）；其他平台一平台一卡。
     pub fn store_key(&self) -> String {
-        format!("{}|{}", self.channel, self.account.as_deref().unwrap_or(""))
+        if self.channel == "ark" {
+            format!("{}|{}", self.channel, self.account.as_deref().unwrap_or(""))
+        } else {
+            self.channel.clone()
+        }
     }
 }
 
@@ -303,6 +308,9 @@ pub struct UsageConfig {
     pub pricing_url: Option<String>,
     #[serde(default)]
     pub last_cleanup_at: Option<String>,
+    /// 用户从 `devin` 交互式 REPL 粘贴的 `/usage` 输出。
+    #[serde(default)]
+    pub devin_usage_text: Option<String>,
 }
 
 fn default_retention_days() -> u32 {
@@ -319,6 +327,7 @@ impl Default for UsageConfig {
                 "https://api.juejin.cn/aiusage_api/functions/tud-pricing".to_owned(),
             ),
             last_cleanup_at: None,
+            devin_usage_text: None,
         }
     }
 }

@@ -23,12 +23,12 @@ assert("空模型→default", lookupRates(undefined).matched === false);
 const opus = computeCostUsd({ model: "claude-opus-4-8", inputTokens: 1_000_000, outputTokens: 1_000_000 });
 assert("opus 1M+1M ≈ 30 USD", Math.abs(opus - 30) < 1e-6, `cost=${opus}`);
 
-// 缓存计费：input 含缓存时，(input-cached) 按输入价、cached 按缓存价。
-// gpt-5.6-terra：input=2, cacheRead=0.2。1M 输入含 0.5M 缓存 + 0 输出
+// 缓存计费：input 为净输入，缓存读单独按 cacheRead 计。
+// gpt-5.6-terra：input=2, cacheRead=0.2。0.5M 净输入 + 0.5M 缓存 + 0 输出
 // = 0.5M*2 + 0.5M*0.2 = 1.0 + 0.1 = 1.1 USD
 const cachedCost = computeCostUsd({
   model: "gpt-5.6-terra",
-  inputTokens: 1_000_000,
+  inputTokens: 500_000,
   outputTokens: 0,
   cachedTokens: 500_000,
 });

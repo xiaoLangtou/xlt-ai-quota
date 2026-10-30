@@ -42,6 +42,7 @@ declare module 'vue' {
     OverviewStatCard: typeof import('./src/components/OverviewStatCard.vue')['default']
     PlatformDailyChart: typeof import('./src/components/PlatformDailyChart.vue')['default']
     Popover: typeof import('./src/components/ui/popover/Popover.vue')['default']
+    ProjectBreakdown: typeof import('./src/components/ProjectBreakdown.vue')['default']
     QuickTaskMenu: typeof import('./src/components/calendar/QuickTaskMenu.vue')['default']
     QuotaCard: typeof import('./src/components/QuotaCard.vue')['default']
     QuotaSummary: typeof import('./src/components/QuotaSummary.vue')['default']

@@ -11,6 +11,7 @@ import ClipboardWidget from "@/components/ClipboardWidget.vue";
 import ToolBreakdown from "@/components/ToolBreakdown.vue";
 import ToolDistributionChart from "@/components/ToolDistributionChart.vue";
 import ModelBreakdown from "@/components/ModelBreakdown.vue";
+import ProjectBreakdown from "@/components/ProjectBreakdown.vue";
 import CalendarHeatmap from "@/components/CalendarHeatmap.vue";
 import TokenSummaryPanel from "@/components/TokenSummaryPanel.vue";
 import SettingsPanel from "@/components/SettingsPanel.vue";
@@ -32,6 +33,7 @@ const {
   platformDaily,
   toolUsage,
   modelUsage,
+  projectUsage,
   heatmap,
   todayHourly,
   earliestUsageDate,
@@ -78,11 +80,13 @@ const settingsSyncSignal = ref(0);
 
 // 详情区默认收起，避免首屏信息过载；展开态与页签在同一 session 内记忆。
 const DETAILS_KEY = "analytics:detailsOpen";
-const detailsOpen = ref(false);
+// 默认展开；只有用户手动收起过才按存储值恢复。
+const detailsOpen = ref(true);
 try {
-  detailsOpen.value = sessionStorage.getItem(DETAILS_KEY) === "1";
+  const stored = sessionStorage.getItem(DETAILS_KEY);
+  if (stored !== null) detailsOpen.value = stored === "1";
 } catch {
-  /* 存储不可用时保持默认收起 */
+  /* 存储不可用时保持默认展开 */
 }
 watch(detailsOpen, (value) => {
   try {
@@ -91,7 +95,7 @@ watch(detailsOpen, (value) => {
     /* 忽略存储失败 */
   }
 });
-const detailTab = ref<"tool" | "model">("tool");
+const detailTab = ref<"tool" | "model" | "project">("tool");
 const exchangeRate = ref(usdToCnyRate.value);
 const chartsReady = ref(!isTauriDesktop());
 let unlistenFocus: UnlistenFn | undefined;
@@ -258,9 +262,21 @@ function formatCny(value: number): string {
               {{ isSyncing ? "同步中…" : "同步全部" }}
             </UButton>
           </template>
-          <div v-else-if="activeWorkspace === 'analytics'" class="range-switch" role="group" aria-label="统计周期">
-            <button v-for="r in RANGES" :key="r.preset" type="button" :class="{ on: state.range === r.preset }"
-              @click="setRange(r.preset)">{{ r.label }}</button>
+          <div v-else-if="activeWorkspace === 'analytics'" class="flex items-center gap-2">
+            <div class="range-switch" role="group" aria-label="统计周期">
+              <button v-for="r in RANGES" :key="r.preset" type="button" :class="{ on: state.range === r.preset }"
+                @click="setRange(r.preset)">{{ r.label }}</button>
+            </div>
+            <UButton
+              icon="i-lucide-refresh-cw"
+              color="neutral"
+              variant="outline"
+              size="sm"
+              :loading="isSyncing"
+              @click="syncEverything"
+            >
+              {{ isSyncing ? "同步中…" : "同步" }}
+            </UButton>
           </div>
           <template v-else-if="activeWorkspace === 'subscriptions'">
             <label class="rate-field">1 USD = ¥ <input v-model.number="exchangeRate" type="number" min="0.01"
@@ -349,6 +365,10 @@ function formatCny(value: number): string {
             :total="summary.total"
             :input="summary.input"
             :output="summary.output"
+            :cached="summary.cached"
+            :cache-write="summary.cacheWrite"
+            :reasoning="summary.reasoning"
+            :cache-hit-rate="summary.cacheHitRate"
             :requests="summary.requests"
             :cost-usd="summary.costUsd"
             :delta-pct="summary.deltaPct"
@@ -428,13 +448,23 @@ function formatCny(value: number): string {
                 >
                   按模型
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  :aria-selected="detailTab === 'project'"
+                  :class="{ on: detailTab === 'project' }"
+                  @click="detailTab = 'project'"
+                >
+                  按项目
+                </button>
               </div>
 
               <div v-if="detailTab === 'tool'" class="analytics-grid">
                 <ToolBreakdown :tools="toolUsage" :range-label="rangeLabel" />
                 <ToolDistributionChart :tools="toolUsage" />
               </div>
-              <ModelBreakdown v-else :models="modelUsage" :range-label="rangeLabel" />
+              <ModelBreakdown v-else-if="detailTab === 'model'" :models="modelUsage" :range-label="rangeLabel" />
+              <ProjectBreakdown v-else :projects="projectUsage" :range-label="rangeLabel" @sync="syncNow" />
             </div>
           </section>
         </template>

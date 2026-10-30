@@ -68,5 +68,8 @@
       "esbuild",
       "vue-demi"
     ]
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

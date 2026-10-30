@@ -1081,7 +1081,7 @@ onUnmounted(() => {
     align-items: center;
     gap: 6px;
     padding: 10px 20px;
-    background: var(--bg);
+    background: transparent;
     color: var(--text-muted);
     font-size: 11px;
     font-weight: 550;

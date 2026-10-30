@@ -6,9 +6,9 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ToolLogo from "@/components/ToolLogo.vue";
 import { usageService } from "@/services/usage-service";
-import type { PlatformQuotaView, SyncInfo } from "@/types/usage";
+import type { PlatformQuotaView, QuotaDisplayTarget, SyncInfo } from "@/types/usage";
 
-const PANEL_WIDTH = 336;
+const PANEL_WIDTH = 360;
 const popoverEl = ref<HTMLElement | null>(null);
 const quotas = ref<PlatformQuotaView[]>([]);
 const sync = ref<SyncInfo>({ lastSyncAt: null, syncing: false });
@@ -21,7 +21,7 @@ const unlisteners: UnlistenFn[] = [];
  */
 async function fitWindowHeight(): Promise<void> {
   await nextTick();
-  const height = Math.ceil(popoverEl.value?.offsetHeight ?? 0);
+  const height = Math.min(Math.ceil(popoverEl.value?.offsetHeight ?? 0), 720);
   if (height > 0) {
     await getCurrentWindow().setSize(new LogicalSize(PANEL_WIDTH, height)).catch(() => undefined);
   }
@@ -37,6 +37,12 @@ interface QuotaRow {
   tone: "ok" | "warn" | "critical" | "muted";
   detail: string;
   reset: string | null;
+  valueText: string;
+}
+
+function money(value: number, currency: string): string {
+  const symbol = currency === "USD" ? "$" : "¥";
+  return `${symbol}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** 复用主应用同款口径：有积分算积分利用率，否则取利用率最高的窗口。 */
@@ -45,7 +51,13 @@ const rows = computed<QuotaRow[]>(() =>
     let pct: number | null = null;
     let detail = v.account ? "已登录" : "暂无额度数据";
     let reset: string | null = null;
-    if (v.credits) {
+    let valueText = "未读取";
+    let tone: QuotaRow["tone"] = "muted";
+    if (v.balance) {
+      detail = `余额 · 赠金 ${money(v.balance.granted, v.balance.currency)}`;
+      valueText = money(v.balance.total, v.balance.currency);
+      tone = v.balance.available ? "ok" : "critical";
+    } else if (v.credits) {
       const used = Math.max(0, v.credits.total - v.credits.remaining);
       pct =
         v.credits.total > 0
@@ -53,11 +65,15 @@ const rows = computed<QuotaRow[]>(() =>
           : 0;
       detail = `已用 ${used.toLocaleString()} / ${v.credits.total.toLocaleString()} Credits`;
       reset = compactReset(v.credits.expiresIn ?? v.credits.refreshIn ?? v.windows[0]?.resetsIn);
+      valueText = pct == null ? "未读取" : `${pct}%`;
+      tone = pct != null && pct >= 100 ? "critical" : pct != null && pct >= 80 ? "warn" : "ok";
     } else if (v.windows.length) {
       const window = v.windows.reduce((a, b) => (b.usedPct > a.usedPct ? b : a));
       pct = window.usedPct;
       detail = window.label;
       reset = compactReset(window.resetsIn);
+      valueText = pct >= 100 ? "已耗尽" : `${pct}%`;
+      tone = pct >= 100 ? "critical" : pct >= 80 ? "warn" : "ok";
     }
     const exhausted = pct != null && pct >= 100;
     return {
@@ -67,9 +83,10 @@ const rows = computed<QuotaRow[]>(() =>
       planTag: v.planTag,
       pct,
       exhausted,
-      tone: pct == null ? "muted" : exhausted ? "critical" : pct >= 80 ? "warn" : "ok",
+      tone,
       detail,
       reset,
+      valueText,
     };
   }),
 );
@@ -86,9 +103,21 @@ function compactReset(value?: string): string | null {
     .replace("后到期", "后");
 }
 
-/** 面板与主窗口同源、共享 localStorage；直接从存储读取最新聚合结果。 */
-function refresh(): void {
-  quotas.value = usageService.getPlatformQuotaViews();
+/** 面板与主窗口同源；从磁盘重新读取额度快照，避免托盘内存与主窗口不同步。 */
+async function refresh(): Promise<void> {
+  await usageService.reloadQuotas().catch(() => undefined);
+  const hidden = new Set(usageService.getQuotaDisplayConfigView().hiddenPlatforms);
+  quotas.value = usageService.getPlatformQuotaViews().filter((view) => {
+    if (view.platform === "ark") {
+      const target = view.planTag.includes("Coding")
+        ? "ark-coding"
+        : view.planTag.includes("Agent")
+          ? "ark-agent"
+          : null;
+      return !target || !hidden.has(target);
+    }
+    return !hidden.has(view.platform as QuotaDisplayTarget);
+  });
   sync.value = usageService.getSyncInfo();
   if (!sync.value.syncing) requesting.value = false;
   void fitWindowHeight();
@@ -117,6 +146,13 @@ const statusText = computed(() => {
   return sync.value.outcome === "partial" ? `${relative} · 部分` : relative;
 });
 const hasData = computed(() => rows.value.length > 0);
+const availableCount = computed(() => rows.value.filter((row) => row.pct != null).length);
+const tightest = computed(
+  () =>
+    [...rows.value]
+      .filter((row) => row.pct != null)
+      .sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0))[0] ?? null,
+);
 /** 临时：预览页用 localStorage 强制暗色，便于无头截图走查（不影响 Tauri 运行时）。 */
 const previewDark = typeof localStorage !== "undefined" && localStorage.getItem("xlt.tray-preview-theme") === "dark";
 
@@ -138,16 +174,22 @@ function quit(): void {
   void invoke("quit_app");
 }
 
+const onStorage = (event: StorageEvent): void => {
+  if (!event.key || event.key === "xlt.config") void refresh();
+};
+
 onMounted(async () => {
-  refresh();
+  await usageService.init().catch(() => undefined);
+  await refresh();
+  window.addEventListener("storage", onStorage);
   const win = getCurrentWindow();
   // 主窗口每次同步前后广播 usage-updated，面板据此更新摘要。
-  unlisteners.push(await listen("usage-updated", () => refresh()));
+  unlisteners.push(await listen("usage-updated", () => void refresh()));
   // 失焦即收起，并留下时间戳供托盘点击去抖（避免点击图标时“隐藏又立即弹出”）。
   unlisteners.push(
     await win.onFocusChanged(({ payload: focused }) => {
       if (focused) {
-        refresh();
+        void refresh();
       } else {
         localStorage.setItem("tray:lastHiddenAt", String(Date.now()));
         void win.hide();
@@ -157,6 +199,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener("storage", onStorage);
   for (const off of unlisteners) off();
 });
 </script>
@@ -171,7 +214,7 @@ onUnmounted(() => {
         <div class="pop-logo">/_</div>
         <div>
           <h1>AI 用量</h1>
-          <p>{{ rows.length }} 个套餐的额度概览</p>
+          <p>{{ rows.length }} 个平台 · {{ availableCount }} 个有额度</p>
         </div>
       </div>
       <button
@@ -187,6 +230,13 @@ onUnmounted(() => {
 
     <div class="pop-divider" />
 
+    <div v-if="tightest" class="pop-summary">
+      <span class="sum-label">最紧额度</span>
+      <strong class="sum-value" :class="tightest.tone">{{ tightest.pct }}%</strong>
+      <span class="sum-name">{{ tightest.name }}</span>
+      <span v-if="tightest.reset" class="sum-reset">{{ tightest.reset }}</span>
+    </div>
+
     <div v-if="hasData" class="quota-list">
       <div v-for="r in rows" :key="r.key" class="qrow">
         <div class="qrow-top">
@@ -201,7 +251,7 @@ onUnmounted(() => {
             </span>
           </div>
           <span class="qvalue" :class="r.tone">
-            {{ r.pct == null ? "—" : r.exhausted ? "已耗尽" : `${r.pct}%` }}
+            {{ r.valueText }}
           </span>
         </div>
         <div class="qtrack">
@@ -229,6 +279,7 @@ onUnmounted(() => {
           <rect x="14" y="12" width="7" height="9" rx="1.5" />
           <rect x="3" y="16" width="7" height="5" rx="1.5" />
         </svg>
+        <span>看板</span>
       </button>
       <button
         class="act-btn primary"
@@ -243,6 +294,7 @@ onUnmounted(() => {
           <path d="M21 12a9 9 0 1 1-3-6.7" />
           <path d="M21 3v6h-6" />
         </svg>
+        <span>同步</span>
       </button>
       <button class="act-btn quit" type="button" title="退出" aria-label="退出" @click="quit">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -250,6 +302,7 @@ onUnmounted(() => {
           <path d="M16 17l5-5-5-5" />
           <path d="M21 12H9" />
         </svg>
+        <span>退出</span>
       </button>
     </div>
   </main>
@@ -415,6 +468,43 @@ onUnmounted(() => {
   background: var(--hairline);
 }
 
+.pop-summary {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 10px 16px;
+  border-bottom: 0.5px solid var(--hairline);
+  background: var(--footer);
+}
+.sum-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.sum-value {
+  color: var(--ink);
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.sum-value.warn { color: var(--orange); }
+.sum-value.critical { color: var(--red); }
+.sum-name {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+}
+.sum-reset {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .quota-list {
   position: relative;
   z-index: 1;
@@ -439,12 +529,15 @@ onUnmounted(() => {
 }
 
 .qrow {
-  padding: 9px 10px 10px;
-  border-radius: 10px;
-  transition: background 0.12s ease;
+  padding: 10px 12px 11px;
+  border: 0.5px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--hover);
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 .qrow:hover {
-  background: var(--hover);
+  background: var(--press);
+  border-color: var(--edge);
 }
 .qrow-top {
   display: flex;
@@ -503,7 +596,7 @@ onUnmounted(() => {
   flex: 0 0 auto;
   color: var(--ink-soft);
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
-  font-size: 12px;
+  font-size: 13.5px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
@@ -517,6 +610,9 @@ onUnmounted(() => {
 }
 .qvalue.muted {
   color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
 }
 .qtrack {
   height: 3px;
@@ -568,15 +664,17 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   padding: 7px 10px 9px;
+  border-top: 0.5px solid var(--hairline);
   background: var(--footer);
 }
 .act-btn {
   position: relative;
   display: flex;
-  height: 32px;
+  height: 34px;
   flex: 1;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   border: 0;
   background: transparent;
   color: var(--ink-soft);
@@ -587,9 +685,13 @@ onUnmounted(() => {
     color 0.1s ease;
 }
 .act-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   opacity: 0.75;
+}
+.act-btn span {
+  font-size: 10.5px;
+  font-weight: 550;
 }
 .act-btn + .act-btn::before {
   content: none;

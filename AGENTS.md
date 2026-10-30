@@ -46,7 +46,8 @@ cd src-tauri && cargo check   # Rust 编译检查
 - 图表：Apache ECharts（vue-echarts）
 - 存储：`UsageStorage` 抽象。桌面端走 `~/.xlt-workbench/`（`queue/YYYY-MM.jsonl` + `cursors.json` + `manifest.json` + `quotas.json` + `config.json`）；浏览器/测试回退 localStorage。Skills 元数据仍在 `~/.local-skills-manager/`
 - 采集器：所有本地连接器统一经 Tauri command（`src-tauri/src/connectors.rs`），**不再有 Vite dev 中间件**；`src/connectors/*.ts` 只负责把 command 结果映射成前端模型
-- 新增采集器（Rust 侧增量）：`src-tauri/src/usage/collectors/` 下 qwen / amp / roocode / kilocode / openclaw / cline / codebuddy / workbuddy；游标、去重、半小时桶落盘都在 Rust 完成
+- 新增采集器（Rust 侧增量）：`src-tauri/src/usage/collectors/` 下 qwen / amp / roocode / kilocode / openclaw / cline / codebuddy / workbuddy / jetbrains-acp；游标、去重、半小时桶落盘都在 Rust 完成
+- JetBrains / WebStorm ACP：读 `aia-task-history/*.usage` + `*.agentsession`。`.usage` 只有累计 `used` 和可选 USD `cost`，按文件差分计入；codex / claude / opencode / kiro / qoder 的 ACP 会话会写各自的本地 store，跳过以免重复计数。Codex 采集器同时支持 `.jsonl` 与 `.jsonl.zst`
   - `ark.ts`：火山方舟，经本机 `arkcli`（dev 由 `vite-local-connectors.ts` 的 `/api/ark/*` 中间件转发；需 `arkcli auth login volc-sso`）。套餐额度 + Token 用量
   - `kiro.ts`：Kiro Credits，经 `kiro-cli chat /usage --no-interactive`（`/api/kiro/usage`）。需 `kiro-cli login`
   - `qoder.ts`：Qoder 套餐与加购 Credits，经官方 Agent SDK 复用本机 qodercli 登录态（`/api/qoder/usage`）；需 `qodercli login`。
@@ -59,6 +60,16 @@ cd src-tauri && cargo check   # Rust 编译检查
 > 注：`ark-` Bearer Key 只能用于数据面推理，无法查询用量；Ark 用量需 Volc 签名（SSO），由 arkcli 承担。
 > CLI 在无 TTY 时常把输出写到 stderr，Rust 侧已合并 stdout+stderr 解析。
 > 看板不含任何种子/默认数据；首次启动为空，点「同步」从本机 CLI 拉取真实数据。
+
+## 用量口径（与 juejin-usage 对齐）
+
+- 所有采集器统一输出**净输入**：`input_tokens` 不含缓存；缓存读、缓存写、推理分别落在
+  `cached_input_tokens` / `cache_creation_input_tokens` / `reasoning_output_tokens`。
+- 总 Token = 输入 + 输出 + 缓存读 + 缓存写 + 推理；前端 `totalTokensOf()` 与后端 `computeTokens()` 同口径。
+- 费用 = 输入×input + 输出×output + 缓存读×cache_read + 缓存写×cache_write + 推理×output；
+  Codex / Every Code 的 output 已含推理，不再重复计推理费。
+- 缓存命中率 = 缓存读 ÷（净输入 + 缓存读 + 缓存写）。
+- 采集器如果拿到的上游 `input` 含缓存（Claude / Codex / Kimi / DeepSeek / Ark），必须在采集边界先减去缓存。
 
 ## 目录
 

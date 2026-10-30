@@ -32,7 +32,7 @@ onMounted(() => {
 
   // 面板未配置凭据时直接跳到设置页「翻译」分类。
   void listen("translate:settings", async () => {
-    await router.push({ path: "/settings", query: { tab: "translate" } });
+    await router.push({ path: "/settings", query: { tab: "ai" } });
   }).then((stop) => unlisteners.push(stop));
 });
 

@@ -159,7 +159,7 @@ async function copy(text: string, label: string): Promise<void> {
   try { await clipboardService.writeText(text); pushToast(`已复制${label}`, "success"); }
   catch (reason) { pushToast(String(reason), "error"); }
 }
-function openSettings(): void { void router.push({ path: "/settings", query: { tab: "translate" } }); }
+function openSettings(): void { void router.push({ path: "/settings", query: { tab: "ai" } }); }
 async function changeEngine(value: string): Promise<void> {
   if (translating.value || value === config.value.engine) return;
   try { config.value = await translateService.setEngine(value); segments.value = []; session = null; lang.value = ""; error.value = ""; }

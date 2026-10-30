@@ -27,9 +27,20 @@ async function fitWindowHeight(): Promise<void> {
   }
 }
 
+const BRAND: Record<string, string> = {
+  codex: "var(--brand-codex)",
+  ark: "var(--brand-ark)",
+  kiro: "var(--brand-kiro)",
+  qoder: "var(--brand-qoder)",
+  kimi: "#7c5cff",
+  deepseek: "var(--brand-deepseek)",
+  devin: "#2f80ed",
+};
+
 interface QuotaRow {
   key: string;
   platform: string;
+  brand: string;
   name: string;
   planTag: string;
   pct: number | null;
@@ -79,6 +90,7 @@ const rows = computed<QuotaRow[]>(() =>
     return {
       key: v.id,
       platform: v.platform,
+      brand: BRAND[v.platform] ?? "var(--accent)",
       name: v.name,
       planTag: v.planTag,
       pct,
@@ -238,7 +250,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="hasData" class="quota-list">
-      <div v-for="r in rows" :key="r.key" class="qrow">
+      <div v-for="r in rows" :key="r.key" class="qrow" :style="{ '--brand': r.brand }">
         <div class="qrow-top">
           <span class="qicon"><ToolLogo :platform="r.platform" :size="19" /></span>
           <div class="qcopy">
@@ -319,7 +331,7 @@ onUnmounted(() => {
   --green-deep: #209948;
   --red: #ff3b30;
   --orange: #e88316;
-  --tint: rgba(246, 248, 249, 0.36);
+  --tint: #f6f7fb;
   --rim: rgba(255, 255, 255, 0.66);
   --edge: rgba(66, 74, 80, 0.2);
   --sheen: rgba(255, 255, 255, 0.32);
@@ -338,14 +350,14 @@ onUnmounted(() => {
   background:
     linear-gradient(165deg, var(--sheen), transparent 28%),
     var(--tint);
-  -webkit-backdrop-filter: blur(32px) saturate(145%);
-  backdrop-filter: blur(32px) saturate(145%);
   isolation: isolate;
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     var(--font-sans), sans-serif;
   /* 内圈描边贴合原生圆角；桌面磨砂与外阴影由透明原生窗口提供。 */
   box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.22),
+    0 2px 8px rgba(0, 0, 0, 0.08),
     inset 0 1px 0 var(--rim),
     inset 0 0 0 0.5px var(--edge);
   -webkit-font-smoothing: antialiased;
@@ -529,15 +541,29 @@ onUnmounted(() => {
 }
 
 .qrow {
-  padding: 10px 12px 11px;
+  position: relative;
+  overflow: hidden;
+  padding: 11px 13px 12px;
   border: 0.5px solid var(--hairline);
-  border-radius: 12px;
-  background: var(--hover);
-  transition: background 0.12s ease, border-color 0.12s ease;
+  border-radius: 13px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.02),
+    0 10px 22px -20px rgba(0, 0, 0, 0.32);
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+.qrow::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: linear-gradient(180deg, var(--brand), transparent);
+  content: "";
+  opacity: 0.85;
 }
 .qrow:hover {
-  background: var(--press);
-  border-color: var(--edge);
+  border-color: color-mix(in srgb, var(--brand) 22%, var(--hairline));
+  background: #f8f9fc;
+  transform: translateY(-1px);
 }
 .qrow-top {
   display: flex;
@@ -546,11 +572,13 @@ onUnmounted(() => {
 }
 .qicon {
   display: grid;
-  width: 22px;
-  height: 30px;
-  flex: 0 0 22px;
+  width: 27px;
+  height: 27px;
+  flex: 0 0 27px;
   place-items: center;
-  opacity: 0.92;
+  border: 0.5px solid color-mix(in srgb, var(--brand) 20%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
 }
 .qcopy {
   min-width: 0;
@@ -594,9 +622,9 @@ onUnmounted(() => {
 }
 .qvalue {
   flex: 0 0 auto;
-  color: var(--ink-soft);
+  color: var(--ink);
   font-family: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
-  font-size: 13.5px;
+  font-size: 15px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
@@ -627,7 +655,7 @@ onUnmounted(() => {
   transition: width 0.4s ease;
 }
 .qfill.ok {
-  background: linear-gradient(90deg, #7c85f5, var(--accent));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 72%, white), var(--brand));
 }
 .qfill.warn {
   background: linear-gradient(90deg, #ffb24d, var(--orange));
@@ -729,7 +757,7 @@ onUnmounted(() => {
     --ink-soft: rgba(255, 255, 255, 0.76);
     --muted: rgba(235, 239, 241, 0.46);
     --hairline: rgba(255, 255, 255, 0.13);
-    --tint: rgba(41, 45, 47, 0.48);
+    --tint: #24282b;
     --rim: rgba(220, 239, 247, 0.23);
     --edge: rgba(255, 255, 255, 0.16);
     --sheen: rgba(171, 211, 226, 0.1);
@@ -740,6 +768,12 @@ onUnmounted(() => {
     --green-deep: #64d98b;
 }
 .popover.dark .qtag::before { color: rgba(255, 255, 255, 0.28); }
+.popover.dark .qrow {
+  background: #303030;
+}
+.popover.dark .qrow:hover {
+  background: #383838;
+}
 .popover.dark .sync-pill.warn { color: #ffc278; }
 .popover.dark .sync-pill.error { color: #ff8e86; }
 
@@ -750,7 +784,7 @@ onUnmounted(() => {
     --ink-soft: rgba(255, 255, 255, 0.76);
     --muted: rgba(235, 239, 241, 0.46);
     --hairline: rgba(255, 255, 255, 0.13);
-    --tint: rgba(41, 45, 47, 0.48);
+    --tint: #24282b;
     --rim: rgba(220, 239, 247, 0.23);
     --edge: rgba(255, 255, 255, 0.16);
     --sheen: rgba(171, 211, 226, 0.1);
@@ -778,5 +812,14 @@ onUnmounted(() => {
   .sync-pill.error {
     color: #ff8e86;
   }
+}
+</style>
+
+<style>
+/* 托盘是独立入口：不要继承主窗口的全局 tint，否则圆角会被方形底色盖住。 */
+html,
+body,
+#app {
+  background: transparent !important;
 }
 </style>

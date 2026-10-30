@@ -982,6 +982,18 @@ watch(usdToCnyRate, (value) => {
   align-items: stretch;
 }
 
+@media (min-width: 1280px) {
+  .quota-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1680px) {
+  .quota-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);

@@ -224,7 +224,7 @@ async function commit(): Promise<void> {
 }
 
 function goToSettings(): void {
-  void router.push({ path: "/settings", query: { tab: "advanced" } });
+  void router.push({ path: "/settings", query: { tab: "ai" } });
 }
 
 let unlisten: (() => void) | undefined;

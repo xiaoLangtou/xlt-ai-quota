@@ -41,13 +41,9 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": false,
-        "shadow": true,
+        "shadow": false,
         "focus": false,
-        "windowEffects": {
-          "effects": ["popover"],
-          "state": "active",
-          "radius": 20
-        }
+        "backgroundColor": "#00000000"
       },
       {
         "label": "clipboard-panel",

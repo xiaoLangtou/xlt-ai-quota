@@ -727,9 +727,22 @@ function formatCny(value: number): string {
 }
 .quota-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   align-items: stretch;
+}
+
+/* 大屏三列，超宽屏四列；默认两列保证卡片信息密度。 */
+@media (min-width: 1280px) {
+  .quota-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1680px) {
+  .quota-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 .summary-skeleton {
   display: grid;
@@ -793,9 +806,6 @@ function formatCny(value: number): string {
 .span-4,
 .span-5 {
     grid-column: 1 / -1;
-  }
-.quota-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

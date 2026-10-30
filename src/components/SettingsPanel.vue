@@ -422,14 +422,13 @@ const CONNECTORS = [
 ] as const;
 
 // ---- 设置页布局：顶部 Tabs + 分区卡片（全部默认展开，不可折叠） ----
-type SettingsTab = "general" | "connectors" | "translate" | "clipboard" | "advanced";
+type SettingsTab = "general" | "connectors" | "ai" | "clipboard";
 
 const TABS: { key: SettingsTab; label: string }[] = [
   { key: "general", label: "通用" },
   { key: "connectors", label: "平台连接" },
-  { key: "translate", label: "翻译" },
+  { key: "ai", label: "AI 配置" },
   { key: "clipboard", label: "剪贴板" },
-  { key: "advanced", label: "高级" },
 ];
 
 const activeTab = ref<SettingsTab>("general");
@@ -439,8 +438,10 @@ const route = useRoute();
 watch(
   () => route.query.tab,
   (tab) => {
-    if (typeof tab === "string" && TABS.some((item) => item.key === tab)) {
-      activeTab.value = tab as SettingsTab;
+    if (typeof tab !== "string") return;
+    const key = tab === "translate" || tab === "advanced" ? "ai" : tab;
+    if (TABS.some((item) => item.key === key)) {
+      activeTab.value = key as SettingsTab;
     }
   },
   { immediate: true },
@@ -883,22 +884,8 @@ function updateStatsSince(value: string): void {
                   <span class="conn-badge" :class="c.tone">{{ c.badge }}</span>
                 </div>
               </div>
-
-              <!-- DeepSeek 账户余额需 API Key，仅本机保存；不填则只采集 DSH 会话 Token -->
-              <div class="connector-note">
-                <p><b>DeepSeek 账户余额</b>（费用中心）经官方 <code>/user/balance</code> 查询，需 API Key，仅保存在本机。</p>
-                <label class="pref-field deepseek-key-field">
-                  <span>DeepSeek API KEY（可选）</span>
-                  <Input v-model="deepseekApiKey" type="password" autocomplete="off" placeholder="sk-… 仅本机保存" />
-                </label>
-              </div>
             </div>
           </section>
-        </template>
-
-        <!-- ===================== 翻译 ===================== -->
-        <template v-else-if="activeTab === 'translate'">
-          <TranslateSettings />
         </template>
 
         <!-- ===================== 剪贴板 ===================== -->
@@ -967,8 +954,27 @@ function updateStatsSince(value: string): void {
           </section>
         </template>
 
-        <!-- ===================== 高级 ===================== -->
+        <!-- ===================== AI 配置 ===================== -->
         <template v-else>
+          <TranslateSettings />
+
+          <section class="sec">
+            <div class="sec-head solo">
+              <span class="sec-icon tone-info"><Sparkles :size="18" /></span>
+              <span class="sec-copy">
+                <strong>DeepSeek 余额查询</strong>
+                <small>费用中心余额经官方 /user/balance 查询，API Key 仅保存在本机</small>
+              </span>
+            </div>
+            <div class="sec-body">
+              <label class="pref-field deepseek-key-field">
+                <span>DeepSeek API KEY（可选）</span>
+                <Input v-model="deepseekApiKey" type="password" autocomplete="off" placeholder="sk-… 仅本机保存" />
+              </label>
+              <p class="pref-note">不填时仍会采集 DSH 客户端会话 Token，只是不显示账户余额。</p>
+            </div>
+          </section>
+
           <section class="sec">
             <div class="sec-head solo">
               <span class="sec-icon tone-accent"><Sparkles :size="18" /></span>

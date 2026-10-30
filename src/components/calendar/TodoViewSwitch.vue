@@ -10,7 +10,7 @@ const items: { value: TodoViewMode; label: string; icon: string }[] = [
 </script>
 
 <template>
-  <div class="flex items-center gap-0.5 rounded-lg bg-elevated p-0.5">
+  <div class="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded-lg bg-elevated p-0.5">
     <UButton
       v-for="item in items"
       :key="item.value"

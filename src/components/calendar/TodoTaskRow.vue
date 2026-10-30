@@ -37,7 +37,8 @@ const PRIORITY_COLOR: Record<TodoPriority, ExternalStatusTone> = {
 };
 
 const clock = useNow({ interval: 60_000 });
-const reasons = computed(() => attentionReasons(props.task, today(clock.value)));
+// 优先级已由右上角标签展示，这里不再重复“高优先级”。
+const reasons = computed(() => attentionReasons(props.task, today(clock.value)).filter((reason) => reason !== "高优先级"));
 const cleanTitle = computed(() => props.task.title.replace(/^【#\d+】\s*/, ""));
 const externalNumber = computed(() => props.task.externalId?.split(":").pop());
 const done = computed(() => props.task.status === "done");
@@ -76,11 +77,11 @@ function toggle(): void {
 
 <template>
   <article
-    class="group flex items-start gap-3 px-3 py-2.5 transition-colors hover:bg-elevated/70"
+    class="group @container grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 px-3 py-2.5 transition-colors hover:bg-elevated/70 @md:grid-cols-[auto_minmax(0,1fr)_auto_auto]"
     :class="[selectable && 'cursor-pointer', active && 'bg-primary/5 ring-1 ring-inset ring-primary/25']"
     @click="selectable && emit('select', task)"
   >
-    <div v-if="!isZentao || selectable" class="pt-0.5" @click.stop>
+    <div v-if="!isZentao || selectable" class="col-start-1 row-start-1 pt-0.5" @click.stop>
       <UCheckbox
         :model-value="checkboxValue"
         :disabled="checkboxDisabled"
@@ -90,10 +91,10 @@ function toggle(): void {
       />
     </div>
 
-    <div v-else class="flex size-7 shrink-0 items-center justify-center rounded-md bg-elevated text-muted" :title="typeLabel">
+    <div v-else class="col-start-1 row-start-1 flex size-7 shrink-0 items-center justify-center rounded-md bg-elevated text-muted" :title="typeLabel">
       <UIcon :name="task.externalType === 'bug' ? 'i-lucide-bug' : 'i-lucide-check-square'" class="size-4" />
     </div>
-    <div class="min-w-0 flex-1" :class="!selectable && 'cursor-pointer'" @click.stop="activate">
+    <div class="col-start-2 row-start-1 min-w-0" :class="!selectable && 'cursor-pointer'" @click.stop="activate">
       <button type="button"
         @click.stop="activate"
         class="w-full text-left text-[13px] leading-5 font-medium break-words"
@@ -101,7 +102,7 @@ function toggle(): void {
       >
         {{ isZentao ? cleanTitle : task.title }}
       </button>
-      <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-none text-dimmed">
+      <div class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-none text-dimmed [&>*]:shrink-0 [&>*]:whitespace-nowrap">
         <span v-if="isZentao" class="font-mono text-dimmed">{{ typeLabel }} #{{ externalNumber }}</span>
         <span v-if="!isZentao" class="inline-flex items-center gap-1.5">
           <span class="size-1.5 shrink-0 rounded-full" :class="CATEGORY_DOT_BG[task.category]" />
@@ -120,21 +121,33 @@ function toggle(): void {
         </span>
 
         <UBadge v-if="task.sourceType === 'document'" color="primary" size="sm" variant="subtle">文档</UBadge>
-        <span v-if="isZentao && task.externalAssignedTo && !task.externalTransferred">指派给 {{ task.externalAssignedTo }}</span>
-        <span v-if="isZentao && task.externalUpdatedDate">更新 {{ task.externalUpdatedDate }}</span>
         <span v-for="reason in reasons" :key="reason" class="text-primary">{{ reason }}</span>
         <span v-if="task.externalTransferred" class="inline-flex items-center gap-1">
           <UIcon name="i-lucide-arrow-right-left" class="size-3" />
           {{ task.externalAssignedTo ? `已转交 · ${task.externalAssignedTo}` : "已转出" }}
         </span>
       </div>
+      <div
+        v-if="isZentao && ((task.externalAssignedTo && !task.externalTransferred) || task.externalUpdatedDate)"
+        class="mt-1 truncate text-[11px] leading-4 text-dimmed"
+      >
+        <template v-if="task.externalAssignedTo && !task.externalTransferred">指派给 {{ task.externalAssignedTo }}</template>
+        <template v-if="task.externalAssignedTo && !task.externalTransferred && task.externalUpdatedDate"> · </template>
+        <template v-if="task.externalUpdatedDate">更新于 {{ task.externalUpdatedDate.slice(0, 16) }}</template>
+      </div>
     </div>
 
-    <div class="flex shrink-0 items-center gap-0.5 pt-0.5">
+    <div
+      v-if="isZentao && !selectable && !task.externalTransferred"
+      class="col-span-2 col-start-2 row-start-2 [&:not(:has(button))]:hidden @md:col-span-1 @md:col-start-3 @md:row-start-1"
+    >
+      <ZentaoActions :task="task" compact @updated="emit('updated', $event)" />
+    </div>
+
+    <div class="col-start-3 row-start-1 flex items-center gap-0.5 pt-0.5 @md:col-start-4">
       <UBadge :color="PRIORITY_COLOR[task.priority]" size="sm" variant="subtle">
         {{ PRIORITY_LABELS[task.priority] }}
       </UBadge>
-      <ZentaoActions v-if="isZentao && !selectable && !task.externalTransferred" :task="task" compact @updated="emit('updated', $event)" />
       <UButton
         v-if="task.externalUrl"
         icon="i-lucide-external-link"

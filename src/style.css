@@ -1108,3 +1108,11 @@ textarea {
   pointer-events: none;
   transform: translate(12px, 12px) rotate(-2deg);
 }
+
+/* 隐藏滚动条但保留滚动（需写在全局 *::-webkit-scrollbar 规则之后才能覆盖）。 */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}

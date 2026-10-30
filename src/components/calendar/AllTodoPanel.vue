@@ -85,31 +85,35 @@ watch(todoView, exitBatch);
 
 <template>
   <section class="flex h-full min-h-0 flex-col bg-default">
-    <header class="shrink-0 border-b border-default">
-      <nav class="flex flex-nowrap gap-1 overflow-x-auto px-4 pt-2" aria-label="工作视图">
+    <header class="@container shrink-0 border-b border-default">
+      <nav class="scrollbar-none grid auto-cols-fr grid-flow-col gap-0.5 px-2 pt-2 @md:flex @md:flex-nowrap @md:gap-1 @md:overflow-x-auto @md:px-4" aria-label="工作视图">
         <button v-for="item in views" :key="item.value" type="button"
-          class="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-t-lg border-b-2 px-3 py-2.5 text-xs font-medium transition-colors"
+          class="flex min-w-0 flex-col items-center gap-0.5 whitespace-nowrap rounded-t-lg border-b-2 px-1 py-1.5 text-[11px] font-medium transition-colors @md:shrink-0 @md:flex-row @md:gap-2 @md:px-3 @md:py-2.5 @md:text-xs"
           :class="workView === item.value ? 'border-primary text-primary bg-primary/5' : 'border-transparent text-muted hover:text-highlighted hover:bg-elevated'"
           :aria-current="workView === item.value ? 'page' : undefined" @click="workView = item.value">
-          <UIcon :name="item.icon" class="size-3.5" />{{ item.label }}
-          <span class="rounded px-1.5 py-0.5 text-[10px] tabular-nums" :class="workView === item.value ? 'bg-primary/10' : 'bg-elevated'">{{ item.count }}</span>
+          <UIcon :name="item.icon" class="hidden size-3.5 @md:block" />
+          <span class="order-last max-w-full truncate @md:order-none">{{ item.label }}</span>
+          <span class="text-sm font-semibold leading-5 tabular-nums @md:rounded @md:px-1.5 @md:py-0.5 @md:text-[10px] @md:font-medium @md:leading-normal"
+            :class="workView === item.value ? '@md:bg-primary/10' : 'text-highlighted @md:bg-elevated @md:text-[inherit]'">{{ item.count }}</span>
         </button>
       </nav>
-      <div class="flex flex-wrap items-center gap-2 px-4 py-3">
-        <UInput v-model="form.query" icon="i-lucide-search" :placeholder="isZentao ? '搜索编号或标题…' : '搜索待办标题…'" aria-label="搜索待办" class="min-w-40 flex-1" />
-        <USelect v-if="isZentao" v-model="form.type" :items="typeOptions" aria-label="类型" class="w-28" />
-        <USelect v-else v-model="form.category" :items="categoryOptions" aria-label="分类" class="w-32" />
-        <USelect v-model="form.priority" :items="priorityOptions" aria-label="优先级" class="w-32" />
-        <UButton icon="i-lucide-sliders-horizontal" color="neutral" :variant="advanced ? 'soft' : 'ghost'" :aria-expanded="advanced" aria-label="计划日期筛选" @click="advanced = !advanced" />
-        <UButton v-if="hasFilter" color="neutral" variant="ghost" size="sm" @click="resetFilters">重置</UButton>
-        <USelect v-model="form.sort" :items="[{ label: '建议处理顺序', value: 'suggested' }, { label: '最近更新', value: 'updated' }]" aria-label="排序" class="w-36" />
-        <TodoViewSwitch />
+      <div class="grid grid-cols-2 gap-2 px-3 py-3 @md:px-4 @lg:flex @lg:flex-wrap @lg:items-center">
+        <UInput v-model="form.query" icon="i-lucide-search" :placeholder="isZentao ? '搜索编号或标题…' : '搜索待办标题…'" aria-label="搜索待办" class="col-span-2 @lg:min-w-40 @lg:flex-1" />
+        <USelect v-if="isZentao" v-model="form.type" :items="typeOptions" aria-label="类型" class="w-full @lg:w-28" />
+        <USelect v-else v-model="form.category" :items="categoryOptions" aria-label="分类" class="w-full @lg:w-32" />
+        <USelect v-model="form.priority" :items="priorityOptions" aria-label="优先级" class="w-full @lg:w-32" />
+        <div class="col-span-2 flex min-w-0 items-center gap-1 @lg:contents">
+          <USelect v-model="form.sort" :items="[{ label: '建议处理顺序', value: 'suggested' }, { label: '最近更新', value: 'updated' }]" aria-label="排序" class="min-w-0 flex-1 @lg:w-36 @lg:flex-none" />
+          <UButton v-if="hasFilter" color="neutral" variant="ghost" size="sm" @click="resetFilters">重置</UButton>
+          <UButton icon="i-lucide-sliders-horizontal" color="neutral" :variant="advanced ? 'soft' : 'ghost'" :aria-expanded="advanced" aria-label="计划日期筛选" @click="advanced = !advanced" />
+          <TodoViewSwitch />
+        </div>
       </div>
-      <div v-if="advanced" class="flex flex-wrap items-center gap-2 border-t border-default px-4 py-2">
+      <div v-if="advanced" class="flex flex-wrap items-center gap-2 border-t border-default px-3 py-2 @md:px-4">
         <span class="text-xs text-muted">计划日期</span><DatePicker v-model="form.start" placeholder="开始日期" />
         <span class="text-xs text-muted">至</span><DatePicker v-model="form.end" placeholder="结束日期" />
       </div>
-      <div class="flex min-h-10 flex-wrap items-center gap-2 border-t border-default bg-elevated/40 px-4 py-2 text-xs text-muted">
+      <div class="flex min-h-10 flex-wrap items-center gap-2 border-t border-default bg-elevated/40 px-3 py-2 text-xs text-muted @md:px-4">
         <template v-if="batchMode">
           <span>已选 {{ selectedTasks.length }} 个 Bug</span>
           <UButton size="xs" variant="ghost" color="neutral" @click="selectedIds = bugCandidates.map(task => task.id)">全选当前结果</UButton>

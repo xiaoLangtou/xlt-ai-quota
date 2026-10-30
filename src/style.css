@@ -169,6 +169,21 @@
   --ui-primary: var(--accent);
 }
 
+/*
+ * 浮层（弹窗 / 抽屉 / 气泡 / 菜单 / 下拉）一律用不透明底。
+ * --surface 是半透明的，窗口本身又开了透明/毛玻璃，浮层沿用它会透出下层内容。
+ * var() 在声明处求值，所以 --ui-bg 必须在浮层作用域里重新指向，不能只改 --surface。
+ */
+[role="dialog"],
+[role="alertdialog"],
+[role="menu"],
+[role="listbox"],
+[role="tooltip"] {
+  --surface: var(--popover);
+  --glass-fill: var(--popover);
+  --ui-bg: var(--popover);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -670,7 +685,7 @@ textarea {
   transform: translate(-50%, -50%);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  background: var(--surface);
+  background: var(--popover);
   box-shadow: var(--shadow-pop);
 }
 
